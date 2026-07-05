@@ -1,0 +1,24 @@
+{
+  "name": "@central-vet/agents",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./adk-runtime": "./src/adkRuntime.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test:scenarios": "tsx src/scenarioRunner.ts"
+  },
+  "dependencies": {
+    "@central-vet/db": "*",
+    "@google/adk": "^1.1.0",
+    "@google/genai": "^1.52.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.0",
+    "typescript": "^6.0.3"
+  }
+}

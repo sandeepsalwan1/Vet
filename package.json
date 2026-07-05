@@ -1,0 +1,60 @@
+{
+  "name": "central-vet",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/internal",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev:internal",
+    "dev:internal": "node scripts/with-root-env.mjs npm --workspace @central-vet/internal run dev -- --port 3000",
+    "build": "npm run build --workspace @central-vet/internal",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "lint:dead": "npx -y knip --treat-config-hints-as-errors",
+    "lint:duplicates": "npx -y jscpd",
+    "db:migrate": "node packages/db/scripts/migrate.mjs",
+    "clinic:provision": "node scripts/provision-clinic.mjs",
+    "smoke:local": "node scripts/with-root-env.mjs node scripts/smoke-local.mjs",
+    "smoke:agent-email": "node scripts/with-root-env.mjs node scripts/agent-email-smoke.mjs",
+    "smoke:external-actions": "node scripts/with-root-env.mjs node scripts/external-action-smoke.mjs",
+    "scenarios:local": "node scripts/with-root-env.mjs node scripts/vetagent-scenarios.mjs",
+    "scenarios:e2b": "node scripts/with-root-env.mjs node scripts/vetagent-scenarios.mjs --e2b",
+    "smoke:e2b": "node scripts/with-root-env.mjs node scripts/e2b-smoke.mjs",
+    "test:scenarios": "tsx packages/agents/src/scenarioRunner.ts",
+    "verify:agents": "node scripts/with-root-env.mjs node scripts/verify-agents.mjs --allow-fallback",
+    "verify:agents:google": "node scripts/with-root-env.mjs node scripts/verify-agents.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@next/env": "^16.0.0",
+    "e2b": "^2.27.0",
+    "postgres": "^3.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "eslint-config-next": "^16.0.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "tsx": "^4.23.0",
+    "typescript": "^6.0.3"
+  },
+  "overrides": {
+    "@opentelemetry/core": "2.8.0",
+    "@opentelemetry/exporter-logs-otlp-http": "0.219.0",
+    "@opentelemetry/exporter-metrics-otlp-http": "0.219.0",
+    "@opentelemetry/exporter-trace-otlp-http": "0.219.0",
+    "@opentelemetry/otlp-exporter-base": "0.219.0",
+    "@opentelemetry/otlp-transformer": "0.219.0",
+    "@opentelemetry/resources": "2.8.0",
+    "@opentelemetry/sdk-logs": "0.219.0",
+    "@opentelemetry/sdk-metrics": "2.8.0",
+    "@opentelemetry/sdk-trace-base": "2.8.0",
+    "@tootallnate/once": "2.0.1",
+    "postcss": "8.5.15",
+    "tar": "7.5.19",
+    "uuid": "11.1.1"
+  }
+}

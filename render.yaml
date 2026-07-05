@@ -1,0 +1,126 @@
+services:
+  - type: web
+    name: vetagent-internal
+    runtime: node
+    plan: free
+    region: oregon
+    autoDeploy: true
+    rootDir: .
+    buildCommand: npm ci && npm run build --workspace @central-vet/internal
+    startCommand: npm run start --workspace @central-vet/internal -- -p $PORT
+    envVars:
+      - key: NODE_VERSION
+        value: 22.16.0
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_MAX_CONNECTIONS
+        value: "5"
+      - key: DATABASE_IDLE_TIMEOUT_SECONDS
+        value: "20"
+      - key: DATABASE_CONNECT_TIMEOUT_SECONDS
+        value: "10"
+      - key: DATABASE_MAX_LIFETIME_SECONDS
+        value: "600"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: VET_ADMIN_PASSCODE
+        sync: false
+      - key: VET_APP_ADMIN_PASSCODE
+        sync: false
+      - key: VET_VETERINARIAN_PASSCODE
+        sync: false
+      - key: HOSPITAL_NAME
+        value: Central Veterinary Hospital
+      - key: APP_TIME_ZONE
+        value: America/Los_Angeles
+      - key: MOCK_MODE
+        value: "true"
+      - key: AGENT_RUNTIME
+        value: google-adk
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GOOGLE_GENAI_USE_VERTEXAI
+        sync: false
+      - key: GOOGLE_CLOUD_PROJECT
+        sync: false
+      - key: GOOGLE_CLOUD_LOCATION
+        sync: false
+      - key: E2B_API_KEY
+        sync: false
+      - key: APIFY_API_TOKEN
+        sync: false
+      - key: APIFY_PRICING_ACTOR_ID
+        sync: false
+      - key: NOTIFICATION_MODE
+        value: disabled
+      - key: NOTIFICATION_CHANNEL
+        value: email
+      - key: DAILY_PRIORITY_SUMMARY_HOUR
+        value: "18"
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        value: Central Veterinary Hospital <notifications@eepish.com>
+      - key: DOCTOR_NOTIFICATION_EMAILS
+        sync: false
+      - key: TEST_NOTIFICATION_EMAIL
+        sync: false
+      - key: MONTHLY_AGENT_EMAIL_MODE
+        value: disabled
+      - key: MONTHLY_AGENT_EMAIL_RECIPIENTS
+        sync: false
+      - key: MONTHLY_AGENT_EMAIL_SUBJECT
+        value: Central Veterinary Hospital monthly agent email
+      - key: MONTHLY_AGENT_EMAIL_MESSAGE
+        value: This is the monthly VetAgent email path check.
+      - key: SMS_NOTIFICATION_RECIPIENTS
+        sync: false
+      - key: TEST_SMS_NOTIFICATION_RECIPIENTS
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+      - key: INTERNAL_BASE_URL
+        value: https://vetagent-internal.onrender.com
+
+  - type: cron
+    # Keep the legacy Render service name so blueprint sync updates the existing cron in place.
+    name: vetagent-overdue-summary
+    runtime: node
+    plan: free
+    region: oregon
+    schedule: "0 2 * * *"
+    rootDir: .
+    buildCommand: npm ci
+    startCommand: >-
+      node -e "const url=process.env.INTERNAL_BASE_URL + '/api/notifications/daily-priority-summary'; fetch(url,{headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(async r=>{const text=await r.text(); console.log(r.status,text); if(!r.ok) process.exit(1);}).catch((error)=>{console.error(error); process.exit(1);})"
+    envVars:
+      - key: NODE_VERSION
+        value: 22.16.0
+      - key: INTERNAL_BASE_URL
+        value: https://vetagent-internal.onrender.com
+      - key: CRON_SECRET
+        sync: false
+
+  - type: cron
+    name: vetagent-monthly-agent-email
+    runtime: node
+    plan: free
+    region: oregon
+    schedule: "15 17 1 * *"
+    rootDir: .
+    buildCommand: npm ci
+    startCommand: >-
+      node -e "const url=process.env.INTERNAL_BASE_URL + '/api/notifications/monthly-agent-email'; fetch(url,{headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(async r=>{const text=await r.text(); console.log(r.status,text); if(!r.ok) process.exit(1);}).catch((error)=>{console.error(error); process.exit(1);})"
+    envVars:
+      - key: NODE_VERSION
+        value: 22.16.0
+      - key: INTERNAL_BASE_URL
+        value: https://vetagent-internal.onrender.com
+      - key: CRON_SECRET
+        sync: false

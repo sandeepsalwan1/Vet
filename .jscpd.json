@@ -1,0 +1,15 @@
+{
+  "ignore": [
+    "node_modules/**",
+    ".next/**",
+    "opensrc/**",
+    "package-lock.json",
+    "docs/proof/**",
+    "*.md",
+    "db/migrations/**"
+  ],
+  "minLines": 20,
+  "minTokens": 80,
+  "reporters": ["console"],
+  "threshold": 0
+}

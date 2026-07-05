@@ -1,0 +1,243 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {FunctionCall, FunctionResponse} from '@google/genai';
+
+import {LlmResponse} from '../models/llm_response.js';
+
+import {toCamelCase, toSnakeCase} from '../utils/object_notation_utils.js';
+import {createEventActions, EventActions} from './event_actions.js';
+
+/**
+ * Represents an event in a conversation between agents and users.
+
+  It is used to store the content of the conversation, as well as the actions
+  taken by the agents like function calls, etc.
+ */
+export interface Event extends LlmResponse {
+  /**
+   * The unique identifier of the event.
+   * Do not assign the ID. It will be assigned by the session.
+   */
+  id: string;
+
+  /**
+   * The invocation ID of the event. Should be non-empty before appending to a
+   * session.
+   */
+  invocationId: string;
+
+  /**
+   * "user" or the name of the agent, indicating who appended the event to the
+   * session.
+   */
+  author?: string;
+
+  /**
+   * The actions taken by the agent.
+   */
+  actions: EventActions;
+
+  /**
+   * Set of ids of the long running function calls. Agent client will know from
+   * this field about which function call is long running. Only valid for
+   * function call event
+   */
+  longRunningToolIds?: string[];
+
+  /**
+   * The branch of the event.
+   * The format is like agent_1.agent_2.agent_3, where agent_1 is the parent of
+   * agent_2, and agent_2 is the parent of agent_3.
+   *
+   * Branch is used when multiple sub-agent shouldn't see their peer agents'
+   * conversation history.
+   */
+  branch?: string;
+
+  /**
+   * The timestamp of the event.
+   */
+  timestamp: number;
+}
+
+/**
+ * Creates an event from a partial event.
+ *
+ * @param params The partial event to create the event from.
+ * @returns The event.
+ */
+export function createEvent(params: Partial<Event> = {}): Event {
+  return {
+    ...params,
+    id: params.id || createNewEventId(),
+    invocationId: params.invocationId || '',
+    author: params.author,
+    actions: params.actions || createEventActions(),
+    longRunningToolIds: params.longRunningToolIds || [],
+    branch: params.branch,
+    timestamp: params.timestamp || Date.now(),
+  };
+}
+
+/**
+ * Returns whether the event is the final response of the agent.
+ */
+export function isFinalResponse(event: Event) {
+  if (
+    event.actions.skipSummarization ||
+    (event.longRunningToolIds && event.longRunningToolIds.length > 0)
+  ) {
+    return true;
+  }
+
+  return (
+    getFunctionCalls(event).length === 0 &&
+    getFunctionResponses(event).length === 0 &&
+    !event.partial &&
+    !hasTrailingCodeExecutionResult(event)
+  );
+}
+
+/**
+ * Returns the function calls in the event.
+ */
+export function getFunctionCalls(event: Event): FunctionCall[] {
+  const funcCalls = [];
+  if (event.content && event.content.parts) {
+    for (const part of event.content.parts) {
+      if (part.functionCall) {
+        funcCalls.push(part.functionCall);
+      }
+    }
+  }
+
+  return funcCalls;
+}
+
+/**
+ * Returns the function responses in the event.
+ */
+export function getFunctionResponses(event: Event): FunctionResponse[] {
+  const funcResponses = [];
+  if (event.content && event.content.parts) {
+    for (const part of event.content.parts) {
+      if (part.functionResponse) {
+        funcResponses.push(part.functionResponse);
+      }
+    }
+  }
+
+  return funcResponses;
+}
+
+/**
+ * Returns whether the event has a trailing code execution result.
+ */
+export function hasTrailingCodeExecutionResult(event: Event): boolean {
+  if (event.content && event.content.parts?.length) {
+    const lastPart = event.content.parts[event.content.parts.length - 1];
+    return lastPart.codeExecutionResult !== undefined;
+  }
+
+  return false;
+}
+
+/**
+ * Extracts and concatenates all text from the parts of a `Event` object.
+ * @param event The `Event` object to process.
+ *
+ * @returns A single string with the combined text.
+ */
+export function stringifyContent(event: Event): string {
+  if (!event.content?.parts) {
+    return '';
+  }
+
+  return event.content.parts.map((part) => part.text ?? '').join('');
+}
+
+const ASCII_LETTERS_AND_NUMBERS =
+  'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
+/**
+ * Generates a new unique ID for the event.
+ */
+export function createNewEventId(): string {
+  let id = '';
+
+  for (let i = 0; i < 8; i++) {
+    id +=
+      ASCII_LETTERS_AND_NUMBERS[
+        Math.floor(Math.random() * ASCII_LETTERS_AND_NUMBERS.length)
+      ];
+  }
+
+  return id;
+}
+
+/**
+ * List of keys to preserve during snake_case to camelCase conversion.
+ *
+ * Example: `content.parts.functionCall.args`
+ * will be converted to be `content.parts.function_call.args` but the object
+ * inside of the `content.parts.function_call.args` will skip the conversion as it
+ * can contain data in any notation.
+ */
+const PRESERVE_KEYS_CAMEL_CASE = [
+  'actions.stateDelta',
+  'actions.artifactDelta',
+  'actions.requestedAuthConfigs',
+  'actions.requestedToolConfirmations',
+  'actions.customMetadata',
+  'content.parts.functionCall.args',
+  'content.parts.functionResponse.response',
+];
+
+/**
+ * List of keys to preserve during camelCase to snake_case conversion.
+ *
+ * Example: `content.parts.function_call.args`
+ * will be converted to be `content.parts.functionCall.args` but the object
+ * inside of the `content.parts.functionCall.args` will skip the conversion as it
+ * can contain data in any notation.
+ */
+const PRESERVE_KEYS_SNAKE_CASE = [
+  'actions.state_delta',
+  'actions.artifact_delta',
+  'actions.requested_auth_configs',
+  'actions.requested_tool_confirmations',
+  'actions.custom_metadata',
+  'content.parts.function_call.args',
+  'content.parts.function_response.response',
+];
+
+/**
+ * Transforms a snake_cased event object to a camelCased Event object.
+ *
+ * @param event The snake_cased event object.
+ * @returns The camelCased Event object.
+ */
+export function transformToCamelCaseEvent(
+  event: Record<string, unknown>,
+): Event {
+  return toCamelCase(event, PRESERVE_KEYS_SNAKE_CASE) as Event;
+}
+
+/**
+ * Transforms a camelCased event object to a snake_cased Event object.
+ *
+ * @param event The camelCased event object.
+ * @returns The snake_cased Event object.
+ */
+export function transformToSnakeCaseEvent(
+  event: Event,
+): Record<string, unknown> {
+  return toSnakeCase(event, PRESERVE_KEYS_CAMEL_CASE) as Record<
+    string,
+    unknown
+  >;
+}

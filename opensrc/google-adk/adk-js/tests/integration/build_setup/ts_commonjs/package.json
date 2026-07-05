@@ -1,0 +1,20 @@
+{
+  "name": "ts_commonjs_build_setup",
+  "version": "1.0.0",
+  "description": "",
+  "main": "agent.ts",
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc && echo Build complete",
+    "start": "npx @google/adk-devtools run agent.ts",
+    "test:db": "node ./dist/db_init_check.js",
+    "test:devtools": "node ./dist/devtools_check.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/adk": "file:../../../../core",
+    "@google/adk-devtools": "file:../../../../dev"
+  }
+}

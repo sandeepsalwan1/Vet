@@ -1,0 +1,476 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {Content} from '@google/genai';
+import {context, trace} from '@opentelemetry/api';
+
+import {createEvent, Event} from '../events/event.js';
+
+import {
+  runAsyncGeneratorWithOtelContext,
+  traceAgentInvocation,
+  tracer,
+} from '../telemetry/tracing.js';
+import {Context} from './context.js';
+import {InvocationContext} from './invocation_context.js';
+
+/**
+ * A single callback function for an agent.
+ */
+export type SingleAgentCallback = (
+  context: Context,
+) => Promise<Content | undefined> | (Content | undefined);
+
+/**
+ * Type for before agent callbacks, which can be a single callback or
+ * an array of callbacks.
+ */
+export type BeforeAgentCallback = SingleAgentCallback | SingleAgentCallback[];
+
+/**
+ * Type for after agent callbacks, which can be a single callback or
+ * an array of callbacks.
+ */
+export type AfterAgentCallback = SingleAgentCallback | SingleAgentCallback[];
+
+/**
+ * The config of a base agent.
+ */
+export interface BaseAgentConfig {
+  name: string;
+  description?: string;
+  parentAgent?: BaseAgent;
+  subAgents?: BaseAgent[];
+  beforeAgentCallback?: BeforeAgentCallback;
+  afterAgentCallback?: AfterAgentCallback;
+}
+
+/**
+ * A unique symbol to identify ADK agent classes.
+ * Defined once and shared by all BaseAgent instances.
+ */
+const BASE_AGENT_SIGNATURE_SYMBOL = Symbol.for('google.adk.baseAgent');
+
+/**
+ * Type guard to check if an object is an instance of BaseAgent.
+ * @param obj The object to check.
+ * @returns True if the object is an instance of BaseAgent, false otherwise.
+ */
+export function isBaseAgent(obj: unknown): obj is BaseAgent {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    BASE_AGENT_SIGNATURE_SYMBOL in obj &&
+    obj[BASE_AGENT_SIGNATURE_SYMBOL] === true
+  );
+}
+
+/**
+ * Base class for all agents in Agent Development Kit.
+ */
+export abstract class BaseAgent {
+  /**
+   * A unique symbol to identify ADK agent classes.
+   */
+  readonly [BASE_AGENT_SIGNATURE_SYMBOL] = true;
+
+  /**
+   * The agent's name.
+   * Agent name must be a JS identifier and unique within the agent tree.
+   * Agent name cannot be "user", since it's reserved for end-user's input.
+   */
+  readonly name: string;
+
+  /**
+   * Description about the agent's capability.
+   *
+   * The model uses this to determine whether to delegate control to the agent.
+   * One-line description is enough and preferred.
+   */
+  readonly description?: string;
+
+  /**
+   * Root agent of this agent.
+   * Computed dynamically by traversing up the parent chain.
+   */
+  get rootAgent(): BaseAgent {
+    return getRootAgent(this);
+  }
+
+  /**
+   * The parent agent of this agent.
+   *
+   * Note that an agent can ONLY be added as sub-agent once.
+   *
+   * If you want to add one agent twice as sub-agent, consider to create two
+   * agent instances with identical config, but with different name and add them
+   * to the agent tree.
+   *
+   * The parent agent is the agent that created this agent.
+   */
+  parentAgent?: BaseAgent;
+
+  /**
+   * The sub-agents of this agent.
+   */
+  readonly subAgents: BaseAgent[];
+
+  /**
+   * Callback or list of callbacks to be invoked before the agent run.
+   *
+   * When a list of callbacks is provided, the callbacks will be called in the
+   * order they are listed until a callback does not return undefined.
+   *
+   * @param callbackContext: MUST be named 'callbackContext' (enforced).
+   *
+   * @return Content: The content to return to the user. When the content is
+   *     present, the agent run will be skipped and the provided content will be
+   *     returned to user.
+   */
+  readonly beforeAgentCallback: SingleAgentCallback[];
+
+  /**
+   * Callback or list of callbacks to be invoked after the agent run.
+   *
+   * When a list of callbacks is provided, the callbacks will be called in the
+   * order they are listed until a callback does not return undefined.
+   *
+   * @param callbackContext: MUST be named 'callbackContext' (enforced).
+   *
+   * @return Content: The content to return to the user. When the content is
+   *     present, the provided content will be used as agent response and
+   *     appended to event history as agent response.
+   */
+  readonly afterAgentCallback: SingleAgentCallback[];
+
+  constructor(config: BaseAgentConfig) {
+    this.name = validateAgentName(config.name);
+    this.description = config.description;
+    this.parentAgent = config.parentAgent;
+    this.subAgents = config.subAgents || [];
+    this.beforeAgentCallback = getCannonicalCallback(
+      config.beforeAgentCallback,
+    );
+    this.afterAgentCallback = getCannonicalCallback(config.afterAgentCallback);
+
+    this.setParentAgentForSubAgents();
+  }
+
+  /**
+   * Entry method to run an agent via text-based conversation.
+   *
+   * @param parentContext The invocation context of the parent agent.
+   * @yields The events generated by the agent.
+   * @returns An AsyncGenerator that yields the events generated by the agent.
+   */
+  async *runAsync(
+    parentContext: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    const span = tracer.startSpan(`invoke_agent ${this.name}`);
+    const ctx = trace.setSpan(context.active(), span);
+    try {
+      yield* runAsyncGeneratorWithOtelContext<BaseAgent, Event>(
+        ctx,
+        this,
+        async function* () {
+          const context = this.createInvocationContext(parentContext);
+
+          const beforeAgentCallbackEvent =
+            await this.handleBeforeAgentCallback(context);
+          if (beforeAgentCallbackEvent) {
+            yield beforeAgentCallbackEvent;
+          }
+
+          if (context.endInvocation || parentContext.abortSignal?.aborted) {
+            return;
+          }
+
+          traceAgentInvocation({agent: this, invocationContext: context});
+          for await (const event of this.runAsyncImpl(context)) {
+            yield event;
+          }
+
+          if (context.endInvocation || parentContext.abortSignal?.aborted) {
+            return;
+          }
+
+          const afterAgentCallbackEvent =
+            await this.handleAfterAgentCallback(context);
+          if (afterAgentCallbackEvent) {
+            yield afterAgentCallbackEvent;
+          }
+        },
+      );
+    } finally {
+      span.end();
+    }
+  }
+
+  /**
+   * Entry method to run an agent via video/audio-based conversation.
+   *
+   * @param parentContext The invocation context of the parent agent.
+   * @yields The events generated by the agent.
+   * @returns An AsyncGenerator that yields the events generated by the agent.
+   */
+  async *runLive(
+    parentContext: InvocationContext, // eslint-disable-line @typescript-eslint/no-unused-vars
+  ): AsyncGenerator<Event, void, void> {
+    const span = tracer.startSpan(`invoke_agent ${this.name}`);
+    const ctx = trace.setSpan(context.active(), span);
+    try {
+      yield* runAsyncGeneratorWithOtelContext<BaseAgent, Event>(
+        ctx,
+        this,
+        async function* () {
+          // TODO(b/425992518): Implement live mode.
+        },
+      );
+      throw new Error('Live mode is not implemented yet.');
+    } finally {
+      span.end();
+    }
+  }
+
+  /**
+   * Core logic to run this agent via text-based conversation.
+   *
+   * @param context The invocation context of the agent.
+   * @yields The events generated by the agent.
+   * @returns An AsyncGenerator that yields the events generated by the agent.
+   */
+  protected abstract runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void>;
+
+  /**
+   * Core logic to run this agent via video/audio-based conversation.
+   *
+   * @param context The invocation context of the agent.
+   * @yields The events generated by the agent.
+   * @returns An AsyncGenerator that yields the events generated by the agent.
+   */
+  protected abstract runLiveImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void>;
+
+  /**
+   * Finds the agent with the given name in this agent and its descendants.
+   *
+   * @param name The name of the agent to find.
+   * @return The agent with the given name, or undefined if not found.
+   */
+  findAgent(name: string): BaseAgent | undefined {
+    if (this.name === name) {
+      return this;
+    }
+
+    return this.findSubAgent(name);
+  }
+
+  /**
+   * Finds the agent with the given name in this agent's descendants.
+   *
+   * @param name The name of the agent to find.
+   * @return The agent with the given name, or undefined if not found.
+   */
+  findSubAgent(name: string): BaseAgent | undefined {
+    for (const subAgent of this.subAgents) {
+      const result = subAgent.findAgent(name);
+      if (result) {
+        return result;
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Creates an invocation context for this agent.
+   *
+   * @param parentContext The invocation context of the parent agent.
+   * @return The invocation context for this agent.
+   */
+  protected createInvocationContext(
+    parentContext: InvocationContext,
+  ): InvocationContext {
+    return new InvocationContext({
+      ...parentContext,
+      agent: this,
+    });
+  }
+
+  /**
+   * Runs the before agent callback if it exists.
+   *
+   * @param invocationContext The invocation context of the agent.
+   * @return The event to return to the user, or undefined if no event is
+   *     generated.
+   */
+  protected async handleBeforeAgentCallback(
+    invocationContext: InvocationContext,
+  ): Promise<Event | undefined> {
+    if (this.beforeAgentCallback.length === 0) {
+      return undefined;
+    }
+
+    const callbackContext = new Context({invocationContext});
+    for (const callback of this.beforeAgentCallback) {
+      const content = await callback(callbackContext);
+
+      if (invocationContext.abortSignal?.aborted) {
+        return;
+      }
+
+      if (content) {
+        invocationContext.endInvocation = true;
+
+        return createEvent({
+          invocationId: invocationContext.invocationId,
+          author: this.name,
+          branch: invocationContext.branch,
+          content,
+          actions: callbackContext.eventActions,
+        });
+      }
+    }
+
+    if (callbackContext.state.hasDelta()) {
+      return createEvent({
+        invocationId: invocationContext.invocationId,
+        author: this.name,
+        branch: invocationContext.branch,
+        actions: callbackContext.eventActions,
+      });
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Runs the after agent callback if it exists.
+   *
+   * @param invocationContext The invocation context of the agent.
+   * @return The event to return to the user, or undefined if no event is
+   *     generated.
+   */
+  protected async handleAfterAgentCallback(
+    invocationContext: InvocationContext,
+  ): Promise<Event | undefined> {
+    if (this.afterAgentCallback.length === 0) {
+      return undefined;
+    }
+
+    const callbackContext = new Context({invocationContext});
+    for (const callback of this.afterAgentCallback) {
+      const content = await callback(callbackContext);
+
+      if (invocationContext.abortSignal?.aborted) {
+        return;
+      }
+
+      if (content) {
+        return createEvent({
+          invocationId: invocationContext.invocationId,
+          author: this.name,
+          branch: invocationContext.branch,
+          content,
+          actions: callbackContext.eventActions,
+        });
+      }
+    }
+
+    if (callbackContext.state.hasDelta()) {
+      return createEvent({
+        invocationId: invocationContext.invocationId,
+        author: this.name,
+        branch: invocationContext.branch,
+        actions: callbackContext.eventActions,
+      });
+    }
+
+    return undefined;
+  }
+
+  private setParentAgentForSubAgents(): void {
+    for (const subAgent of this.subAgents) {
+      if (subAgent.parentAgent) {
+        throw new Error(
+          `Agent "${
+            subAgent.name
+          }" already has a parent agent, current parent: "${
+            subAgent.parentAgent.name
+          }", trying to add: "${this.name}"`,
+        );
+      }
+
+      subAgent.parentAgent = this;
+    }
+  }
+}
+
+/**
+ * Validates the agent name.
+ *
+ * @param name The name of the agent.
+ * @return The validated agent name.
+ */
+function validateAgentName(name: string): string {
+  if (!isIdentifier(name)) {
+    throw new Error(
+      `Found invalid agent name: "${
+        name
+      }". Agent name must be a valid identifier. It should start with a letter (a-z, A-Z) or an underscore (_), and can only contain letters, digits (0-9), underscores, and hyphens.`,
+    );
+  }
+
+  if (name === 'user') {
+    throw new Error(
+      `Agent name cannot be 'user'. 'user' is reserved for end-user's input.`,
+    );
+  }
+
+  return name;
+}
+
+/**
+ * Checks if the given string is a valid identifier.
+ *
+ * @param str The string to check.
+ * @return True if the string is a valid identifier, false otherwise.
+ */
+function isIdentifier(str: string): boolean {
+  return /^[\p{ID_Start}$_][\p{ID_Continue}$_-]*$/u.test(str);
+}
+
+/**
+ * Gets the root agent of the given agent.
+ *
+ * @param rootAgent The root agent to get the root agent of.
+ * @return The root agent.
+ */
+function getRootAgent(rootAgent: BaseAgent): BaseAgent {
+  while (rootAgent.parentAgent) {
+    rootAgent = rootAgent.parentAgent;
+  }
+
+  return rootAgent;
+}
+
+/**
+ * Gets the canonical callback from the given callback.
+ *
+ * @param callbacks The callback or list of callbacks to get the canonical
+ *     callback from.
+ * @return The canonical callback.
+ */
+export function getCannonicalCallback<T>(callbacks?: T | T[]): T[] {
+  if (!callbacks) {
+    return [];
+  }
+
+  return Array.isArray(callbacks) ? callbacks : [callbacks];
+}

@@ -1,0 +1,47 @@
+name: validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  run-tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Check for secrets leaks
+        run: npx secretlint "**/*"
+
+      - name: Build packages
+        run: npm run build
+
+      - name: Run tests and check code coverage
+        run: npm run test:coverage
+
+      - name: Run lint check
+        run: npm run lint
+
+      - name: Run format check
+        run: npm run format:check
+
+      - name: Run documentation build check
+        run: npm run docs:check

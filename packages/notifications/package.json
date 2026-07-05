@@ -1,0 +1,19 @@
+{
+  "name": "@central-vet/notifications",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@central-vet/db": "*",
+    "resend": "^6.17.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "typescript": "^6.0.3"
+  }
+}
