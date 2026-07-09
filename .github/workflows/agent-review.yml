@@ -30,14 +30,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: refs/pull/${{ inputs.pr-number }}/head
-          fetch-depth: 0
+          ref: main
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-      - run: npm ci
       - run: mkdir -p .agent-output
       - name: Build review prompt
         env:

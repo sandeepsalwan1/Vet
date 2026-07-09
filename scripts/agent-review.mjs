@@ -150,11 +150,18 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun) {
   let state = "success";
   let description = "agent review passed";
   if (review.proofNeeded === "UI" || review.proofNeeded === "GIF") add.push(config.labels.proof);
-  if (review.mergeRecommendation === "blocked" || review.remainingRisk === "high") {
+  const blocked =
+    review.mergeRecommendation === "blocked" ||
+    review.mergeRecommendation === "ready-human-review" ||
+    review.remainingRisk === "high";
+  if (blocked) {
     add.push(config.labels.blocked);
     remove.push(config.labels.automerge);
     state = "failure";
-    description = "agent review blocked";
+    description =
+      review.mergeRecommendation === "ready-human-review"
+        ? "agent review needs human review"
+        : "agent review blocked";
   } else {
     remove.push(config.labels.blocked);
   }
@@ -194,7 +201,10 @@ async function main() {
   }
   if (args["from-file"]) {
     const result = applyReview(config, prNumber, args["from-file"], args["apply-patch"], dryRun);
-    const blocked = result.review.mergeRecommendation === "blocked" || result.review.remainingRisk === "high";
+    const blocked =
+      result.review.mergeRecommendation === "blocked" ||
+      result.review.mergeRecommendation === "ready-human-review" ||
+      result.review.remainingRisk === "high";
     finish(
       { ok: !blocked, message: `${dryRun ? "would apply" : "applied"} review for #${prNumber}`, result },
       Boolean(args.json),

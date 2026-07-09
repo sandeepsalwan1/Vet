@@ -24,3 +24,4 @@ Rules:
 - Set `remainingRisk: high` when product, auth, data, migration, billing, or unresolved human decision risk remains.
 - Set `proofNeeded: GIF` only when issue/PR explicitly asks for GIF/video.
 - `mergeRecommendation: ready` only when no blockers remain and no high-priority/high-risk manual decision is needed.
+- `mergeRecommendation: ready-human-review` means automerge must remain blocked until a human clears it.
