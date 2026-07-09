@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "proofKind",
+    "status",
+    "commands",
+    "artifactPaths",
+    "provider",
+    "leaseId",
+    "summary",
+    "blocker"
+  ],
+  "properties": {
+    "proofKind": { "enum": ["none", "CI", "UI", "GIF"] },
+    "status": { "enum": ["passed", "skipped", "blocked", "failed"] },
+    "commands": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "artifactPaths": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "provider": { "type": "string" },
+    "leaseId": { "type": "string" },
+    "summary": { "type": "string" },
+    "blocker": { "type": "string" }
+  }
+}

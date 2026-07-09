@@ -1,0 +1,106 @@
+name: Agent Review
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        required: true
+        type: number
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        required: true
+        type: number
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-review-${{ inputs.pr-number }}
+  cancel-in-progress: false
+
+jobs:
+  generate-review:
+    name: generate-review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refs/pull/${{ inputs.pr-number }}/head
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: mkdir -p .agent-output
+      - name: Build review prompt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/agent-review.mjs --pr-number "${{ inputs.pr-number }}" --write-prompt .agent-output/review-prompt.md --json
+      - name: Run Codex reviewer
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: .agent-output/review-prompt.md
+          sandbox: workspace-write
+          effort: medium
+          allow-users: ${{ github.repository_owner }}
+          allow-bots: github-actions[bot]
+          codex-args: '["--output-schema",".agent/schemas/review.schema.json"]'
+          output-file: .agent-output/review.json
+      - name: Create review patch
+        run: node scripts/agent-review.mjs --pr-number "${{ inputs.pr-number }}" --create-patch .agent-output/review.patch --json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-review-${{ inputs.pr-number }}
+          path: .agent-output/*
+          if-no-files-found: error
+
+  apply-review:
+    name: apply-review
+    runs-on: ubuntu-latest
+    needs: generate-review
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+      issues: write
+      statuses: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-review-${{ inputs.pr-number }}
+          path: .agent-output
+      - name: Apply review result
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/agent-review.mjs --pr-number "${{ inputs.pr-number }}" --from-file .agent-output/review.json --apply-patch .agent-output/review.patch --json
+
+  no-mistakes:
+    needs: apply-review
+    if: needs.apply-review.result == 'success'
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+      issues: write
+      statuses: write
+      checks: read
+    uses: ./.github/workflows/agent-no-mistakes.yml
+    with:
+      pr-number: ${{ inputs.pr-number }}
+      intent: Validate the agent-created PR after automated review. The PR must satisfy its linked issue, preserve repo architecture, pass CI, and remain blocked rather than auto-merged if no-mistakes finds ask-user or high-risk issues.

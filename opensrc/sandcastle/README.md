@@ -1,0 +1,55 @@
+# Sandcastle
+
+Source: https://github.com/mattpocock/sandcastle
+
+Fetched for planning:
+
+```sh
+npx opensrc fetch https://github.com/mattpocock/sandcastle
+```
+
+Local cache:
+
+```text
+/Users/sandeep/.opensrc/repos/github.com/mattpocock/sandcastle/main
+```
+
+Current checked state on 2026-07-09:
+
+- latest release: `v0.12.0`
+- latest release time: `2026-06-29T20:16:27Z`
+- upstream last pushed: `2026-06-29T20:16:27Z`
+- language: TypeScript
+- license: MIT
+- stars at check time: 6733
+
+Use in this repo:
+
+- optional TypeScript orchestration adapter for AFK implementation/review runs
+- useful when raw GitHub Actions scripts become awkward for multi-agent planning, parallel execution, branch strategies, review pipelines, or session capture/resume
+- supports Codex as an agent provider
+- supports Docker, Podman, Vercel, custom sandbox providers, and no-sandbox mode
+- Vercel adapter can rely on `VERCEL_TOKEN` or `VERCEL_OIDC_TOKEN`
+- has templates relevant to this goal:
+  - `simple-loop`
+  - `sequential-reviewer`
+  - `parallel-planner`
+  - `parallel-planner-with-review`
+
+Do not use it for:
+
+- GitHub issue label state machine
+- final merge gate
+- no-mistakes replacement
+- Crabbox desktop/browser/GIF proof replacement
+- bypassing branch protection or required checks
+
+Recommendation:
+
+- Keep GitHub Issues and Actions as the control plane.
+- Use Crabbox as the preferred remote worker host when provider auth exists.
+- Add Sandcastle only inside the worker if the implementation runner benefits from TypeScript orchestration, parallel issue planning, branch strategies, warm sandbox reuse, structured output, or session handling.
+- Do not make Sandcastle the top-level GitHub label state machine.
+- If Sandcastle uses Vercel Sandbox, first verify with a real sandbox create/run smoke. The current `VERCEL_TOKEN` exists and may be new, but `vercel whoami --token "$VERCEL_TOKEN"` is unauthorized.
+
+Do not vendor the full Sandcastle source here. Refresh with `npx opensrc fetch` and cite this note when implementation decisions depend on Sandcastle behavior.

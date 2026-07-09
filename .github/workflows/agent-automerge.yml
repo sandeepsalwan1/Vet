@@ -1,0 +1,48 @@
+name: Agent Automerge
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        required: true
+        type: number
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        required: true
+        type: number
+  workflow_run:
+    workflows:
+      - CI
+      - Agent no-mistakes
+      - Agent Proof
+      - Agent Review
+    types:
+      - completed
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  statuses: read
+  checks: read
+
+concurrency:
+  group: agent-automerge-${{ inputs.pr-number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  automerge:
+    name: automerge
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.pull_requests[0].number != ''
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Evaluate automerge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr-number || github.event.workflow_run.pull_requests[0].number }}
+        run: node scripts/agent-automerge.mjs --pr-number "$PR_NUMBER" --json

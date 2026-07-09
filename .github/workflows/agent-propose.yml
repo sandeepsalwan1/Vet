@@ -1,0 +1,38 @@
+name: Agent Propose
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: agent-propose
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    name: propose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: mkdir -p .agent-output
+      - name: Run Codex proposer
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: .agent/prompts/propose.md
+          sandbox: read-only
+          effort: low
+          allow-users: ${{ github.repository_owner }}
+          allow-bots: github-actions[bot]
+          codex-args: '["--output-schema",".agent/schemas/proposals.schema.json"]'
+          output-file: .agent-output/proposals.json
+      - name: Create proposed issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/agent-propose.mjs --from-file .agent-output/proposals.json --json

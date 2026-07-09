@@ -1,0 +1,42 @@
+[
+  {
+    "name": "agent:triage",
+    "color": "5319e7",
+    "description": "AI evaluates issue alignment and readiness"
+  },
+  {
+    "name": "agent:implement",
+    "color": "0e8a16",
+    "description": "AI may implement an approved issue"
+  },
+  {
+    "name": "agent:review",
+    "color": "1d76db",
+    "description": "AI reviews or fixes an agent PR"
+  },
+  {
+    "name": "agent:proof",
+    "color": "0052cc",
+    "description": "Run explicit proof or visual evidence flow"
+  },
+  {
+    "name": "agent:automerge",
+    "color": "0e8a16",
+    "description": "Merge allowed after every required gate passes"
+  },
+  {
+    "name": "agent:blocked",
+    "color": "b60205",
+    "description": "Automation needs human input or a failed gate"
+  },
+  {
+    "name": "priority:high",
+    "color": "d93f0b",
+    "description": "Important or risky work; manual review required"
+  },
+  {
+    "name": "priority:low",
+    "color": "c2e0c6",
+    "description": "Small low-risk work; cheapest automation path"
+  }
+]

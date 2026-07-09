@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "value",
+    "priority",
+    "risk",
+    "alignment",
+    "implementationScope",
+    "proofNeeded",
+    "automationDecision",
+    "humanQuestion"
+  ],
+  "properties": {
+    "value": { "enum": ["low", "medium", "high"] },
+    "priority": { "enum": ["low", "medium", "high"] },
+    "risk": { "enum": ["low", "medium", "high"] },
+    "alignment": { "enum": ["yes", "no", "unclear"] },
+    "implementationScope": { "type": "string" },
+    "proofNeeded": { "enum": ["none", "CI", "UI", "GIF"] },
+    "automationDecision": {
+      "enum": ["implement", "manual-review", "blocked", "reject"]
+    },
+    "humanQuestion": { "type": "string" }
+  }
+}

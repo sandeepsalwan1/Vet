@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "findings", "checksRun", "blocker"],
+  "properties": {
+    "status": {
+      "enum": ["passed", "blocked", "failed", "skipped"]
+    },
+    "findings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "checksRun": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "blocker": { "type": "string" }
+  }
+}

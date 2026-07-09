@@ -1,0 +1,108 @@
+name: Agent Router
+
+on:
+  issues:
+    types:
+      - labeled
+  pull_request:
+    types:
+      - labeled
+  workflow_dispatch:
+    inputs:
+      event-file:
+        description: Optional event JSON path for manual route dry-run
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-router-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  route:
+    name: route
+    runs-on: ubuntu-latest
+    outputs:
+      lane: ${{ steps.route.outputs.lane }}
+      issue_number: ${{ steps.route.outputs.issue_number }}
+      pr_number: ${{ steps.route.outputs.pr_number }}
+      target_kind: ${{ steps.route.outputs.target_kind }}
+      target_number: ${{ steps.route.outputs.target_number }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - id: route
+        run: |
+          args=(--json)
+          if [ -n "${{ inputs.event-file }}" ]; then
+            args+=(--event-file "${{ inputs.event-file }}")
+          fi
+          node scripts/agent-router.mjs "${args[@]}"
+
+  triage:
+    needs: route
+    if: needs.route.outputs.lane == 'triage'
+    permissions:
+      contents: read
+      issues: write
+    uses: ./.github/workflows/agent-triage.yml
+    with:
+      issue-number: ${{ fromJSON(needs.route.outputs.issue_number) }}
+    secrets: inherit
+
+  implement:
+    needs: route
+    if: needs.route.outputs.lane == 'implement'
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    uses: ./.github/workflows/agent-implement.yml
+    with:
+      issue-number: ${{ fromJSON(needs.route.outputs.issue_number) }}
+    secrets: inherit
+
+  review:
+    needs: route
+    if: needs.route.outputs.lane == 'review'
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      statuses: write
+    uses: ./.github/workflows/agent-review.yml
+    with:
+      pr-number: ${{ fromJSON(needs.route.outputs.pr_number) }}
+    secrets: inherit
+
+  proof:
+    needs: route
+    if: needs.route.outputs.lane == 'proof'
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      statuses: write
+    uses: ./.github/workflows/agent-proof.yml
+    with:
+      target-kind: ${{ needs.route.outputs.target_kind }}
+      target-number: ${{ fromJSON(needs.route.outputs.target_number) }}
+    secrets: inherit
+
+  automerge:
+    needs: route
+    if: needs.route.outputs.lane == 'automerge'
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      statuses: read
+      checks: read
+    uses: ./.github/workflows/agent-automerge.yml
+    with:
+      pr-number: ${{ fromJSON(needs.route.outputs.pr_number) }}
+    secrets: inherit

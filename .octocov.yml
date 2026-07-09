@@ -1,0 +1,21 @@
+codeToTestRatio:
+  code:
+    - "apps/internal/app/**/*.{ts,tsx}"
+    - "packages/*/src/**/*.ts"
+    - "scripts/*.mjs"
+    - "!**/*.test.ts"
+    - "!**/*.spec.ts"
+  test:
+    - "**/*.test.ts"
+    - "**/*.spec.ts"
+    - "scripts/vetagent-scenarios.mjs"
+    - "scripts/vetagent-scenario-assertions.mjs"
+coverage:
+  if: false
+comment:
+  if: is_pull_request
+  updatePrevious: true
+  hideFooterLink: true
+summary:
+  if: true
+  hideFooterLink: true

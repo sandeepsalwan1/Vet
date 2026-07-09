@@ -10,6 +10,8 @@ Operational scripts.
 - Send passcodes in headers/body, never query strings.
 - Prefer flags over editing script constants.
 - Keep smoke/proof output aligned with docs.
+- `agent-*.mjs` scripts support `--dry-run` and `--json`; keep GitHub writes idempotent.
+- Agent GitHub comments use managed markers and temp body files.
 - `smoke-local.mjs` warms pages/routes first, then enforces measured budgets.
 - Scenario definitions live in `vetagent-scenario-data.mjs`.
 - Scenario assertion/detail policy lives in `vetagent-scenario-assertions.mjs`; `vetagent-scenarios.mjs` owns HTTP execution.

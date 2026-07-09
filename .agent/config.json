@@ -1,0 +1,131 @@
+{
+  "repo": {
+    "owner": "sandeepsalwan1",
+    "name": "Vet",
+    "defaultBranch": "main"
+  },
+  "commands": {
+    "install": "npm ci",
+    "quality": [
+      "git diff --check",
+      "npm run typecheck",
+      "npm run lint",
+      "npm run lint:dead",
+      "npm run lint:duplicates"
+    ],
+    "build": "npm run build",
+    "scenarios": "npm run test:scenarios",
+    "defaultImplementChecks": [
+      "npm run typecheck",
+      "npm run lint"
+    ],
+    "normalImplementChecks": [
+      "npm run build",
+      "npm run lint",
+      "npm run test:scenarios"
+    ],
+    "proof": [
+      "npm run build",
+      "npm run test:scenarios"
+    ],
+    "localSmoke": "npm run smoke:local"
+  },
+  "labels": {
+    "triage": "agent:triage",
+    "implement": "agent:implement",
+    "review": "agent:review",
+    "proof": "agent:proof",
+    "automerge": "agent:automerge",
+    "blocked": "agent:blocked",
+    "priorityHigh": "priority:high",
+    "priorityLow": "priority:low"
+  },
+  "comments": {
+    "propose": "<!-- agent-propose:v1 -->",
+    "triage": "<!-- agent-triage:v1 -->",
+    "review": "<!-- agent-review:v1 -->",
+    "proof": "<!-- agent-proof:v1 -->",
+    "gate": "<!-- agent-gate:v1 -->"
+  },
+  "concurrency": {
+    "maxGlobal": 15,
+    "proposer": 1,
+    "triage": 2,
+    "implement": 2,
+    "review": 2,
+    "proof": 1
+  },
+  "backend": {
+    "default": "codex",
+    "codexAction": "openai/codex-action@v1",
+    "model": "",
+    "effort": "medium",
+    "triageEffort": "low",
+    "reviewEffort": "medium",
+    "sandbox": "workspace-write",
+    "readOnlySandbox": "read-only"
+  },
+  "secrets": {
+    "agentAuth": "OPENAI_API_KEY",
+    "githubWrite": "GITHUB_TOKEN",
+    "githubPat": "AGENT_PAT",
+    "crabboxCoordinator": "CRABBOX_COORDINATOR_TOKEN",
+    "crabboxProviders": [
+      "HCLOUD_TOKEN",
+      "HETZNER_TOKEN",
+      "HETZNER_API_TOKEN"
+    ],
+    "vercel": [
+      "VERCEL_TOKEN",
+      "VERCEL_OIDC_TOKEN"
+    ]
+  },
+  "crabbox": {
+    "preferWhenProviderAuthExists": true,
+    "nonVisualProviders": [
+      "vercel-sandbox",
+      "github-actions"
+    ],
+    "visualProviders": [
+      "hetzner"
+    ],
+    "lanes": {
+      "ciRemote": [
+        "npm run build",
+        "npm run test:scenarios"
+      ],
+      "smokeRemote": [
+        "npm run smoke:local"
+      ],
+      "visualProof": [
+        "npm run smoke:local"
+      ],
+      "gifProof": []
+    }
+  },
+  "automerge": {
+    "requiredLabels": [
+      "agent:automerge"
+    ],
+    "blockedLabels": [
+      "priority:high",
+      "agent:blocked"
+    ],
+    "requiredChecks": [
+      "quality",
+      "build",
+      "scenarios"
+    ],
+    "requiredStatuses": [
+      "agent-review",
+      "no-mistakes"
+    ],
+    "proofStatus": "agent-proof",
+    "manualWhenPriority": [
+      "high"
+    ],
+    "manualWhenRisk": [
+      "high"
+    ]
+  }
+}

@@ -1,0 +1,48 @@
+name: Agent Proof
+
+on:
+  workflow_call:
+    inputs:
+      target-kind:
+        required: true
+        type: string
+      target-number:
+        required: true
+        type: number
+  workflow_dispatch:
+    inputs:
+      target-kind:
+        required: true
+        type: choice
+        options:
+          - issue
+          - pr
+      target-number:
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: agent-proof-${{ inputs.target-kind }}-${{ inputs.target-number }}
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    name: proof
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Run proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/agent-proof.mjs --target-kind "${{ inputs.target-kind }}" --target-number "${{ inputs.target-number }}" --run --json

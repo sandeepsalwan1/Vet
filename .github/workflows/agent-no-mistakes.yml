@@ -1,0 +1,63 @@
+name: Agent no-mistakes
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        required: true
+        type: number
+      intent:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        required: true
+        type: number
+      intent:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  statuses: write
+  checks: read
+
+concurrency:
+  group: agent-no-mistakes-${{ inputs.pr-number }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: no-mistakes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install no-mistakes if missing
+        env:
+          NO_MISTAKES_TELEMETRY: "0"
+        run: |
+          if ! command -v no-mistakes >/dev/null 2>&1; then
+            curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/v1.34.0/docs/install.sh | sh
+            echo "$HOME/.no-mistakes/bin" >> "$GITHUB_PATH"
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          fi
+      - name: Refresh no-mistakes repo gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NO_MISTAKES_TELEMETRY: "0"
+        run: no-mistakes init
+      - name: Run no-mistakes gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NO_MISTAKES_TELEMETRY: "0"
+        run: node scripts/agent-no-mistakes-gate.mjs --pr-number "${{ inputs.pr-number }}" --intent "${{ inputs.intent }}" --json
