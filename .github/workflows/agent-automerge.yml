@@ -45,4 +45,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pr-number || github.event.workflow_run.pull_requests[0].number }}
-        run: node scripts/agent-automerge.mjs --pr-number "$PR_NUMBER" --json
+        run: |
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No pull request associated with this workflow run; skipping automerge."
+            exit 0
+          fi
+          node scripts/agent-automerge.mjs --pr-number "$PR_NUMBER" --json
