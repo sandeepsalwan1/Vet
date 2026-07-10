@@ -31,11 +31,41 @@ function targetDetails(config, kind, number) {
       title: pull.title,
       body: `${pull.body ?? ""}\n${issue.body ?? ""}`,
       labels: issueLabels(issue),
-      sha: pull.head.sha
+      sha: pull.head.sha,
+      pull
     };
   }
   const issue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${number}`);
   return { title: issue.title, body: issue.body ?? "", labels: issueLabels(issue), sha: null };
+}
+
+function proofEnvironment() {
+  const env = { ...process.env };
+  for (const name of Object.keys(env)) {
+    if (
+      name === "GH_TOKEN" ||
+      name === "GITHUB_TOKEN" ||
+      name === "AGENT_PAT" ||
+      name === "OPENAI_API_KEY" ||
+      name === "CODEX_API_KEY" ||
+      name.startsWith("GITHUB_")
+    ) {
+      delete env[name];
+    }
+  }
+  return env;
+}
+
+function checkoutPullHead(pull) {
+  if (pull.head.repo.full_name !== pull.base.repo.full_name) {
+    throw new AgentError("refusing proof run for cross-repository PR", 1, {
+      head: pull.head.repo.full_name,
+      base: pull.base.repo.full_name
+    });
+  }
+  runCommand("gh", ["auth", "setup-git", "--hostname", "github.com"]);
+  runCommand("git", ["fetch", "origin", pull.head.ref]);
+  runCommand("git", ["switch", "-C", pull.head.ref, "FETCH_HEAD"]);
 }
 
 function requestedProof(config, details) {
@@ -88,6 +118,7 @@ async function collectUiProof() {
   const artifactPath = join(outputDir, "proof-ui.png");
   const logPath = join(outputDir, "proof-next.log");
   const commands = [];
+  const env = proofEnvironment();
   mkdirSync(outputDir, { recursive: true });
 
   for (const args of [
@@ -96,7 +127,7 @@ async function collectUiProof() {
   ]) {
     const [command, commandArgs] = args;
     commands.push([command, ...commandArgs].join(" "));
-    const result = runCommand(command, commandArgs, { check: false });
+    const result = runCommand(command, commandArgs, { check: false, env });
     if (result.status !== 0) {
       return { ok: false, artifactPath, commands, error: `${commands.at(-1)} failed` };
     }
@@ -104,7 +135,7 @@ async function collectUiProof() {
 
   const server = spawn("npm", ["--workspace", "@central-vet/internal", "run", "start", "--", "--port", "3000", "--hostname", "127.0.0.1"], {
     cwd: repoRoot(),
-    env: process.env,
+    env,
     stdio: ["ignore", "pipe", "pipe"]
   });
   let serverLog = "";
@@ -130,7 +161,7 @@ async function collectUiProof() {
       artifactPath
     ];
     commands.push(["npx", ...screenshotArgs].join(" "));
-    const screenshot = runCommand("npx", screenshotArgs, { check: false });
+    const screenshot = runCommand("npx", screenshotArgs, { check: false, env });
     if (screenshot.status !== 0 || !existsSync(artifactPath)) {
       return { ok: false, artifactPath, commands, error: "Playwright screenshot failed" };
     }
@@ -170,7 +201,17 @@ async function main() {
     blocker: ""
   };
 
-  if (run && !dryRun && proofKind === "UI" && (!artifactPath || !artifactProvider || !leaseId)) {
+  if (run && !dryRun && kind === "pr") {
+    checkoutPullHead(details.pull);
+    const install = runShell(config.commands.install, { check: false, env: proofEnvironment() });
+    result.commands.push(config.commands.install);
+    if (install.status !== 0) {
+      result.status = "failed";
+      result.summary = `${config.commands.install} failed on PR head`;
+    }
+  }
+
+  if (result.status !== "failed" && run && !dryRun && proofKind === "UI" && (!artifactPath || !artifactProvider || !leaseId)) {
     const collected = await collectUiProof();
     result.commands.push(...collected.commands);
     if (collected.ok) {
@@ -188,7 +229,7 @@ async function main() {
     }
   }
 
-  if ((proofKind === "UI" || proofKind === "GIF") && result.status !== "passed" && (!artifactPath || !artifactProvider || !leaseId)) {
+  if (result.status !== "failed" && (proofKind === "UI" || proofKind === "GIF") && result.status !== "passed" && (!artifactPath || !artifactProvider || !leaseId)) {
     blocker =
       proofKind === "GIF"
         ? "GIF proof requires a collected Crabbox desktop artifact, provider, and lease id"
@@ -198,7 +239,7 @@ async function main() {
     result.blocker = blocker;
   }
 
-  if (!blocker && (proofKind === "UI" || proofKind === "GIF")) {
+  if (result.status !== "failed" && !blocker && (proofKind === "UI" || proofKind === "GIF")) {
     result.status = "passed";
     result.summary = proofKind === "GIF" ? "GIF/video proof artifact was recorded." : "UI screenshot proof artifact was recorded.";
     result.artifactPaths = artifactPath ? [artifactPath] : [];
@@ -206,9 +247,9 @@ async function main() {
     result.leaseId = leaseId;
   }
 
-  if (run && !dryRun && proofKind === "CI" && !blocker) {
+  if (result.status !== "failed" && run && !dryRun && proofKind === "CI" && !blocker) {
     for (const command of commands) {
-      const output = runShell(command, { check: false });
+      const output = runShell(command, { check: false, env: proofEnvironment() });
       result.commands.push(command);
       if (output.status !== 0) {
         result.status = "failed";
