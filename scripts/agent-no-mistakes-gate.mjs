@@ -16,8 +16,12 @@ import {
   upsertManagedComment
 } from "./agent-lib.mjs";
 
-function summarize(output) {
+function summarize(output, exitStatus) {
   const lower = output.toLowerCase();
+  if (exitStatus !== 0) {
+    if (lower.includes("ask-user") || lower.includes("gate")) return "blocked";
+    return "failed";
+  }
   if (lower.includes("ask-user")) return "blocked";
   if (lower.includes("failed") || lower.includes("cancelled")) return "failed";
   if (lower.includes("checks-passed") || lower.includes("passed")) return "passed";
@@ -81,7 +85,7 @@ async function main() {
     env: noMistakesEnvironment()
   });
   const output = `${run.stdout}\n${run.stderr}`.trim();
-  const status = summarize(output);
+  const status = summarize(output, run.status);
   const state = status === "passed" ? "success" : "failure";
   const body = `## no-mistakes Gate
 

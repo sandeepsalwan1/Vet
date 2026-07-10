@@ -75,6 +75,10 @@ function requestedProof(config, details) {
   return "CI";
 }
 
+function hasVerifiedArtifact(artifactPath, artifactProvider, leaseId) {
+  return Boolean(artifactPath && artifactProvider && leaseId && existsSync(artifactPath));
+}
+
 function proofBody(result) {
   return `## Agent Proof
 
@@ -229,7 +233,7 @@ async function main() {
     }
   }
 
-  if (result.status !== "failed" && (proofKind === "UI" || proofKind === "GIF") && result.status !== "passed" && (!artifactPath || !artifactProvider || !leaseId)) {
+  if (result.status !== "failed" && (proofKind === "UI" || proofKind === "GIF") && result.status !== "passed" && !hasVerifiedArtifact(artifactPath, artifactProvider, leaseId)) {
     blocker =
       proofKind === "GIF"
         ? "GIF proof requires a collected Crabbox desktop artifact, provider, and lease id"
@@ -239,7 +243,7 @@ async function main() {
     result.blocker = blocker;
   }
 
-  if (result.status !== "failed" && !blocker && (proofKind === "UI" || proofKind === "GIF")) {
+  if (result.status !== "failed" && !blocker && (proofKind === "UI" || proofKind === "GIF") && hasVerifiedArtifact(artifactPath, artifactProvider, leaseId)) {
     result.status = "passed";
     result.summary = proofKind === "GIF" ? "GIF/video proof artifact was recorded." : "UI screenshot proof artifact was recorded.";
     result.artifactPaths = artifactPath ? [artifactPath] : [];
