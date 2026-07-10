@@ -59,6 +59,11 @@ async function main() {
   const checks = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/commits/${pull.head.sha}/check-runs`);
   const decision = evaluate(config, pull, issue, combined, checks);
 
+  if (!decision.labels.includes(config.labels.automerge)) {
+    finish({ ok: true, message: `automerge not requested for PR #${prNumber}`, decision }, Boolean(args.json));
+    return;
+  }
+
   if (!decision.allowed) {
     const comment = upsertManagedComment({
       config,
@@ -69,7 +74,7 @@ async function main() {
 ${decision.blockers.map((item) => `- ${item}`).join("\n")}`,
       dryRun
     });
-    finish({ ok: false, message: `automerge blocked for PR #${prNumber}`, decision, comment }, Boolean(args.json), 1);
+    finish({ ok: true, message: `automerge blocked for PR #${prNumber}`, decision, comment }, Boolean(args.json));
     return;
   }
 
