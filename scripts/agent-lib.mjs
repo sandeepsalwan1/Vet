@@ -135,7 +135,11 @@ export function ghJson(args, options = {}) {
 }
 
 export function ghApiJson(path, options = {}) {
-  return ghJson(["api", path, ...(options.paginate ? ["--paginate"] : [])], options);
+  const result = ghJson(["api", path, ...(options.paginate ? ["--paginate", "--slurp"] : [])], options);
+  if (options.paginate && Array.isArray(result) && result.every((page) => Array.isArray(page))) {
+    return result.flat();
+  }
+  return result;
 }
 
 export function withTempJson(data, callback) {

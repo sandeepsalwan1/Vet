@@ -89,9 +89,11 @@ function applyDecision(config, issueNumber, decision, dryRun) {
     decision.automationDecision === "reject" ||
     decision.risk === "high" ||
     decision.priority === "high";
+  const requiresVisualProof = decision.proofNeeded === "UI" || decision.proofNeeded === "GIF";
 
   if (decision.priority === "high") add.push(config.labels.priorityHigh);
   if (decision.priority === "low") add.push(config.labels.priorityLow);
+  if (requiresVisualProof) add.push(config.labels.proof);
 
   if (blocked) {
     add.push(config.labels.blocked);
@@ -104,6 +106,7 @@ function applyDecision(config, issueNumber, decision, dryRun) {
 
   if (decision.priority !== "high") remove.push(config.labels.priorityHigh);
   if (decision.priority !== "low") remove.push(config.labels.priorityLow);
+  if (!requiresVisualProof) remove.push(config.labels.proof);
 
   const comment = upsertManagedComment({
     config,

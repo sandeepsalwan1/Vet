@@ -107,6 +107,35 @@ function checkEnvironment() {
   return env;
 }
 
+function privilegedPatchPaths(paths) {
+  return paths.filter(
+    (path) =>
+      path.startsWith(".agent/") ||
+      path.startsWith(".github/") ||
+      path.startsWith("scripts/agent-") ||
+      path === "AGENTS.md" ||
+      path === "package.json" ||
+      path === "package-lock.json" ||
+      path === ".npmrc"
+  );
+}
+
+function blockPrivilegedPatch(config, issueNumber, paths) {
+  addLabels(config, issueNumber, [config.labels.blocked], false);
+  removeLabels(config, issueNumber, [config.labels.implement, config.labels.automerge], false);
+  upsertManagedComment({
+    config,
+    number: issueNumber,
+    marker: config.comments.gate,
+    body: `Agent implementation blocked because the generated patch touches privileged automation or runtime-control paths.
+
+Structured blocker:
+${markdownJsonBlock({ blockedPaths: paths, requiredAction: "human-review" })}`,
+    dryRun: false
+  });
+  throw new AgentError("agent patch touches privileged paths", 1, { paths });
+}
+
 function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputPath, dryRun) {
   if (!existsSync(patchPath)) throw new AgentError(`patch not found: ${patchPath}`, 2);
   const { issue } = fetchIssue(config, issueNumber);
@@ -129,9 +158,11 @@ function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputPath, dr
   runCommand("git", ["switch", "-c", branch]);
   runCommand("git", ["apply", "--index", patchPath]);
   const env = checkEnvironment();
-  for (const command of config.commands.defaultImplementChecks) runShell(command, { env });
   const staged = gitOutput(["diff", "--cached", "--name-only"]);
   if (!staged) throw new AgentError("patch applied no staged changes", 1);
+  const privilegedPaths = privilegedPatchPaths(staged.split("\n").filter(Boolean));
+  if (privilegedPaths.length) blockPrivilegedPatch(config, issueNumber, privilegedPaths);
+  for (const command of config.commands.defaultImplementChecks) runShell(command, { env });
   runCommand("git", ["config", "user.name", "github-actions[bot]"]);
   runCommand("git", ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
   runCommand("git", ["commit", "-m", `chore: implement agent issue #${issueNumber}`]);
