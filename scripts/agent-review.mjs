@@ -120,12 +120,21 @@ ${markdownJsonBlock(review)}`;
 function applyReview(config, prNumber, reviewPath, patchPath, dryRun) {
   const { pull } = fetchPull(config, prNumber);
   const review = readAgentJson(reviewPath);
-  const hasPatch = patchPath && existsSync(patchPath) && readText(patchPath).trim();
+  let effectivePatchPath = patchPath;
+  let patchText = patchPath && existsSync(patchPath) ? readText(patchPath) : "";
+  if (!patchText.trim() && typeof review.unifiedDiff === "string" && review.unifiedDiff.trim()) {
+    const outputDir = join(repoRoot(), ".agent-output");
+    mkdirSync(outputDir, { recursive: true });
+    effectivePatchPath = join(outputDir, "review-inline.patch");
+    patchText = review.unifiedDiff;
+    writeFileSync(effectivePatchPath, patchText);
+  }
+  const hasPatch = patchText.trim();
   let statusSha = pull.head.sha;
 
   if (!dryRun && hasPatch) {
     checkoutPullHead(pull);
-    runCommand("git", ["apply", "--index", patchPath]);
+    runCommand("git", ["apply", "--index", effectivePatchPath]);
     const staged = runCommand("git", ["diff", "--cached", "--name-only"]).stdout.trim();
     if (staged) {
       runCommand("git", ["config", "user.name", "github-actions[bot]"]);

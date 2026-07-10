@@ -9,7 +9,8 @@
     "remainingRisk",
     "proofNeeded",
     "mergeRecommendation",
-    "humanQuestion"
+    "humanQuestion",
+    "unifiedDiff"
   ],
   "properties": {
     "bugsFound": {
@@ -29,6 +30,10 @@
     "mergeRecommendation": {
       "enum": ["ready", "ready-human-review", "blocked"]
     },
-    "humanQuestion": { "type": "string" }
+    "humanQuestion": { "type": "string" },
+    "unifiedDiff": {
+      "type": "string",
+      "description": "Unified git diff for any safe fixes, or an empty string when no fixes are made."
+    }
   }
 }

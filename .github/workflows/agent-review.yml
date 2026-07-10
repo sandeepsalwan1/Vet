@@ -40,19 +40,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/agent-review.mjs --pr-number "${{ inputs.pr-number }}" --write-prompt .agent-output/review-prompt.md --json
+      - run: cp .agent/schemas/review.schema.json .agent-output/review.schema.json
+      - uses: actions/checkout@v5
+        with:
+          ref: refs/pull/${{ inputs.pr-number }}/head
+          fetch-depth: 0
+          persist-credentials: false
+          clean: false
       - name: Run Codex reviewer
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           prompt-file: .agent-output/review-prompt.md
-          sandbox: workspace-write
+          sandbox: read-only
           effort: medium
           allow-users: ${{ github.repository_owner }}
           allow-bots: github-actions[bot]
-          codex-args: '["--output-schema",".agent/schemas/review.schema.json"]'
+          codex-args: '["--output-schema",".agent-output/review.schema.json"]'
           output-file: .agent-output/review.json
-      - name: Create review patch
-        run: node scripts/agent-review.mjs --pr-number "${{ inputs.pr-number }}" --create-patch .agent-output/review.patch --json
       - uses: actions/upload-artifact@v4
         with:
           name: agent-review-${{ inputs.pr-number }}
@@ -85,7 +90,7 @@ jobs:
       - name: Apply review result
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/agent-review.mjs --pr-number "${{ inputs.pr-number }}" --from-file .agent-output/review.json --apply-patch .agent-output/review.patch --json
+        run: node scripts/agent-review.mjs --pr-number "${{ inputs.pr-number }}" --from-file .agent-output/review.json --json
 
   no-mistakes:
     needs: apply-review

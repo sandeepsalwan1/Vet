@@ -9,6 +9,18 @@ on:
       target-number:
         required: true
         type: number
+      artifact-path:
+        required: false
+        type: string
+        default: ""
+      provider:
+        required: false
+        type: string
+        default: ""
+      lease-id:
+        required: false
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       target-kind:
@@ -20,6 +32,15 @@ on:
       target-number:
         required: true
         type: number
+      artifact-path:
+        required: false
+        type: string
+      provider:
+        required: false
+        type: string
+      lease-id:
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -45,4 +66,10 @@ jobs:
       - name: Run proof
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/agent-proof.mjs --target-kind "${{ inputs.target-kind }}" --target-number "${{ inputs.target-number }}" --run --json
+        run: node scripts/agent-proof.mjs --target-kind "${{ inputs.target-kind }}" --target-number "${{ inputs.target-number }}" --artifact-path "${{ inputs.artifact-path }}" --provider "${{ inputs.provider }}" --lease-id "${{ inputs.lease-id }}" --run --json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-proof-${{ inputs.target-kind }}-${{ inputs.target-number }}
+          path: .agent-output/*
+          if-no-files-found: ignore

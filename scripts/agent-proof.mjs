@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   AgentError,
   addLabels,
@@ -10,10 +14,14 @@ import {
   markdownJsonBlock,
   parseArgs,
   removeLabels,
+  repoRoot,
+  runCommand,
   runShell,
   setCommitStatus,
   upsertManagedComment
 } from "./agent-lib.mjs";
+
+const proofBaseUrl = "http://127.0.0.1:3000";
 
 function targetDetails(config, kind, number) {
   if (kind === "pr") {
@@ -59,6 +67,82 @@ Structured proof:
 ${markdownJsonBlock(result)}`;
 }
 
+async function waitForUrl(url, timeoutMs = 60000) {
+  const started = Date.now();
+  let lastError = "";
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const response = await fetch(url, { headers: { "user-agent": "vet-agent-proof" } });
+      if (response.ok) return;
+      lastError = `${response.status} ${response.statusText}`;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await delay(1000);
+  }
+  throw new AgentError(`server did not become ready: ${lastError}`, 1);
+}
+
+async function collectUiProof() {
+  const outputDir = join(repoRoot(), ".agent-output");
+  const artifactPath = join(outputDir, "proof-ui.png");
+  const logPath = join(outputDir, "proof-next.log");
+  const commands = [];
+  mkdirSync(outputDir, { recursive: true });
+
+  for (const args of [
+    ["npm", ["run", "build"]],
+    ["npx", ["-y", "playwright@latest", "install", "chromium"]]
+  ]) {
+    const [command, commandArgs] = args;
+    commands.push([command, ...commandArgs].join(" "));
+    const result = runCommand(command, commandArgs, { check: false });
+    if (result.status !== 0) {
+      return { ok: false, artifactPath, commands, error: `${commands.at(-1)} failed` };
+    }
+  }
+
+  const server = spawn("npm", ["--workspace", "@central-vet/internal", "run", "start", "--", "--port", "3000", "--hostname", "127.0.0.1"], {
+    cwd: repoRoot(),
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let serverLog = "";
+  server.stdout.on("data", (chunk) => {
+    serverLog += chunk.toString();
+  });
+  server.stderr.on("data", (chunk) => {
+    serverLog += chunk.toString();
+  });
+  commands.push("npm --workspace @central-vet/internal run start -- --port 3000 --hostname 127.0.0.1");
+
+  try {
+    await waitForUrl(`${proofBaseUrl}/request`);
+    const screenshotArgs = [
+      "-y",
+      "playwright@latest",
+      "screenshot",
+      "--browser",
+      "chromium",
+      "--timeout",
+      "30000",
+      `${proofBaseUrl}/request`,
+      artifactPath
+    ];
+    commands.push(["npx", ...screenshotArgs].join(" "));
+    const screenshot = runCommand("npx", screenshotArgs, { check: false });
+    if (screenshot.status !== 0 || !existsSync(artifactPath)) {
+      return { ok: false, artifactPath, commands, error: "Playwright screenshot failed" };
+    }
+    return { ok: true, artifactPath, commands, error: "" };
+  } catch (error) {
+    return { ok: false, artifactPath, commands, error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    server.kill("SIGTERM");
+    writeFileSync(logPath, serverLog);
+  }
+}
+
 async function main() {
   const args = parseArgs();
   const config = loadConfig();
@@ -70,32 +154,59 @@ async function main() {
   const run = Boolean(args.run);
   const details = targetDetails(config, kind, number);
   const proofKind = args["proof-kind"] ?? requestedProof(config, details);
-  const artifactPath = args["artifact-path"] ?? "";
-  const artifactProvider = args.provider ?? "";
-  const leaseId = args["lease-id"] ?? "";
-  const missingVisualArtifact =
-    (proofKind === "UI" || proofKind === "GIF") && (!artifactPath || !artifactProvider || !leaseId)
-      ? `${proofKind} proof requires a collected Crabbox artifact, provider, and lease id`
-      : "";
-  const blocker = missingVisualArtifact;
+  let artifactPath = args["artifact-path"] ?? "";
+  let artifactProvider = args.provider ?? "";
+  let leaseId = args["lease-id"] ?? "";
+  let blocker = "";
   const commands = proofKind === "CI" ? config.commands.proof : [];
   const result = {
     proofKind,
-    status: blocker ? "blocked" : "skipped",
+    status: "skipped",
     commands: [],
     artifactPaths: artifactPath ? [artifactPath] : [],
     provider: artifactProvider,
     leaseId,
-    summary: blocker ? "Remote visual proof did not produce a complete artifact record." : "Proof requested but not run.",
-    blocker
+    summary: "Proof requested but not run.",
+    blocker: ""
   };
+
+  if (run && !dryRun && proofKind === "UI" && (!artifactPath || !artifactProvider || !leaseId)) {
+    const collected = await collectUiProof();
+    result.commands.push(...collected.commands);
+    if (collected.ok) {
+      artifactPath = collected.artifactPath;
+      artifactProvider = "github-actions";
+      leaseId = process.env.GITHUB_RUN_ID || "local";
+      result.artifactPaths = [artifactPath];
+      result.provider = artifactProvider;
+      result.leaseId = leaseId;
+      result.status = "passed";
+      result.summary = "UI screenshot proof artifact was recorded.";
+    } else {
+      result.status = "failed";
+      result.summary = collected.error || "UI proof capture failed.";
+    }
+  }
+
+  if ((proofKind === "UI" || proofKind === "GIF") && result.status !== "passed" && (!artifactPath || !artifactProvider || !leaseId)) {
+    blocker =
+      proofKind === "GIF"
+        ? "GIF proof requires a collected Crabbox desktop artifact, provider, and lease id"
+        : "UI proof requires a screenshot artifact, provider, and lease id";
+    result.status = "blocked";
+    result.summary = "Visual proof did not produce a complete artifact record.";
+    result.blocker = blocker;
+  }
 
   if (!blocker && (proofKind === "UI" || proofKind === "GIF")) {
     result.status = "passed";
-    result.summary = "Visual proof artifact was recorded.";
+    result.summary = proofKind === "GIF" ? "GIF/video proof artifact was recorded." : "UI screenshot proof artifact was recorded.";
+    result.artifactPaths = artifactPath ? [artifactPath] : [];
+    result.provider = artifactProvider;
+    result.leaseId = leaseId;
   }
 
-  if (run && !blocker) {
+  if (run && !dryRun && proofKind === "CI" && !blocker) {
     for (const command of commands) {
       const output = runShell(command, { check: false });
       result.commands.push(command);
