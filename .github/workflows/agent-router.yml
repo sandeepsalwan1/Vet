@@ -47,6 +47,7 @@ jobs:
     needs: route
     if: needs.route.outputs.lane == 'triage'
     permissions:
+      actions: write
       contents: read
       issues: write
     uses: ./.github/workflows/agent-triage.yml
@@ -58,6 +59,7 @@ jobs:
     needs: route
     if: needs.route.outputs.lane == 'implement'
     permissions:
+      actions: write
       contents: write
       issues: write
       pull-requests: write
@@ -70,6 +72,7 @@ jobs:
     needs: route
     if: needs.route.outputs.lane == 'review'
     permissions:
+      actions: write
       contents: write
       issues: write
       pull-requests: write

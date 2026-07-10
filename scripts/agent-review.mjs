@@ -92,6 +92,19 @@ function checkoutPullHead(pull) {
   runCommand("git", ["switch", "-C", pull.head.ref, "FETCH_HEAD"]);
 }
 
+function privilegedPatchPaths(paths) {
+  return paths.filter(
+    (path) =>
+      path.startsWith(".agent/") ||
+      path.startsWith(".github/") ||
+      path.startsWith("scripts/agent-") ||
+      path === "AGENTS.md" ||
+      path === "package.json" ||
+      path === "package-lock.json" ||
+      path === ".npmrc"
+  );
+}
+
 function reviewBody(review) {
   return `## Agent Review
 
@@ -131,18 +144,27 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun) {
   }
   const hasPatch = patchText.trim();
   let statusSha = pull.head.sha;
+  let privilegedPaths = [];
 
   if (!dryRun && hasPatch) {
     checkoutPullHead(pull);
     runCommand("git", ["apply", "--index", effectivePatchPath]);
     const staged = runCommand("git", ["diff", "--cached", "--name-only"]).stdout.trim();
     if (staged) {
-      runCommand("git", ["config", "user.name", "github-actions[bot]"]);
-      runCommand("git", ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
-      runCommand("git", ["commit", "-m", `fix: address agent review for #${prNumber}`]);
-      statusSha = gitOutput(["rev-parse", "HEAD"]);
-      runCommand("gh", ["auth", "setup-git", "--hostname", "github.com"]);
-      runCommand("git", ["push", "origin", `HEAD:${pull.head.ref}`]);
+      privilegedPaths = privilegedPatchPaths(staged.split("\n").filter(Boolean));
+      if (privilegedPaths.length) {
+        review.bugsFound.push(`Review patch touched privileged paths: ${privilegedPaths.join(", ")}`);
+        review.remainingRisk = "high";
+        review.mergeRecommendation = "ready-human-review";
+        review.humanQuestion = review.humanQuestion || "Review patch touches privileged automation/runtime paths. Approve or rewrite manually?";
+      } else {
+        runCommand("git", ["config", "user.name", "github-actions[bot]"]);
+        runCommand("git", ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
+        runCommand("git", ["commit", "-m", `fix: address agent review for #${prNumber}`]);
+        statusSha = gitOutput(["rev-parse", "HEAD"]);
+        runCommand("gh", ["auth", "setup-git", "--hostname", "github.com"]);
+        runCommand("git", ["push", "origin", `HEAD:${pull.head.ref}`]);
+      }
     }
   }
 
@@ -190,7 +212,7 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun) {
     description,
     dryRun
   });
-  return { review, comment, labels, dispatch, status, patchApplied: Boolean(hasPatch) };
+  return { review, comment, labels, dispatch, status, patchApplied: Boolean(hasPatch && !privilegedPaths.length), privilegedPaths };
 }
 
 async function main() {
