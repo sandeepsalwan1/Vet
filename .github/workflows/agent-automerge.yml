@@ -35,7 +35,7 @@ jobs:
   automerge:
     name: automerge
     runs-on: ubuntu-latest
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.pull_requests[0].number != ''
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.pull_requests[0].number > 0
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
