@@ -14,7 +14,7 @@
     "@central-vet/client-request": "*",
     "@central-vet/db": "*",
     "@central-vet/notifications": "*",
-    "lucide-react": "^1.23.0",
+    "lucide-react": "^1.24.0",
     "next": "^16.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

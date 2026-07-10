@@ -31,7 +31,7 @@
   },
   "dependencies": {
     "@next/env": "^16.0.0",
-    "e2b": "^2.27.0",
+    "e2b": "^2.32.0",
     "postgres": "^3.4.7"
   },
   "devDependencies": {
