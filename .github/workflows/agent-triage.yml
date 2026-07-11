@@ -43,7 +43,7 @@ jobs:
           sandbox: read-only
           effort: low
           allow-users: ${{ github.repository_owner }}
-          allow-bots: github-actions[bot]
+          allow-bots: true
           codex-args: '["--output-schema",".agent/schemas/triage.schema.json"]'
           output-file: .agent-output/triage.json
       - name: Apply triage labels

@@ -55,7 +55,7 @@ jobs:
           sandbox: read-only
           effort: medium
           allow-users: ${{ github.repository_owner }}
-          allow-bots: github-actions[bot]
+          allow-bots: true
           codex-args: '["--output-schema",".agent-output/review.schema.json"]'
           output-file: .agent-output/review.json
       - uses: actions/upload-artifact@v4

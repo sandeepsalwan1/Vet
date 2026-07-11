@@ -49,7 +49,7 @@ jobs:
           sandbox: workspace-write
           effort: medium
           allow-users: ${{ github.repository_owner }}
-          allow-bots: github-actions[bot]
+          allow-bots: true
           output-file: .agent-output/implementation.md
       - name: Create patch artifact
         run: node scripts/agent-implement.mjs --issue-number "${{ inputs.issue-number }}" --create-patch .agent-output/codex.patch --json

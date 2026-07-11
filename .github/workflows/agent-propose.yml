@@ -29,7 +29,7 @@ jobs:
           sandbox: read-only
           effort: low
           allow-users: ${{ github.repository_owner }}
-          allow-bots: github-actions[bot]
+          allow-bots: true
           codex-args: '["--output-schema",".agent/schemas/proposals.schema.json"]'
           output-file: .agent-output/proposals.json
       - name: Create proposed issues
