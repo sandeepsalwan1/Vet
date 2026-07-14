@@ -149,12 +149,17 @@ jobs:
           docker pull "$DOCKER_IMAGE"
           docker run --rm \
             --network none \
+            --user "$(id -u):$(id -g)" \
             --cap-drop ALL \
             --security-opt no-new-privileges \
+            --read-only \
             --mount "type=bind,src=$PWD,dst=/source,readonly" \
             --mount "type=bind,src=$PWD/node_modules,dst=/workspace/node_modules" \
-            --mount type=volume,dst=/workspace \
+            --mount type=tmpfs,dst=/workspace,tmpfs-mode=1777 \
+            --mount type=tmpfs,dst=/tmp,tmpfs-mode=1777 \
             --workdir /workspace \
+            --env HOME=/tmp/home \
+            --env npm_config_cache=/tmp/npm-cache \
             --env npm_config_nodedir=/usr/local \
             "$DOCKER_IMAGE" \
             sh -lc 'tar -C /source --exclude=./node_modules --exclude=./.git -cf - . | tar --no-same-owner -xf - -C /workspace && npm rebuild --offline --no-audit --no-fund'
