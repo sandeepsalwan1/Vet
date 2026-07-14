@@ -22,7 +22,7 @@ import {
   upsertManagedComment,
 } from "./agent-lib.mjs";
 
-const ARTIFACT_VERSION = 2;
+const ARTIFACT_VERSION = 3;
 const NO_MISTAKES_COMMENT_MARKER = "<!-- agent-gate-no-mistakes:v1 -->";
 const STATUS_CONTEXT = "no-mistakes";
 const PASSING_OUTCOMES = new Set(["checks-passed", "passed"]);
@@ -47,6 +47,22 @@ const PUBLIC_FINDING_SUMMARIES = new Map([
     "The isolated evidence agent could not demonstrate the requested behavior.",
   ],
 ]);
+const PUBLIC_FAILURE_STAGES = new Set([
+  "intent",
+  "rebase",
+  "review",
+  "test",
+  "document",
+  "lint",
+  "push",
+  "pr",
+  "ci",
+]);
+const GATE_EVIDENCE_BOUNDARY = `Evidence boundary:
+- Configured deterministic scenario, API, or CLI checks count as direct product evidence when their output and assertions demonstrate the requested behavior.
+- Agent Proof owns browser, visual, and live-provider evidence. Require that evidence only when the trusted issue or managed triage explicitly requests it.
+- Do not block solely because UI or live-provider evidence is absent when the trusted request calls for CI or non-visual proof and a configured check directly exercises the behavior.
+- Still block when the requested behavior is not demonstrated by either direct checks or an applicable Agent Proof result.`;
 
 export function noMistakesCommentMarker(config) {
   return `${config.comments.gate}\n${NO_MISTAKES_COMMENT_MARKER}`;
@@ -90,6 +106,8 @@ export function composeEffectiveIntent({
   }
   const effective = `Gate policy:
 ${policy}
+
+${GATE_EVIDENCE_BOUNDARY}
 
 Authoritative source issue #${issueNumber}
 Title: ${issueTitle}
@@ -157,6 +175,28 @@ export function parseGateFindings(output) {
   return findings;
 }
 
+function parseFailureStage(output) {
+  const lines = String(output ?? "").split(/\r?\n/);
+  const headerIndex = lines.findIndex((line) =>
+    /^\s{2}steps\[\d+\]\{[^}]+\}:\s*$/.test(line),
+  );
+  if (headerIndex === -1) return "";
+  const columnsMatch = lines[headerIndex].match(/\{([^}]+)\}/);
+  const columns =
+    columnsMatch?.[1].split(",").map((column) => column.trim()) ?? [];
+  for (const line of lines.slice(headerIndex + 1)) {
+    if (!/^\s{4}\S/.test(line)) break;
+    const values = parseCsvRow(line.slice(4));
+    const row = Object.fromEntries(
+      columns.map((column, index) => [column, values[index] ?? ""]),
+    );
+    if (row.status === "failed" && PUBLIC_FAILURE_STAGES.has(row.step)) {
+      return row.step;
+    }
+  }
+  return "";
+}
+
 function parseRunFields(output) {
   const lines = String(output ?? "").split(/\r?\n/);
   const runIndex = lines.findIndex((line) => line === "run:");
@@ -204,13 +244,14 @@ export function parseAxiResult(output, exitStatus) {
   const run = parseRunFields(text);
   const findings = parseGateFindings(text);
   const step = parseGateStep(text);
+  const failureStage = parseFailureStage(text);
 
   if (outcomes.length === 1) {
     const outcome = outcomes[0];
     if (exitStatus === 0 && PASSING_OUTCOMES.has(outcome)) {
-      return { status: "passed", outcome, run, findings };
+      return { status: "passed", outcome, run, findings, failureStage };
     }
-    return { status: "failed", outcome, run, findings };
+    return { status: "failed", outcome, run, findings, failureStage };
   }
   if (/^gate:\s*$/m.test(text)) {
     return {
@@ -221,9 +262,16 @@ export function parseAxiResult(output, exitStatus) {
       run,
       findings,
       step,
+      failureStage,
     };
   }
-  return { status: "failed", outcome: "invalid-output", run, findings };
+  return {
+    status: "failed",
+    outcome: "invalid-output",
+    run,
+    findings,
+    failureStage,
+  };
 }
 
 export function isRetryableReviewEnvironmentBlock(gate) {
@@ -308,6 +356,9 @@ export function sanitizedGateArtifact(
     expectedHead,
     validatedHead: headMatches ? expectedHead : "",
     runId: safePublicText(normalized?.run?.id, 80),
+    failureStage: PUBLIC_FAILURE_STAGES.has(normalized?.failureStage)
+      ? normalized.failureStage
+      : "",
     findings: (normalized?.findings ?? []).slice(0, 100).map(safeFinding),
   };
 }
@@ -328,6 +379,9 @@ export function normalizeGateArtifact(value, expectedHead) {
   if (!ALLOWED_OUTCOMES.has(value.outcome)) {
     throw new AgentError("sanitized gate artifact outcome is invalid", 1);
   }
+  if (value.failureStage && !PUBLIC_FAILURE_STAGES.has(value.failureStage)) {
+    throw new AgentError("sanitized gate artifact failure stage is invalid", 1);
+  }
   if (
     value.status === "passed" &&
     (!PASSING_OUTCOMES.has(value.outcome) ||
@@ -345,6 +399,9 @@ export function normalizeGateArtifact(value, expectedHead) {
     expectedHead,
     validatedHead: value.validatedHead === expectedHead ? expectedHead : "",
     runId: safePublicText(value.runId, 80),
+    failureStage: PUBLIC_FAILURE_STAGES.has(value.failureStage)
+      ? value.failureStage
+      : "",
     findings: value.findings.map(safeFinding),
   };
 }
@@ -452,7 +509,8 @@ ${markdownJsonBlock({
   status: artifact.status,
   outcome: artifact.outcome,
   runId: artifact.runId || "",
-  checksRun: ["no-mistakes axi run --skip push,pr,ci"],
+  failureStage: artifact.failureStage || "",
+  checksRun: ["no-mistakes axi run --skip rebase,push,pr,ci"],
   findings: artifact.findings,
   blocker: artifactBlocker(artifact),
 })}`;
@@ -536,7 +594,14 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
     execute("no-mistakes", ["init"], { cwd: repoDir, env });
     const result = spawn(
       "no-mistakes",
-      ["axi", "run", "--intent", intent, "--skip", "push,pr,ci"],
+      [
+        "axi",
+        "run",
+        "--intent",
+        intent,
+        "--skip",
+        "rebase,push,pr,ci",
+      ],
       {
         cwd: repoDir,
         env,
@@ -597,6 +662,7 @@ function setupFailureArtifact(expectedHead) {
     expectedHead,
     validatedHead: "",
     runId: "",
+    failureStage: "",
     findings: [],
   };
 }

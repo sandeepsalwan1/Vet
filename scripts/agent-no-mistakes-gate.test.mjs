@@ -38,6 +38,8 @@ test("authenticated reviewer is read-only and all source changes fail closed", (
   assert.match(workflow, /codex exec \\\n\s+--sandbox read-only/);
   assert.match(workflow, /NM_TEST_START_DAEMON: "1"/);
   assert.match(workflow, /session_reuse: false/);
+  assert.match(gate, /"--skip",\s+"rebase,push,pr,ci"/);
+  assert.doesNotMatch(workflow, /git config --global user\./);
   assert.match(workflow, /if: \$\{\{ always\(\) \}\}\n\s+continue-on-error: true\n[\s\S]*?run: no-mistakes daemon stop --force/);
   assert.doesNotMatch(workflow, /- workspace-write/);
   assert.doesNotMatch(workflow, /tar -C \/source/);
@@ -131,6 +133,8 @@ test("effective intent includes caller policy, full source issue, and managed tr
   });
 
   assert.match(intent, /Require every automated gate to pass/);
+  assert.match(intent, /deterministic scenario, API, or CLI checks count as direct product evidence/);
+  assert.match(intent, /Agent Proof owns browser, visual, and live-provider evidence/);
   assert.match(intent, /Authoritative source issue #42/);
   assert.match(
     intent,
@@ -409,10 +413,15 @@ test("identified technical failure receives one bounded fresh retry", () => {
   const technicalFailure = `run:
   id: run-technical
   head: abcdef12
+  steps[2]{step,status,findings,duration_ms}:
+    intent,completed,0,0
+    rebase,failed,0,125
 outcome: failed`;
   const parsed = parseAxiResult(technicalFailure, 1);
 
   assert.equal(isRetryableTechnicalFailure(parsed, HEAD), true);
+  assert.equal(parsed.failureStage, "rebase");
+  assert.equal(sanitizedGateArtifact(parsed, HEAD).failureStage, "rebase");
   assert.equal(
     isRetryableTechnicalFailure({ ...parsed, run: {} }, HEAD),
     false,
@@ -450,6 +459,30 @@ outcome: failed`;
   assert.equal(calls, 2);
   assert.equal(result.attempts, 2);
   assert.equal(parseAxiResult(result.stdout, result.status).status, "passed");
+});
+
+test("failure stage diagnostics accept only fixed pipeline stage names", () => {
+  const unknown = parseAxiResult(
+    `run:
+  id: run-unknown
+  head: abcdef12
+  steps[1]{step,status,findings,duration_ms}:
+    private-stage,failed,0,1
+outcome: failed`,
+    1,
+  );
+  const artifact = sanitizedGateArtifact(unknown, HEAD);
+
+  assert.equal(unknown.failureStage, "");
+  assert.equal(artifact.failureStage, "");
+  assert.throws(
+    () =>
+      normalizeGateArtifact(
+        { ...artifact, failureStage: "private-stage" },
+        HEAD,
+      ),
+    /failure stage is invalid/,
+  );
 });
 
 test("only ask-user outcomes change no-mistakes policy labels", () => {
