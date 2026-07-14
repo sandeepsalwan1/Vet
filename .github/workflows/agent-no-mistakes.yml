@@ -175,6 +175,12 @@ jobs:
           tar -xzf "$RUNNER_TEMP/no-mistakes.tar.gz" -C "$RUNNER_TEMP/no-mistakes-bin"
           chmod 755 "$RUNNER_TEMP/no-mistakes-bin/no-mistakes"
           echo "$RUNNER_TEMP/no-mistakes-bin" >> "$GITHUB_PATH"
+          codex exec \
+            --sandbox read-only \
+            -c 'approval_policy="never"' \
+            -c 'shell_environment_policy.inherit="core"' \
+            -c 'shell_environment_policy.ignore_default_excludes=false' \
+            --help >/dev/null
       - name: Configure isolated gate home
         env:
           NM_HOME: ${{ runner.temp }}/no-mistakes
@@ -192,8 +198,8 @@ jobs:
             codex:
               - --sandbox
               - read-only
-              - --ask-for-approval
-              - never
+              - -c
+              - 'approval_policy="never"'
               - -c
               - 'shell_environment_policy.inherit="core"'
               - -c
@@ -209,6 +215,7 @@ jobs:
           HEAD_REF: ${{ needs.prepare.outputs.head_ref }}
           HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
           NM_HOME: ${{ runner.temp }}/no-mistakes
+          NM_TEST_START_DAEMON: "1"
           NO_MISTAKES_TELEMETRY: "0"
           VET_GATE_DEPS: ${{ github.workspace }}/candidate
         run: >-
@@ -232,6 +239,15 @@ jobs:
           path: ${{ runner.temp }}/no-mistakes-result/result.json
           if-no-files-found: ignore
           retention-days: 1
+      # Pinned no-mistakes v1.37 uses this isolated detached daemon path to
+      # preserve the already-sanitized ephemeral Codex credential environment.
+      - name: Stop isolated no-mistakes daemon
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          NM_HOME: ${{ runner.temp }}/no-mistakes
+          NM_TEST_START_DAEMON: "1"
+        run: no-mistakes daemon stop
 
   finalize:
     name: finalize no-mistakes
@@ -270,3 +286,20 @@ jobs:
           --expected-head "$HEAD_SHA"
           --result-file "$RUNNER_TEMP/no-mistakes-result/result.json"
           --json
+
+  dispatch-automerge:
+    name: dispatch automerge
+    needs: finalize
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch automerge for the validated pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh workflow run agent-automerge.yml
+          --repo "$GITHUB_REPOSITORY"
+          --ref main
+          -f pr-number="${{ inputs.pr-number }}"

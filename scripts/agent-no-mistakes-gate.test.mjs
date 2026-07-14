@@ -24,9 +24,15 @@ const safeFiles = [{ filename: "apps/internal/src/app/page.tsx" }];
 
 test("authenticated reviewer is read-only and all source changes fail closed", () => {
   const workflow = readFileSync(new URL("../.github/workflows/agent-no-mistakes.yml", import.meta.url), "utf8");
+  const automergeWorkflow = readFileSync(new URL("../.github/workflows/agent-automerge.yml", import.meta.url), "utf8");
   const gate = readFileSync(new URL("./agent-no-mistakes-gate.mjs", import.meta.url), "utf8");
 
   assert.match(workflow, /- --sandbox\s+- read-only/);
+  assert.match(workflow, /- 'approval_policy="never"'/);
+  assert.doesNotMatch(workflow, /- --ask-for-approval/);
+  assert.match(workflow, /codex exec \\\n\s+--sandbox read-only/);
+  assert.match(workflow, /NM_TEST_START_DAEMON: "1"/);
+  assert.match(workflow, /if: \$\{\{ always\(\) \}\}\n\s+continue-on-error: true\n[\s\S]*?run: no-mistakes daemon stop/);
   assert.doesNotMatch(workflow, /- workspace-write/);
   assert.doesNotMatch(workflow, /tar -C \/source/);
   assert.match(workflow, /npm rebuild --offline/);
@@ -34,6 +40,10 @@ test("authenticated reviewer is read-only and all source changes fail closed", (
   assert.match(workflow, /--user "\$\(id -u\):\$\(id -g\)"/);
   assert.match(workflow, /src=\$PWD,dst=\/workspace,readonly/);
   assert.match(workflow, /--read-only/);
+  assert.match(workflow, /gh workflow run agent-automerge\.yml/);
+  assert.match(workflow, /--repo "\$GITHUB_REPOSITORY"/);
+  assert.match(workflow, /-f pr-number="\$\{\{ inputs\.pr-number \}\}"/);
+  assert.doesNotMatch(automergeWorkflow, /- Agent no-mistakes/);
   assert.match(gate, /"--untracked-files=all"/);
 });
 
@@ -151,9 +161,11 @@ test("authenticated gate child receives no GitHub or Actions credentials", () =>
     ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.invalid",
     ACTIONS_CACHE_URL: "https://cache.invalid",
     ACTIONS_RESULTS_URL: "https://results.invalid",
+    NM_TEST_START_DAEMON: "1",
   });
 
   assert.equal(env.CODEX_API_KEY, "model-key");
+  assert.equal(env.NM_TEST_START_DAEMON, "1");
   for (const name of [
     "GH_TOKEN",
     "GITHUB_TOKEN",
@@ -176,6 +188,17 @@ test("nonzero AXI exit produces a finalizable sanitized failure", () => {
 
   assert.equal(artifact.status, "failed");
   assert.equal(normalizeGateArtifact(artifact, HEAD).status, "failed");
+});
+
+test("quoted TOON run fields normalize before head validation", () => {
+  const parsed = parseAxiResult(
+    'run:\n  id: "run-quoted"\n  head: "abcdef12"\noutcome: passed\n',
+    0,
+  );
+
+  assert.equal(parsed.run.id, "run-quoted");
+  assert.equal(parsed.run.head, "abcdef12");
+  assert.equal(validatedHeadMatches(parsed, HEAD), true);
 });
 
 test("ask-user gate blocks and exposes only safe finding metadata", () => {
