@@ -7,18 +7,19 @@ import {
   assertReviewedHead,
   assertReviewDiffFits,
   buildReviewPrompt,
+  dispatchPullSecurity,
   normalizeReviewPolicy,
   privilegedPatchPaths,
   requireManagedTriageComment,
   resolveSourceIssueNumber,
   reviewLabelChanges,
   reviewPolicyOutcome,
-  selectTrustedPullWorkflowRuns,
   validateReviewResult
 } from "./agent-review.mjs";
+import { issueSnapshotSha256 } from "./agent-lib.mjs";
 
 const config = {
-  repo: { owner: "sandeepsalwan1", name: "Vet" },
+  repo: { owner: "sandeepsalwan1", name: "Vet", defaultBranch: "main" },
   labels: {
     proof: "agent:proof",
     automerge: "agent:automerge",
@@ -155,63 +156,101 @@ test("review result is bound to the exact generated head", () => {
   assert.throws(() => assertReviewedHead(pull, ""), /missing reviewed head SHA/);
 });
 
-function workflowRun(path, name, overrides = {}) {
-  const head = "b".repeat(40);
+function trustedSecurityDispatchFixture() {
+  const sourceIssue = {
+    number: 42,
+    state: "open",
+    title: "Fix flow",
+    body: "Do the work"
+  };
+  const metadata = {
+    sourceIssue: sourceIssue.number,
+    sourceLabels: ["agent:automerge"],
+    automergeEligible: true,
+    issueSnapshotSha256: issueSnapshotSha256(sourceIssue)
+  };
+  const pull = {
+    number: 8,
+    state: "open",
+    merged: false,
+    merged_at: null,
+    changed_files: 1,
+    user: { login: "github-actions[bot]" },
+    body: `<!-- agent-implementation:v1 -->\nAgent implementation metadata:\n\`\`\`json\n${JSON.stringify(metadata)}\n\`\`\``,
+    head: {
+      ref: "agent/issue-42-fix-flow",
+      sha: "b".repeat(40),
+      repo: { full_name: "sandeepsalwan1/Vet" }
+    },
+    base: {
+      ref: "main",
+      repo: { full_name: "sandeepsalwan1/Vet" }
+    }
+  };
   return {
-    id: path.includes("codeql") ? 2 : 1,
-    name,
-    path,
-    event: "pull_request",
-    status: "completed",
-    conclusion: "action_required",
-    head_sha: head,
-    head_branch: "agent/issue-42-fix-flow",
-    actor: { login: "github-actions[bot]" },
-    triggering_actor: { login: "github-actions[bot]" },
-    repository: { full_name: "sandeepsalwan1/Vet" },
-    pull_requests: [{ number: 8, head: { sha: head } }],
-    ...overrides,
+    pull,
+    sourceIssue,
+    snapshot: {
+      pull,
+      files: [{ filename: "src/safe.ts" }],
+      trust: { sourceIssue: sourceIssue.number }
+    }
   };
 }
 
-test("only exact bot-authored PR CI and CodeQL runs are approvable", () => {
-  const head = "b".repeat(40);
-  const pull = {
-    number: 8,
-    head: { ref: "agent/issue-42-fix-flow", sha: head },
-  };
-  const ci = workflowRun(".github/workflows/ci.yml", "CI");
-  const codeql = workflowRun(".github/workflows/codeql.yml", "CodeQL");
-  const foreign = workflowRun(".github/workflows/codeql.yml", "CodeQL", {
-    id: 3,
-    repository: { full_name: "attacker/Vet" },
+test("trusted security dispatch is bound to the validated PR branch", () => {
+  const fixture = trustedSecurityDispatchFixture();
+  const calls = [];
+  const result = dispatchPullSecurity(config, 8, fixture.pull.head.sha, {
+    fetchSnapshot: () => fixture.snapshot,
+    fetchSourceIssue: () => fixture.sourceIssue,
+    dispatchWorkflow: (...args) => {
+      calls.push(args);
+      return { ok: true };
+    }
   });
-  const selection = selectTrustedPullWorkflowRuns(
-    [ci, codeql, foreign],
-    pull,
-    head,
-    config,
+
+  assert.deepEqual(result, { ok: true });
+  assert.deepEqual(calls, [
+    [config, "codeql.yml", {}, false, fixture.pull.head.ref]
+  ]);
+});
+
+test("trusted security dispatch rejects stale or changed authorization", () => {
+  const fixture = trustedSecurityDispatchFixture();
+  let dispatched = false;
+  const dependencies = {
+    fetchSnapshot: () => fixture.snapshot,
+    fetchSourceIssue: () => fixture.sourceIssue,
+    dispatchWorkflow: () => {
+      dispatched = true;
+    }
+  };
+
+  assert.throws(
+    () => dispatchPullSecurity(config, 8, "c".repeat(40), dependencies),
+    /head changed after agent review generation/
   );
-
-  assert.deepEqual(selection.missing, []);
-  assert.deepEqual(selection.approvable.map((run) => run.id), [1, 2]);
-
-  for (const forged of [
-    { actor: { login: "contributor" } },
-    { triggering_actor: { login: "contributor" } },
-    { event: "workflow_dispatch" },
-    { head_sha: "c".repeat(40) },
-    { path: ".github/workflows/other.yml" },
-    { pull_requests: [{ number: 9, head: { sha: head } }] },
-  ]) {
-    const invalid = selectTrustedPullWorkflowRuns(
-      [{ ...ci, ...forged }, codeql],
-      pull,
-      head,
-      config,
-    );
-    assert.ok(invalid.missing.includes(".github/workflows/ci.yml"));
-  }
+  assert.throws(
+    () =>
+      dispatchPullSecurity(config, 8, fixture.pull.head.sha, {
+        ...dependencies,
+        fetchSourceIssue: () => ({ ...fixture.sourceIssue, body: "changed" })
+      }),
+    /source issue changed after trusted triage/
+  );
+  assert.throws(
+    () =>
+      dispatchPullSecurity(config, 8, fixture.pull.head.sha, {
+        ...dependencies,
+        fetchSnapshot: () => ({
+          ...fixture.snapshot,
+          files: [{ filename: ".github/workflows/codeql.yml" }]
+        })
+      }),
+    /privileged candidate paths/
+  );
+  assert.equal(dispatched, false);
 });
 
 test("oversized diff blocks instead of truncating", () => {
@@ -266,6 +305,9 @@ test("review schema and unresolved questions fail closed", () => {
 
 test("review generation is read-only and bound to the prepared head", () => {
   const workflow = readFileSync(new URL("../.github/workflows/agent-review.yml", import.meta.url), "utf8");
+  const reviewScript = readFileSync(new URL("./agent-review.mjs", import.meta.url), "utf8");
+  const ciWorkflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const codeqlWorkflow = readFileSync(new URL("../.github/workflows/codeql.yml", import.meta.url), "utf8");
   const prompt = readFileSync(new URL("../.agent/prompts/review.md", import.meta.url), "utf8");
   const prepare = workflow.match(/\n  prepare-review:\n([\s\S]*?)\n  generate-review:/)?.[1] ?? "";
   const generate = workflow.match(/\n  generate-review:\n([\s\S]*?)\n  apply-review:/)?.[1] ?? "";
@@ -278,7 +320,12 @@ test("review generation is read-only and bound to the prepared head", () => {
   assert.match(prepare, /ref: main\n          persist-credentials: false/);
   assert.match(prepare, /--expected-head-sha "\$REVIEWED_HEAD_SHA"/);
   assert.match(prepare, /-f state=pending/);
-  assert.match(prepare, /--approve-pr-runs/);
+  assert.match(prepare, /--dispatch-pr-security/);
+  assert.match(reviewScript, /dispatchPullSecurity/);
+  assert.match(codeqlWorkflow, /workflow_dispatch:/);
+  assert.match(ciWorkflow, /github\.event_name == 'pull_request' \|\| github\.event_name == 'workflow_dispatch'/);
+  assert.match(ciWorkflow, /base-ref:/);
+  assert.match(ciWorkflow, /head-ref:/);
 
   assert.match(generate, /needs: prepare-review/);
   assert.match(generate, /ref: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);

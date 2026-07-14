@@ -30,10 +30,6 @@ import {
 } from "./agent-lib.mjs";
 
 export const MAX_REVIEW_DIFF_BYTES = 50000;
-const TRUSTED_PULL_WORKFLOWS = [
-  { name: "CI", path: ".github/workflows/ci.yml" },
-  { name: "CodeQL", path: ".github/workflows/codeql.yml" },
-];
 
 function fetchPull(config, prNumber) {
   const pull = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/pulls/${prNumber}`);
@@ -229,68 +225,7 @@ export function assertReviewedHead(pull, expectedHeadSha) {
   return current;
 }
 
-function workflowRunMatchesPull(run, pull, expectedHeadSha, config, workflow) {
-  const expectedRepo = `${config.repo.owner}/${config.repo.name}`.toLowerCase();
-  const actor = String(run?.actor?.login ?? "").toLowerCase();
-  const triggeringActor = String(
-    run?.triggering_actor?.login ?? "",
-  ).toLowerCase();
-  const references = Array.isArray(run?.pull_requests)
-    ? run.pull_requests
-    : [];
-  return (
-    run?.name === workflow.name &&
-    run?.path === workflow.path &&
-    run?.event === "pull_request" &&
-    run?.head_sha === expectedHeadSha &&
-    run?.head_branch === pull.head.ref &&
-    String(run?.repository?.full_name ?? "").toLowerCase() === expectedRepo &&
-    actor === "github-actions[bot]" &&
-    triggeringActor === "github-actions[bot]" &&
-    references.length === 1 &&
-    Number(references[0]?.number) === pull.number &&
-    references[0]?.head?.sha === expectedHeadSha
-  );
-}
-
-export function selectTrustedPullWorkflowRuns(
-  runs,
-  pull,
-  expectedHeadSha,
-  config,
-) {
-  const selected = [];
-  const missing = [];
-  for (const workflow of TRUSTED_PULL_WORKFLOWS) {
-    const run = [...(runs ?? [])]
-      .filter((item) =>
-        workflowRunMatchesPull(
-          item,
-          pull,
-          expectedHeadSha,
-          config,
-          workflow,
-        ),
-      )
-      .sort((left, right) => Number(right.id ?? 0) - Number(left.id ?? 0))[0];
-    if (run) selected.push(run);
-    else missing.push(workflow.path);
-  }
-  return {
-    selected,
-    missing,
-    approvable: selected.filter(
-      (run) =>
-        run.status === "completed" && run.conclusion === "action_required",
-    ),
-  };
-}
-
-function sleep(milliseconds) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
-}
-
-function approveTrustedPullWorkflowRuns(
+export function dispatchPullSecurity(
   config,
   prNumber,
   expectedHeadSha,
@@ -303,23 +238,7 @@ function approveTrustedPullWorkflowRuns(
       ghApiJson(
         `repos/${config.repo.owner}/${config.repo.name}/issues/${number}`,
       ));
-  const listRuns =
-    dependencies.listRuns ??
-    (() =>
-      ghApiJson(
-        `repos/${config.repo.owner}/${config.repo.name}/actions/runs?event=pull_request&head_sha=${expectedHeadSha}&per_page=100`,
-      )?.workflow_runs ?? []);
-  const approveRun =
-    dependencies.approveRun ??
-    ((run) =>
-      gh([
-        "api",
-        "--method",
-        "POST",
-        `repos/${config.repo.owner}/${config.repo.name}/actions/runs/${run.id}/approve`,
-      ]));
-  const wait = dependencies.sleep ?? sleep;
-  const attempts = dependencies.attempts ?? 10;
+  const dispatch = dependencies.dispatchWorkflow ?? dispatchWorkflow;
   const snapshot = fetchSnapshot(config, prNumber);
   assertReviewedHead(snapshot.pull, expectedHeadSha);
   const sourceIssue = fetchSourceIssue(snapshot.trust.sourceIssue);
@@ -328,26 +247,12 @@ function approveTrustedPullWorkflowRuns(
     sourceIssue,
     rejectPrivilegedPaths: true,
   });
-
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const selection = selectTrustedPullWorkflowRuns(
-      listRuns(),
-      snapshot.pull,
-      expectedHeadSha,
-      config,
-    );
-    if (selection.missing.length === 0) {
-      for (const run of selection.approvable) approveRun(run);
-      return {
-        observed: selection.selected.map((run) => run.id),
-        approved: selection.approvable.map((run) => run.id),
-      };
-    }
-    if (attempt < attempts) wait(2000);
-  }
-  throw new AgentError(
-    "trusted pull request CI and CodeQL runs were not observed",
-    1,
+  return dispatch(
+    config,
+    "codeql.yml",
+    {},
+    false,
+    snapshot.pull.head.ref,
   );
 }
 
@@ -483,6 +388,7 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun, expectedHe
   let statusSha = pull.head.sha;
   let privilegedPaths = [];
   let ciDispatch = null;
+  let codeqlDispatch = null;
 
   if (!dryRun && hasPatch) {
     checkoutPullHead(pull);
@@ -503,6 +409,13 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun, expectedHe
         runCommand("gh", ["auth", "setup-git", "--hostname", "github.com"]);
         runCommand("git", ["push", "origin", `HEAD:${pull.head.ref}`]);
         ciDispatch = dispatchWorkflow(config, "ci.yml", {}, false, pull.head.ref);
+        codeqlDispatch = dispatchWorkflow(
+          config,
+          "codeql.yml",
+          {},
+          false,
+          pull.head.ref,
+        );
       }
     }
   }
@@ -538,7 +451,7 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun, expectedHe
     review,
     comment,
     labels,
-    dispatch: { ci: ciDispatch, proof: proofDispatch },
+    dispatch: { ci: ciDispatch, codeql: codeqlDispatch, proof: proofDispatch },
     status,
     patchApplied: Boolean(hasPatch && !privilegedPaths.length),
     privilegedPaths,
@@ -569,12 +482,12 @@ async function main() {
     finish({ ok: true, message: `created review patch for #${prNumber}`, ...createPatch(args["create-patch"]) }, Boolean(args.json));
     return;
   }
-  if (args["approve-pr-runs"]) {
+  if (args["dispatch-pr-security"]) {
     finish(
       {
         ok: true,
-        message: `approved trusted pull request runs for #${prNumber}`,
-        result: approveTrustedPullWorkflowRuns(
+        message: `dispatched trusted pull request security for #${prNumber}`,
+        result: dispatchPullSecurity(
           config,
           prNumber,
           args["expected-head-sha"],
@@ -601,7 +514,7 @@ async function main() {
     return;
   }
   throw new AgentError(
-    "missing --write-prompt, --create-patch, --approve-pr-runs, or --from-file",
+    "missing --write-prompt, --create-patch, --dispatch-pr-security, or --from-file",
     2,
   );
 }

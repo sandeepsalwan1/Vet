@@ -68,7 +68,7 @@ jobs:
           --expected-head-sha "$REVIEWED_HEAD_SHA"
           --write-prompt .agent-output/review-prompt.md
           --json
-      - name: Approve trusted pull request CI and CodeQL runs
+      - name: Dispatch trusted pull request CodeQL
         env:
           GH_TOKEN: ${{ github.token }}
           REVIEWED_HEAD_SHA: ${{ steps.mark-pending.outputs.head-sha }}
@@ -76,7 +76,7 @@ jobs:
           node scripts/agent-review.mjs
           --pr-number "${{ inputs.pr-number }}"
           --expected-head-sha "$REVIEWED_HEAD_SHA"
-          --approve-pr-runs
+          --dispatch-pr-security
           --json
       - run: cp .agent/schemas/review.schema.json .agent-output/review.schema.json
       - uses: actions/upload-artifact@v4
