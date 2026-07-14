@@ -206,6 +206,7 @@ test("review schema and unresolved questions fail closed", () => {
 
 test("review generation is read-only and bound to the prepared head", () => {
   const workflow = readFileSync(new URL("../.github/workflows/agent-review.yml", import.meta.url), "utf8");
+  const prompt = readFileSync(new URL("../.agent/prompts/review.md", import.meta.url), "utf8");
   const prepare = workflow.match(/\n  prepare-review:\n([\s\S]*?)\n  generate-review:/)?.[1] ?? "";
   const generate = workflow.match(/\n  generate-review:\n([\s\S]*?)\n  apply-review:/)?.[1] ?? "";
   const apply = workflow.match(/\n  apply-review:\n([\s\S]*?)\n  dispatch-no-mistakes:/)?.[1] ?? "";
@@ -223,6 +224,7 @@ test("review generation is read-only and bound to the prepared head", () => {
   assert.doesNotMatch(generate, /(?:actions|contents|issues|pull-requests|statuses): write/);
   assert.match(generate, /sandbox: read-only/);
   assert.match(generate, /codex-version: "0\.144\.1"/);
+  assert.match(prompt, /do not gate your recommendation on CI, proof, or no-mistakes status/);
 
   assert.match(apply, /REVIEWED_HEAD_SHA: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
   assert.match(apply, /ref: main\n          fetch-depth: 0\n          persist-credentials: false/);

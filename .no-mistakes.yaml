@@ -14,7 +14,7 @@ commands:
     --mount type=volume,dst=/workspace --workdir /workspace
     --env HOME=/tmp/home --env npm_config_cache=/tmp/npm-cache
     node:22-bookworm@sha256:a25c9934ff6382cd4f08b6bc26c82bf4ea69b1e6f8dabfb2ead457374127c365 sh -lc
-    'mkdir -p "$HOME" && tar -C /source --exclude=./node_modules --exclude=./.git -cf - . | tar -xf - -C /workspace && npm run typecheck && npm run build && npm run test:scenarios'
+    'mkdir -p "$HOME" && tar -C /source --exclude=./node_modules --exclude=./.git -cf - . | tar --no-same-owner -xf - -C /workspace && npm run typecheck && npm run build && npm run test:scenarios'
   lint: >-
     docker run --rm --pull never --network none --read-only --cap-drop ALL
     --pids-limit 512 --security-opt no-new-privileges
@@ -24,7 +24,7 @@ commands:
     --mount type=volume,dst=/workspace --workdir /workspace
     --env HOME=/tmp/home --env npm_config_cache=/tmp/npm-cache
     node:22-bookworm@sha256:a25c9934ff6382cd4f08b6bc26c82bf4ea69b1e6f8dabfb2ead457374127c365 sh -lc
-    'mkdir -p "$HOME" && tar -C /source --exclude=./node_modules --exclude=./.git -cf - . | tar -xf - -C /workspace && npm run lint && npm run lint:dead && npm run lint:duplicates && node --test scripts/agent-*.test.mjs && git init -q && git add -A && git diff --cached --check'
+    'mkdir -p "$HOME" && tar -C /source --exclude=./node_modules --exclude=./.git -cf - . | tar --no-same-owner -xf - -C /workspace && npm run lint && npm run lint:dead && npm run lint:duplicates && node --test scripts/agent-*.test.mjs && git init -q && git add -A && git diff --cached --check'
 
 auto_fix:
   rebase: 0

@@ -25,6 +25,7 @@ const safeFiles = [{ filename: "apps/internal/src/app/page.tsx" }];
 test("authenticated reviewer is read-only and all source changes fail closed", () => {
   const workflow = readFileSync(new URL("../.github/workflows/agent-no-mistakes.yml", import.meta.url), "utf8");
   const automergeWorkflow = readFileSync(new URL("../.github/workflows/agent-automerge.yml", import.meta.url), "utf8");
+  const repoConfig = readFileSync(new URL("../.no-mistakes.yaml", import.meta.url), "utf8");
   const gate = readFileSync(new URL("./agent-no-mistakes-gate.mjs", import.meta.url), "utf8");
 
   assert.match(workflow, /- --sandbox\s+- read-only/);
@@ -44,6 +45,7 @@ test("authenticated reviewer is read-only and all source changes fail closed", (
   assert.match(workflow, /--repo "\$GITHUB_REPOSITORY"/);
   assert.match(workflow, /-f pr-number="\$\{\{ inputs\.pr-number \}\}"/);
   assert.doesNotMatch(automergeWorkflow, /- Agent no-mistakes/);
+  assert.equal([...repoConfig.matchAll(/tar --no-same-owner -xf/g)].length, 2);
   assert.match(gate, /"--untracked-files=all"/);
 });
 

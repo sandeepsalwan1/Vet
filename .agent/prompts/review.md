@@ -23,6 +23,7 @@ Rules:
 - If you changed files, list them in `fixesMade`.
 - Put a unified git diff for any safe fixes in `unifiedDiff`; use an empty string when no fix is made.
 - Any `unifiedDiff` must apply cleanly to the PR head checkout being reviewed.
+- Review code and requested behavior only; do not gate your recommendation on CI, proof, or no-mistakes status because downstream automation enforces those after this review.
 - Set `remainingRisk: high` when product, auth, data, migration, billing, or unresolved human decision risk remains.
 - Set `proofNeeded: GIF` only when issue/PR explicitly asks for GIF/video.
 - `mergeRecommendation: ready` only when no blockers remain and no high-priority/high-risk manual decision is needed.
