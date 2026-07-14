@@ -32,6 +32,7 @@ test("authenticated reviewer is read-only while trusted checks and source seals 
   const workflow = readFileSync(new URL("../.github/workflows/agent-no-mistakes.yml", import.meta.url), "utf8");
   const automergeWorkflow = readFileSync(new URL("../.github/workflows/agent-automerge.yml", import.meta.url), "utf8");
   const repoConfig = readFileSync(new URL("../.no-mistakes.yaml", import.meta.url), "utf8");
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const gate = readFileSync(new URL("./agent-no-mistakes-gate.mjs", import.meta.url), "utf8");
 
   assert.match(workflow, /- --sandbox\s+- read-only/);
@@ -75,6 +76,10 @@ test("authenticated reviewer is read-only while trusted checks and source seals 
   assert.match(workflow, /dispatch-automerge:\n[\s\S]*?needs:\n\s+- prepare\n\s+- finalize/);
   assert.match(workflow, /--expected-head "\$\{\{ inputs\.expected-head-sha \}\}"/);
   assert.doesNotMatch(automergeWorkflow, /- Agent no-mistakes/);
+  assert.equal(packageJson.scripts["lint:dead"], "knip --treat-config-hints-as-errors");
+  assert.equal(packageJson.scripts["lint:duplicates"], "jscpd");
+  assert.equal(packageJson.devDependencies.knip, "^6.26.0");
+  assert.equal(packageJson.devDependencies.jscpd, "^5.0.12");
   assert.equal([...repoConfig.matchAll(/tar --no-same-owner -xf/g)].length, 2);
   assert.match(gate, /"--untracked-files=all"/);
 });
