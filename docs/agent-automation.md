@@ -116,6 +116,7 @@ Missing provider readiness blocks required visual proof instead of silently repl
 
 Use this only after the no-mistakes comment reports `ask-user`, the question is understood, and the user explicitly approves unattended handling.
 Approval is not a gate bypass.
+The exact-head approval contract lives in `.agent/agent-policy.md`.
 It lets no-mistakes use `--yes` for one immutable PR head while CI, review, proof, source-integrity, and automerge rules remain required.
 
 Capture the current head, inspect it, then dispatch the owner-only approved rerun.

@@ -39,7 +39,7 @@ Important constraints:
 - initialize per repo with `no-mistakes init`
 - rerun `no-mistakes init` after upgrading to refresh gate wiring and installed skill text
 - run from a committed feature branch, not directly on `main`
-- treat `ask-user` findings as manual blockers unless the user explicitly approves auto-resolution
+- treat `ask-user` findings as manual blockers by default; exact-head unattended approval is only allowed when the repository owner explicitly approves that immutable PR head
 - high-priority/high-risk PRs still require human review even if no-mistakes passes
 
 Do not vendor the full no-mistakes source here. Refresh with `npx opensrc fetch` and cite this note when implementation decisions depend on no-mistakes behavior.
