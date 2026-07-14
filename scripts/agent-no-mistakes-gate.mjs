@@ -526,7 +526,10 @@ ${markdownJsonBlock({
   outcome: artifact.outcome,
   runId: artifact.runId || "",
   failureStage: artifact.failureStage || "",
-  checksRun: ["no-mistakes axi run --skip rebase,push,pr,ci"],
+  checksRun: [
+    "trusted offline typecheck, build, and scenarios baseline",
+    "no-mistakes axi run --skip rebase,test,push,pr,ci",
+  ],
   findings: artifact.findings,
   blocker: artifactBlocker(artifact),
 })}`;
@@ -633,7 +636,7 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
         "--intent",
         intent,
         "--skip",
-        "rebase,push,pr,ci",
+        "rebase,test,push,pr,ci",
       ],
       {
         cwd: repoDir,
