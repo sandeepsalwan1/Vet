@@ -35,6 +35,10 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 10. A successful merge removes agent workflow labels and closes the linked source issue while preserving priority labels.
 Trusted recovery dispatches main-defined workflows with an expected head SHA, and CI publishes required check runs on that exact candidate.
 
+Cost-sensitive routing lives in `.agent/config.json`.
+Proposal and triage use GPT-5.4 nano; implementation, review, and no-mistakes use GPT-5.4 mini; all lanes currently use low reasoning.
+Increase a lane's model or reasoning only after measured contract failures.
+
 ## Trust Boundaries
 
 - Keep baseline CI separate from agent workflows.
@@ -53,7 +57,7 @@ Trusted recovery dispatches main-defined workflows with an expected head SHA, an
 Normal automerge requires CI checks `quality`, `build`, `scenarios`, `audit`, and `dependency-review`, plus `agent-review` and `no-mistakes` statuses.
 `agent-proof` is also required when trusted labels or managed triage request visual proof.
 The active agent-job cap is eight, the hard configurable ceiling is fifteen, and each lane has its own lower cap.
-`.agent/config.json` is the machine-readable source for gate names, backend selection, and capacity; `.agent/agent-policy.md` owns risk and approval meaning.
+`.agent/config.json` is the machine-readable source for gate names, lane-specific model settings, backend selection, and capacity; `.agent/agent-policy.md` owns risk and approval meaning.
 
 ## Commands
 
@@ -61,7 +65,7 @@ Mutating automation CLIs support `--dry-run`; structured workflow calls use `--j
 
     node scripts/agent-labels.mjs --dry-run --json
     node scripts/agent-router.mjs --event-file event.json --json
-    node scripts/agent-worker.mjs --validate-backend --json
+    node scripts/agent-worker.mjs --validate-backend --lane implement --json
     node scripts/agent-concurrency-slot.mjs --lane implement --key 42 --json
 
 GitHub comments use managed markers and temporary body files. Never interpolate untrusted issue text into a shell command.

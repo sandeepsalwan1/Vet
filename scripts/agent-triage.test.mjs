@@ -167,10 +167,14 @@ test("managed triage JSON stores the trusted issue snapshot digest", () => {
 
 test("Codex generation is pinned and has no GitHub write permissions", () => {
   const workflow = readFileSync(new URL("../.github/workflows/agent-triage.yml", import.meta.url), "utf8");
+  const prepare = workflow.match(/\n  prepare:\n([\s\S]*?)\n  generate:/)?.[1] ?? "";
   const generate = workflow.match(/\n  generate:\n([\s\S]*?)\n  apply:/)?.[1] ?? "";
 
+  assert.match(prepare, /--validate-backend --lane triage --json/);
   assert.match(generate, /permissions:\n      contents: read/);
   assert.doesNotMatch(generate, /(?:actions|issues|pull-requests|statuses): write/);
   assert.match(generate, /codex-version: "0\.144\.1"/);
   assert.match(generate, /ref: main\n          persist-credentials: false/);
+  assert.match(generate, /model: \$\{\{ needs\.prepare\.outputs\.backend-model \}\}/);
+  assert.match(generate, /effort: \$\{\{ needs\.prepare\.outputs\.backend-effort \}\}/);
 });

@@ -36,6 +36,7 @@ Central Veterinary Hospital MVP: one deployed Next.js app, Postgres-backed npm w
 - Root `package.json` overrides patch ADK transitive security advisories; rerun `npm audit --omit=dev` after dependency updates.
 - Dependency holds: keep `@google/genai` on v1 while `@google/adk` depends on v1; keep ESLint on v9 until Next/react lint stack supports v10; keep `@types/node` aligned with the minimum supported Node engine.
 - New shared behavior belongs in a package only when two callers need the seam.
+- Agent cost: use the cheapest model that reliably satisfies each lane contract; increase model or reasoning only after measured failure.
 - No secrets in docs, logs, tests, screenshots, or proof files.
 
 ## Docs

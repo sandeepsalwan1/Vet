@@ -59,7 +59,7 @@ jobs:
         run: node scripts/agent-concurrency-slot.mjs --lane implement --key "$CONCURRENCY_KEY" --json
       - name: Validate configured implementation backend
         id: backend
-        run: node scripts/agent-worker.mjs --validate-backend --json
+        run: node scripts/agent-worker.mjs --validate-backend --lane implement --json
       - name: Build trusted implementation prompt
         env:
           GH_TOKEN: ${{ github.token }}

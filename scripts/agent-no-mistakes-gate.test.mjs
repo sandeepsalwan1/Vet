@@ -35,6 +35,12 @@ test("authenticated reviewer is read-only while trusted checks and source seals 
   const gate = readFileSync(new URL("./agent-no-mistakes-gate.mjs", import.meta.url), "utf8");
 
   assert.match(workflow, /- --sandbox\s+- read-only/);
+  assert.match(workflow, /--validate-backend --lane no-mistakes --json/);
+  assert.match(workflow, /- --model\s+- \$\{\{ needs\.prepare\.outputs\.backend_model \}\}/);
+  assert.match(
+    workflow,
+    /model_reasoning_effort="\$\{\{ needs\.prepare\.outputs\.backend_effort \}\}"/,
+  );
   assert.match(workflow, /- 'approval_policy="never"'/);
   assert.doesNotMatch(workflow, /- --ask-for-approval/);
   assert.match(workflow, /codex exec \\\n\s+--sandbox read-only/);

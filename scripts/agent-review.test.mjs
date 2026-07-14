@@ -326,6 +326,7 @@ test("review generation is read-only and bound to the prepared head", () => {
 
   assert.match(prepare, /statuses: write/);
   assert.match(prepare, /actions: write/);
+  assert.match(prepare, /--validate-backend --lane review --json/);
   assert.match(prepare, /ref: main\n          persist-credentials: false/);
   assert.match(prepare, /--expected-head-sha "\$REVIEWED_HEAD_SHA"/);
   assert.match(prepare, /-f state=pending/);
@@ -345,6 +346,8 @@ test("review generation is read-only and bound to the prepared head", () => {
   assert.match(generate, /permissions:\n      contents: read\n      pull-requests: read\n      issues: read/);
   assert.doesNotMatch(generate, /(?:actions|contents|issues|pull-requests|statuses): write/);
   assert.match(generate, /sandbox: read-only/);
+  assert.match(generate, /model: \$\{\{ needs\.prepare-review\.outputs\.backend-model \}\}/);
+  assert.match(generate, /effort: \$\{\{ needs\.prepare-review\.outputs\.backend-effort \}\}/);
   assert.match(generate, /codex-version: "0\.144\.1"/);
   assert.match(prompt, /do not gate your recommendation on CI, proof, or no-mistakes status/);
 
