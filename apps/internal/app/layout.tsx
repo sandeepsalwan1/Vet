@@ -1,19 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Fraunces, Hanken_Grotesk } from "next/font/google";
 import "./globals.css";
-
-const fraunces = Fraunces({
-  subsets: ["latin"],
-  variable: "--font-display",
-  display: "swap",
-  axes: ["SOFT", "WONK"],
-});
-
-const hankenGrotesk = Hanken_Grotesk({
-  subsets: ["latin"],
-  variable: "--font-body",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: "Clinic Task Board",
@@ -35,7 +21,7 @@ export default function RootLayout({
   children
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${fraunces.variable} ${hankenGrotesk.variable}`}>
+    <html lang="en">
       <body>{children}</body>
     </html>
   );

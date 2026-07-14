@@ -247,7 +247,7 @@ jobs:
         env:
           NM_HOME: ${{ runner.temp }}/no-mistakes
           NM_TEST_START_DAEMON: "1"
-        run: no-mistakes daemon stop
+        run: no-mistakes daemon stop --force
 
   finalize:
     name: finalize no-mistakes

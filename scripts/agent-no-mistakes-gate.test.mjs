@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -33,7 +33,7 @@ test("authenticated reviewer is read-only and all source changes fail closed", (
   assert.doesNotMatch(workflow, /- --ask-for-approval/);
   assert.match(workflow, /codex exec \\\n\s+--sandbox read-only/);
   assert.match(workflow, /NM_TEST_START_DAEMON: "1"/);
-  assert.match(workflow, /if: \$\{\{ always\(\) \}\}\n\s+continue-on-error: true\n[\s\S]*?run: no-mistakes daemon stop/);
+  assert.match(workflow, /if: \$\{\{ always\(\) \}\}\n\s+continue-on-error: true\n[\s\S]*?run: no-mistakes daemon stop --force/);
   assert.doesNotMatch(workflow, /- workspace-write/);
   assert.doesNotMatch(workflow, /tar -C \/source/);
   assert.match(workflow, /npm rebuild --offline/);
@@ -47,6 +47,26 @@ test("authenticated reviewer is read-only and all source changes fail closed", (
   assert.doesNotMatch(automergeWorkflow, /- Agent no-mistakes/);
   assert.equal([...repoConfig.matchAll(/tar --no-same-owner -xf/g)].length, 2);
   assert.match(gate, /"--untracked-files=all"/);
+});
+
+test("application fonts are self-hosted for offline gates", () => {
+  const layout = readFileSync(new URL("../apps/internal/app/layout.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../apps/internal/app/globals.css", import.meta.url), "utf8");
+  const fonts = [
+    "fraunces-latin-variable.woff2",
+    "fraunces-latin-ext-variable.woff2",
+    "fraunces-vietnamese-variable.woff2",
+    "hanken-grotesk-cyrillic-ext-variable.woff2",
+    "hanken-grotesk-latin-variable.woff2",
+    "hanken-grotesk-latin-ext-variable.woff2",
+    "hanken-grotesk-vietnamese-variable.woff2",
+  ];
+
+  assert.doesNotMatch(layout, /next\/font\/google/);
+  for (const font of fonts) {
+    assert.equal(css.includes(`url("./fonts/${font}")`), true, font);
+    assert.equal(existsSync(new URL(`../apps/internal/app/fonts/${font}`, import.meta.url)), true, font);
+  }
 });
 
 function trustedPull(overrides = {}) {
