@@ -9,6 +9,7 @@ import {
   gateLabelChanges,
   gateCommentBody,
   isRetryableReviewEnvironmentBlock,
+  isRetryableTechnicalFailure,
   noMistakesCommentMarker,
   normalizeGateArtifact,
   parseAxiResult,
@@ -402,6 +403,48 @@ test("review environment retry stays bounded and excludes product blockers", () 
     ),
     true,
   );
+});
+
+test("identified technical failure receives one bounded fresh retry", () => {
+  const technicalFailure = `run:
+  id: run-technical
+  head: abcdef12
+outcome: failed`;
+  const parsed = parseAxiResult(technicalFailure, 1);
+
+  assert.equal(isRetryableTechnicalFailure(parsed), true);
+  assert.equal(
+    isRetryableTechnicalFailure({ ...parsed, run: {} }),
+    false,
+  );
+  assert.equal(
+    isRetryableTechnicalFailure({
+      ...parsed,
+      findings: [{ id: "test-failure" }],
+    }),
+    false,
+  );
+
+  let calls = 0;
+  const result = runNoMistakesGate("Validate the PR", "/repo", {
+    runCommand: () => ({ status: 0 }),
+    spawnSync: () => {
+      calls += 1;
+      if (calls === 1) {
+        return { stdout: technicalFailure, stderr: "", status: 1 };
+      }
+      return {
+        stdout: "run:\n  id: run-passed\n  head: abcdef12\noutcome: passed\n",
+        stderr: "",
+        status: 0,
+      };
+    },
+    onRetry: () => {},
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.attempts, 2);
+  assert.equal(parseAxiResult(result.stdout, result.status).status, "passed");
 });
 
 test("only ask-user outcomes change no-mistakes policy labels", () => {

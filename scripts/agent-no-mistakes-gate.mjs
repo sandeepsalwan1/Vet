@@ -238,6 +238,16 @@ export function isRetryableReviewEnvironmentBlock(gate) {
   );
 }
 
+export function isRetryableTechnicalFailure(gate) {
+  return (
+    gate?.status === "failed" &&
+    gate?.outcome === "failed" &&
+    /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(gate?.run?.id ?? "") &&
+    /^[0-9a-f]{8,40}$/.test(gate?.run?.head ?? "") &&
+    gate?.findings?.length === 0
+  );
+}
+
 export function validatedHeadMatches(result, sha) {
   const expected = String(sha ?? "");
   const validated = String(result?.run?.head ?? "");
@@ -519,7 +529,7 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
     dependencies.onRetry ??
     (() =>
       process.stderr.write(
-        "retrying no-mistakes once after an isolated review environment blocker\n",
+        "retrying no-mistakes once after an isolated gate infrastructure failure\n",
       ));
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
@@ -547,7 +557,11 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
       `${run.stdout}\n${run.stderr}`.trim(),
       run.status,
     );
-    if (attempt === 1 && isRetryableReviewEnvironmentBlock(parsed)) {
+    if (
+      attempt === 1 &&
+      (isRetryableReviewEnvironmentBlock(parsed) ||
+        isRetryableTechnicalFailure(parsed))
+    ) {
       execute("no-mistakes", ["daemon", "stop", "--force"], {
         cwd: repoDir,
         env,
