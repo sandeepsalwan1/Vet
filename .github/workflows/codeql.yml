@@ -5,11 +5,11 @@ on:
   workflow_dispatch:
     inputs:
       candidate-sha:
-        description: Exact trusted PR head to analyze
+        description: Exact trusted commit to analyze
         required: false
         type: string
       candidate-ref:
-        description: Trusted PR branch for uploaded results
+        description: Trusted ref for uploaded results
         required: false
         type: string
   push:

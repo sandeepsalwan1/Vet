@@ -340,6 +340,14 @@ test("review generation is read-only and bound to the prepared head", () => {
   assert.match(ciWorkflow, /github\.event_name == 'pull_request' \|\| github\.event_name == 'workflow_dispatch'/);
   assert.match(ciWorkflow, /base-ref:/);
   assert.match(ciWorkflow, /head-ref:/);
+  assert.match(
+    ciWorkflow,
+    /publish-candidate-checks:\n[\s\S]*?if: always\(\) && github\.event_name == 'workflow_dispatch' && inputs\.main-sha == ''/
+  );
+  assert.match(
+    ciWorkflow,
+    /dispatch-automerge:\n[\s\S]*?if: always\(\) && github\.event_name == 'workflow_dispatch' && inputs\.main-sha == ''/
+  );
 
   assert.match(generate, /needs: prepare-review/);
   assert.match(generate, /ref: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
