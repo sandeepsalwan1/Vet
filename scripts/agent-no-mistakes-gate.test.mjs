@@ -1,34 +1,50 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
   assertTrustedAgentPull,
   composeEffectiveIntent,
-  gateGhShimScript,
+  gateEnvironment,
   gateCommentBody,
   noMistakesCommentMarker,
+  normalizeGateArtifact,
   parseAxiResult,
+  sanitizedGateArtifact,
+  selectTrustedManagedTriageComment,
   validatedHeadMatches,
 } from "./agent-no-mistakes-gate.mjs";
 
+const HEAD = "abcdef1234567890abcdef1234567890abcdef12";
 const config = {
   repo: { owner: "owner", name: "repo", defaultBranch: "main" },
+  comments: { gate: "<!-- agent-gate:v1 -->" },
 };
+const safeFiles = [{ filename: "apps/internal/src/app/page.tsx" }];
+
+test("authenticated reviewer is read-only and all source changes fail closed", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/agent-no-mistakes.yml", import.meta.url), "utf8");
+  const gate = readFileSync(new URL("./agent-no-mistakes-gate.mjs", import.meta.url), "utf8");
+
+  assert.match(workflow, /- --sandbox\s+- read-only/);
+  assert.doesNotMatch(workflow, /- workspace-write/);
+  assert.match(gate, /"--untracked-files=all"/);
+});
 
 function trustedPull(overrides = {}) {
   return {
     number: 12,
+    state: "open",
+    changed_files: 1,
     body: `<!-- agent-implementation:v1 -->
+Agent implementation metadata:
 \`\`\`json
-{"sourceIssue":42,"automergeEligible":true}
+{"sourceIssue":42,"sourceLabels":["agent:automerge"],"automergeEligible":true,"issueSnapshotSha256":"${"a".repeat(64)}"}
 \`\`\``,
+    user: { login: "github-actions[bot]" },
     head: {
       ref: "agent/issue-42-fix-flow",
-      sha: "abcdef123456",
+      sha: HEAD,
       repo: { full_name: "owner/repo" },
     },
     base: { ref: "main", repo: { full_name: "owner/repo" } },
@@ -47,7 +63,12 @@ help[1]:
 
   assert.equal(result.status, "passed");
   assert.equal(result.outcome, "checks-passed");
-  assert.equal(validatedHeadMatches(result, "abcdef123456"), true);
+  assert.equal(validatedHeadMatches(result, HEAD), true);
+  assert.equal(validatedHeadMatches({ run: { head: "a" } }, HEAD), false);
+  assert.equal(
+    validatedHeadMatches({ run: { head: "ABCDEF12" } }, HEAD),
+    false,
+  );
 });
 
 test("effective intent includes caller policy, full source issue, and managed triage", () => {
@@ -72,49 +93,83 @@ test("effective intent includes caller policy, full source issue, and managed tr
   assert.match(intent, /Do not remove the fallback/);
 });
 
-test("gate gh shim preserves PR metadata while delegating read commands", () => {
-  const directory = mkdtempSync(join(tmpdir(), "vet-gate-shim-"));
-  const realGh = join(directory, "real-gh");
-  const shim = join(directory, "gh");
-  try {
-    writeFileSync(realGh, '#!/bin/sh\nprintf "%s\\n" "$*"\n', { mode: 0o700 });
-    writeFileSync(shim, gateGhShimScript(realGh), { mode: 0o700 });
+test("newest exact-prefix triage must come from Actions or the repo owner", () => {
+  const marker = "<!-- agent-triage:v1 -->";
+  const comments = [
+    {
+      id: 1,
+      body: `${marker}\nold bot result`,
+      user: { login: "github-actions[bot]" },
+      updated_at: "2026-07-01T00:00:00Z",
+    },
+    {
+      id: 2,
+      body: `prefix ${marker}\nspoofed`,
+      user: { login: "github-actions[bot]" },
+      updated_at: "2026-07-04T00:00:00Z",
+    },
+    {
+      id: 3,
+      body: `${marker}\nunauthorized`,
+      user: { login: "contributor" },
+      updated_at: "2026-07-05T00:00:00Z",
+    },
+    {
+      id: 4,
+      body: `${marker}\nowner result`,
+      user: { login: "OWNER" },
+      updated_at: "2026-07-03T00:00:00Z",
+    },
+  ];
 
-    const delegated = spawnSync(shim, ["issue", "view", "42"], {
-      encoding: "utf8",
-    });
-    const edit = spawnSync(shim, ["pr", "edit", "12", "--body-file", "-"], {
-      encoding: "utf8",
-    });
-    const create = spawnSync(shim, ["pr", "create", "--body-file", "-"], {
-      encoding: "utf8",
-    });
-
-    assert.equal(delegated.status, 0);
-    assert.equal(delegated.stdout.trim(), "issue view 42");
-    assert.equal(edit.status, 0);
-    assert.equal(edit.stdout, "");
-    assert.equal(create.status, 1);
-    assert.match(create.stderr, /PR creation disabled/);
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
+  assert.equal(
+    selectTrustedManagedTriageComment(comments, marker, "owner")?.id,
+    4,
+  );
 });
 
 test("no-mistakes uses its own composite managed-comment marker", () => {
   assert.equal(
-    noMistakesCommentMarker({ comments: { gate: "<!-- agent-gate:v1 -->" } }),
+    noMistakesCommentMarker(config),
     "<!-- agent-gate:v1 -->\n<!-- agent-gate-no-mistakes:v1 -->",
   );
 });
 
-test("nonzero exit cannot turn a passing word into a passing gate", () => {
-  const result = parseAxiResult(
+test("authenticated gate child receives no GitHub or Actions credentials", () => {
+  const env = gateEnvironment({
+    CODEX_API_KEY: "model-key",
+    GH_TOKEN: "github-key",
+    GITHUB_TOKEN: "github-key",
+    ACTIONS_RUNTIME_TOKEN: "runtime-key",
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-key",
+    ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.invalid",
+    ACTIONS_CACHE_URL: "https://cache.invalid",
+    ACTIONS_RESULTS_URL: "https://results.invalid",
+  });
+
+  assert.equal(env.CODEX_API_KEY, "model-key");
+  for (const name of [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "ACTIONS_RUNTIME_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_URL",
+    "ACTIONS_CACHE_URL",
+    "ACTIONS_RESULTS_URL",
+  ]) {
+    assert.equal(Object.hasOwn(env, name), false, name);
+  }
+});
+
+test("nonzero AXI exit produces a finalizable sanitized failure", () => {
+  const parsed = parseAxiResult(
     "run:\n  id: run-1\n  head: abcdef12\noutcome: passed\n",
     1,
   );
+  const artifact = sanitizedGateArtifact(parsed, HEAD);
 
-  assert.equal(result.status, "failed");
+  assert.equal(artifact.status, "failed");
+  assert.equal(normalizeGateArtifact(artifact, HEAD).status, "failed");
 });
 
 test("ask-user gate blocks and exposes only safe finding metadata", () => {
@@ -127,25 +182,23 @@ gate:
   status: awaiting_approval
   findings[1]{id,severity,file,action,description}:
     r1,error,src/auth.ts,ask-user,"Leaked ${secret}, requires a decision"`;
-  const result = parseAxiResult(output, 0);
+  const parsed = parseAxiResult(output, 0);
+  const artifact = sanitizedGateArtifact(parsed, HEAD);
   const comment = gateCommentBody({
-    status: result.status,
+    artifact,
     branch: "agent/issue-42-fix-flow",
-    sha: "abcdef123456",
-    runId: result.run.id,
-    findings: result.findings,
-    blocker: "decision required",
+    sha: HEAD,
   });
 
-  assert.equal(result.status, "blocked");
-  assert.equal(result.outcome, "ask-user");
-  assert.deepEqual(result.findings, [
+  assert.equal(artifact.status, "blocked");
+  assert.equal(artifact.outcome, "ask-user");
+  assert.deepEqual(artifact.findings, [
     { id: "r1", severity: "error", file: "src/auth.ts", action: "ask-user" },
   ]);
   assert.doesNotMatch(comment, new RegExp(secret));
   assert.match(
     comment,
-    /Finding descriptions and process output are intentionally omitted/,
+    /source intent, and process output are intentionally omitted/,
   );
 });
 
@@ -159,23 +212,24 @@ test("unknown decision gate fails closed", () => {
   assert.equal(result.outcome, "decision-gate");
 });
 
-test("trusted gate scope requires same-repo agent implementation metadata and branch", () => {
-  const trust = assertTrustedAgentPull(trustedPull(), config);
-
+test("trusted gate scope rejects forks, manual branches, and policy changes", () => {
+  const trust = assertTrustedAgentPull(trustedPull(), config, safeFiles);
   assert.equal(trust.sourceIssue, 42);
+
   assert.throws(
     () =>
       assertTrustedAgentPull(
         trustedPull({
           head: {
             ref: "agent/issue-42-fix-flow",
-            sha: "abcdef",
+            sha: HEAD,
             repo: { full_name: "fork/repo" },
           },
         }),
         config,
+        safeFiles,
       ),
-    /cross-repository/,
+    /same-repository/,
   );
   assert.throws(
     () =>
@@ -183,21 +237,82 @@ test("trusted gate scope requires same-repo agent implementation metadata and br
         trustedPull({
           head: {
             ref: "feature/manual",
-            sha: "abcdef",
+            sha: HEAD,
             repo: { full_name: "owner/repo" },
           },
         }),
         config,
+        safeFiles,
       ),
-    /untrusted same-repository/,
+    /branch does not match implementation source issue/,
+  );
+  assert.throws(
+    () =>
+      assertTrustedAgentPull(trustedPull(), config, [
+        { filename: ".no-mistakes.yaml" },
+      ]),
+    /privileged candidate paths/,
+  );
+  assert.throws(
+    () =>
+      assertTrustedAgentPull(trustedPull(), config, [
+        {
+          filename: "docs/new.md",
+          previous_filename: ".no-mistakes.yaml",
+        },
+      ]),
+    /privileged candidate paths/,
   );
 });
 
-test("validated head mismatch fails the freshness guard", () => {
-  const result = parseAxiResult(
-    "run:\n  id: run-4\n  head: abcdef12\noutcome: checks-passed\n",
+test("no-mistakes refuses non-bot agent PR authors", () => {
+  assert.throws(
+    () => assertTrustedAgentPull({ ...trustedPull(), user: { login: "contributor" } }, config, safeFiles),
+    /author must be github-actions\[bot\]/,
+  );
+});
+
+test("unpublished no-mistakes changes cannot produce a passing artifact", () => {
+  const parsed = parseAxiResult(
+    "run:\n  id: run-4\n  head: 99999999\noutcome: passed\n",
     0,
   );
+  const artifact = sanitizedGateArtifact(parsed, HEAD);
 
-  assert.equal(validatedHeadMatches(result, "999999999999"), false);
+  assert.equal(artifact.status, "failed");
+  assert.equal(artifact.outcome, "unpublished-changes");
+  assert.equal(artifact.validatedHead, "");
+
+  const dirtyArtifact = sanitizedGateArtifact(
+    parseAxiResult("run:\n  id: run-4\n  head: abcdef12\noutcome: passed\n", 0),
+    HEAD,
+    { unpublishedChanges: true },
+  );
+  assert.equal(dirtyArtifact.status, "failed");
+  assert.equal(dirtyArtifact.outcome, "unpublished-changes");
+});
+
+test("sanitized artifact cannot prove a different head", () => {
+  const parsed = parseAxiResult(
+    "run:\n  id: run-5\n  head: abcdef12\noutcome: passed\n",
+    0,
+  );
+  const artifact = sanitizedGateArtifact(parsed, HEAD);
+
+  assert.throws(
+    () =>
+      normalizeGateArtifact(
+        artifact,
+        "1111111111111111111111111111111111111111",
+      ),
+    /targets another head/,
+  );
+  assert.throws(
+    () =>
+      normalizeGateArtifact(
+        { ...artifact, validatedHead: "", status: "passed" },
+        HEAD,
+      ),
+    /cannot prove this head/,
+  );
 });

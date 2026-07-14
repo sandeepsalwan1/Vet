@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   createIssue,
   findExistingProposal,
   issueBody,
   proposalIdentity,
-  proposalIdentityMarker
+  proposalIdentityMarker,
+  validateProposalOutput
 } from "./agent-propose.mjs";
 
 const config = {
@@ -40,6 +42,27 @@ test("issueBody records both the managed marker and stable proposal identity", (
   assert.match(body, /<!-- agent-propose:v1 -->/);
   assert.match(body, new RegExp(proposalIdentity(proposal)));
   assert.match(body, /"proof": "CI"/);
+});
+
+test("trusted apply rejects malformed proposal output", () => {
+  assert.deepEqual(validateProposalOutput({ issues: [proposal] }), [proposal]);
+  assert.throws(
+    () => validateProposalOutput({ issues: [{ ...proposal, risk: "unknown" }] }),
+    /proposal output is invalid/
+  );
+  assert.throws(
+    () => validateProposalOutput({ issues: [{ ...proposal, extra: true }] }),
+    /proposal output is invalid/
+  );
+});
+
+test("proposal generation has no issue-write authority and uses pinned Codex", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/agent-propose.yml", import.meta.url), "utf8");
+  const generate = workflow.split("\n  apply:\n", 1)[0];
+
+  assert.doesNotMatch(generate, /issues:\s*write/);
+  assert.match(generate, /openai\/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56/);
+  assert.match(generate, /codex-version: "0\.144\.1"/);
 });
 
 test("createIssue reuses an open proposal and restores its triage label", () => {

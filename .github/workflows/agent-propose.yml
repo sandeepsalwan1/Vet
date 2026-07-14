@@ -5,26 +5,31 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 concurrency:
   group: agent-propose
   cancel-in-progress: false
 
 jobs:
-  propose:
-    name: propose
+  generate:
+    name: generate proposals
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - run: mkdir -p .agent-output
       - name: Run Codex proposer
-        uses: openai/codex-action@v1
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          codex-version: "0.144.1"
           prompt-file: .agent/prompts/propose.md
           sandbox: read-only
           effort: low
@@ -32,6 +37,31 @@ jobs:
           allow-bots: true
           codex-args: '["--output-schema",".agent/schemas/proposals.schema.json"]'
           output-file: .agent-output/proposals.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-proposals
+          path: .agent-output/proposals.json
+          if-no-files-found: error
+
+  apply:
+    name: apply proposals
+    needs: generate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-proposals
+          path: .agent-output
       - name: Create proposed issues
         env:
           GH_TOKEN: ${{ github.token }}

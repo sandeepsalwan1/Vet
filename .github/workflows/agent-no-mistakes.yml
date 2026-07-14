@@ -22,40 +22,144 @@ on:
         type: string
 
 permissions:
-  contents: write
-  pull-requests: write
-  issues: write
-  statuses: write
-  checks: read
+  contents: read
 
 concurrency:
   group: agent-no-mistakes-${{ inputs.pr-number }}
   cancel-in-progress: false
 
 jobs:
-  gate:
-    name: no-mistakes
+  prepare:
+    name: prepare no-mistakes
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      statuses: write
+    outputs:
+      head_ref: ${{ steps.prepare.outputs.head_ref }}
+      head_sha: ${{ steps.prepare.outputs.head_sha }}
+    steps:
+      - name: Mark requested PR head pending
+        id: pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          pull_file="$RUNNER_TEMP/no-mistakes-pull.json"
+          payload_file="$RUNNER_TEMP/no-mistakes-pending.json"
+          gh api "repos/$GITHUB_REPOSITORY/pulls/${{ inputs.pr-number }}" > "$pull_file"
+          head_repo="$(jq -r '.head.repo.full_name // ""' "$pull_file")"
+          head_sha="$(jq -r '.head.sha // ""' "$pull_file")"
+          if [[ "$head_repo" != "$GITHUB_REPOSITORY" || ! "$head_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "refusing pending status for an untrusted PR head" >&2
+            exit 1
+          fi
+          jq -n \
+            --arg state pending \
+            --arg context no-mistakes \
+            --arg description "no-mistakes gate preparing" \
+            --arg target_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{state: $state, context: $context, description: $description, target_url: $target_url}' \
+            > "$payload_file"
+          printf 'head_sha=%s\n' "$head_sha" >> "$GITHUB_OUTPUT"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$head_sha" --input "$payload_file" >/dev/null
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate trusted PR and mark pending
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/agent-no-mistakes-gate.mjs --pr-number "${{ inputs.pr-number }}" --prepare --json
+      - name: Record prepare failure
+        if: ${{ always() && steps.pending.outputs.head_sha != '' && steps.prepare.outcome != 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.pending.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          payload_file="$RUNNER_TEMP/no-mistakes-prepare-failed.json"
+          jq -n \
+            --arg state failure \
+            --arg context no-mistakes \
+            --arg description "no-mistakes preparation failed" \
+            --arg target_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{state: $state, context: $context, description: $description, target_url: $target_url}' \
+            > "$payload_file"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" --input "$payload_file" >/dev/null
+
+  gate:
+    name: run isolated no-mistakes
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    env:
+      DOCKER_IMAGE: node:22-bookworm@sha256:a25c9934ff6382cd4f08b6bc26c82bf4ea69b1e6f8dabfb2ead457374127c365
     steps:
       - uses: actions/checkout@v5
         with:
           ref: main
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.head_sha }}
+          path: candidate
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Mark gate pending
+      - name: Pin exact candidate branch
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: node scripts/agent-no-mistakes-gate.mjs --pr-number "${{ inputs.pr-number }}" --prepare --json
-      # no-mistakes v1.37 rewrites existing PR bodies with its supplied intent.
-      # Keep the agent metadata authoritative while allowing its CI reads.
-      - name: Preserve pull request metadata
+          HEAD_REF: ${{ needs.prepare.outputs.head_ref }}
+          HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
         run: |
-          node scripts/agent-no-mistakes-gate.mjs --write-gh-shim "$RUNNER_TEMP/no-mistakes-gh-shim/gh" --json
-          echo "$RUNNER_TEMP/no-mistakes-gh-shim" >> "$GITHUB_PATH"
-      - name: Install pinned gate tools
+          test "$(git -C candidate rev-parse HEAD)" = "$HEAD_SHA"
+          git -C candidate switch -C "$HEAD_REF" "$HEAD_SHA"
+          test "$(git -C candidate rev-parse HEAD)" = "$HEAD_SHA"
+      - name: Resolve trusted gate intent
+        env:
+          GATE_INTENT: ${{ inputs.intent }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
+        run: >-
+          node trusted/scripts/agent-no-mistakes-gate.mjs
+          --pr-number "${{ inputs.pr-number }}"
+          --prepare-gate
+          --expected-head "$HEAD_SHA"
+          --intent "$GATE_INTENT"
+          --intent-file "$RUNNER_TEMP/no-mistakes-intent"
+          --json
+      # Dependency lifecycle code runs before agent auth and only inside a
+      # credential-free container. The host npm invocation never runs scripts.
+      - name: Install candidate dependencies before agent auth
+        working-directory: candidate
+        run: |
+          env -u GH_TOKEN -u GITHUB_TOKEN -u AGENT_PAT -u OPENAI_API_KEY -u CODEX_API_KEY npm ci --ignore-scripts --no-audit --no-fund
+          docker pull "$DOCKER_IMAGE"
+          docker run --rm \
+            --network none \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --mount "type=bind,src=$PWD,dst=/source,readonly" \
+            --mount "type=bind,src=$PWD/node_modules,dst=/workspace/node_modules" \
+            --mount type=volume,dst=/workspace \
+            --workdir /workspace \
+            "$DOCKER_IMAGE" \
+            sh -lc 'tar -C /source --exclude=./node_modules --exclude=./.git -cf - . | tar -xf - -C /workspace && npm rebuild --no-audit --no-fund'
+          git diff --exit-code
+          git diff --cached --exit-code
+      - name: Install pinned gate tools before agent auth
         env:
           NO_MISTAKES_TELEMETRY: "0"
         run: |
@@ -82,37 +186,82 @@ jobs:
           agent_args_override:
             codex:
               - --sandbox
-              - workspace-write
+              - read-only
               - --ask-for-approval
               - never
               - -c
               - 'shell_environment_policy.inherit="core"'
               - -c
               - 'shell_environment_policy.ignore_default_excludes=false'
-              - -c
-              - 'sandbox_workspace_write.network_access=false'
           EOF
-      # Trusted same-repo agent PRs only. no-mistakes and repository commands
-      # still share a runner identity; .no-mistakes.yaml limits normal secret
-      # inheritance but cannot isolate credentials from hostile same-user code.
-      - name: Run authenticated no-mistakes gate
+      # This step has the model credential but no GitHub token. Repository
+      # commands run in the offline containers configured by trusted main.
+      - name: Run no-mistakes without mutation or provider steps
         id: gate
+        working-directory: candidate
         env:
           CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GATE_INTENT: ${{ inputs.intent }}
-          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ needs.prepare.outputs.head_ref }}
+          HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
           NM_HOME: ${{ runner.temp }}/no-mistakes
           NO_MISTAKES_TELEMETRY: "0"
-          NO_MISTAKES_FINALIZED_FILE: ${{ runner.temp }}/no-mistakes-finalized
-        run: |
-          env -u GATE_INTENT no-mistakes init
-          node scripts/agent-no-mistakes-gate.mjs --pr-number "${{ inputs.pr-number }}" --intent "$GATE_INTENT" --json
-      - name: Record setup or runner failure
-        if: ${{ always() && steps.gate.outcome != 'success' }}
+          VET_GATE_DEPS: ${{ github.workspace }}/candidate
+        run: >-
+          env -u GH_TOKEN -u GITHUB_TOKEN -u AGENT_PAT -u OPENAI_API_KEY
+          -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_CACHE_URL
+          -u ACTIONS_RESULTS_URL
+          node ../trusted/scripts/agent-no-mistakes-gate.mjs
+          --run-gate
+          --expected-head "$HEAD_SHA"
+          --expected-ref "$HEAD_REF"
+          --intent-file "$RUNNER_TEMP/no-mistakes-intent"
+          --result-file "$RUNNER_TEMP/no-mistakes-result/result.json"
+          --repo-dir "$PWD"
+          --json
+      - name: Upload sanitized gate result
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: no-mistakes-result-${{ inputs.pr-number }}
+          path: ${{ runner.temp }}/no-mistakes-result/result.json
+          if-no-files-found: ignore
+          retention-days: 1
+
+  finalize:
+    name: finalize no-mistakes
+    needs: [prepare, gate]
+    if: ${{ always() && needs.prepare.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+      issues: write
+      statuses: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Download sanitized gate result
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: no-mistakes-result-${{ inputs.pr-number }}
+          path: ${{ runner.temp }}/no-mistakes-result
+      - name: Publish terminal gate state
         env:
           GH_TOKEN: ${{ github.token }}
-          NO_MISTAKES_FINALIZED_FILE: ${{ runner.temp }}/no-mistakes-finalized
-        run: |
-          if [ ! -f "$NO_MISTAKES_FINALIZED_FILE" ]; then
-            node scripts/agent-no-mistakes-gate.mjs --pr-number "${{ inputs.pr-number }}" --setup-failed --json
-          fi
+          HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
+        run: >-
+          node scripts/agent-no-mistakes-gate.mjs
+          --pr-number "${{ inputs.pr-number }}"
+          --finalize
+          --expected-head "$HEAD_SHA"
+          --result-file "$RUNNER_TEMP/no-mistakes-result/result.json"
+          --json

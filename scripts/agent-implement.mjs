@@ -1,20 +1,25 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   AgentError,
   addLabels,
   dispatchWorkflow,
+  extractJson,
   fail,
   finish,
   ghApiJson,
   ghJson,
   gitOutput,
   issueLabels,
+  issueSnapshotSha256,
   loadConfig,
   markdownJsonBlock,
+  newestManagedComment,
   parseArgs,
+  privilegedCandidatePaths,
   readText,
   removeLabels,
   repoRoot,
@@ -35,7 +40,10 @@ function fetchIssue(config, issueNumber) {
 
 function writePrompt(config, issueNumber, outputPath) {
   const { issue, comments } = fetchIssue(config, issueNumber);
-  const triage = comments.find((comment) => String(comment.body ?? "").includes(config.comments.triage));
+  assertImplementationSource(config, issue);
+  const triage = newestManagedComment(comments, config.comments.triage, config.repo.owner);
+  if (!triage) throw new AgentError(`source issue #${issueNumber} has no trusted managed triage`, 1);
+  const snapshotSha256 = assertIssueMatchesTriageSnapshot(issue, triage, config.comments.triage);
   const prompt = `${readText(join(repoRoot(), ".agent/prompts/implement.md"))}
 
 ## Issue
@@ -50,11 +58,16 @@ ${issue.body ?? ""}
 
 ## Agent Triage
 
-${triage?.body ?? "No managed triage comment found."}
+${triage.body}
 `;
   mkdirSync(join(repoRoot(), ".agent-output"), { recursive: true });
   writeFileSync(outputPath, prompt);
-  return { issueNumber, outputPath };
+  const intentPath = join(dirname(outputPath), "implementation-intent.json");
+  writeFileSync(
+    intentPath,
+    `${JSON.stringify({ version: 1, issueNumber, issueSnapshotSha256: snapshotSha256 }, null, 2)}\n`
+  );
+  return { issueNumber, outputPath, intentPath };
 }
 
 function createPatch(outputPath) {
@@ -221,23 +234,302 @@ export function dispatchWorkflowAtRef(config, workflow, ref, dependencies = {}) 
 
 function checkEnvironment() {
   const env = { ...process.env };
-  for (const name of ["GH_TOKEN", "GITHUB_TOKEN", "AGENT_PAT", "OPENAI_API_KEY", "CODEX_API_KEY"]) {
+  for (const name of [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "AGENT_PAT",
+    "OPENAI_API_KEY",
+    "CODEX_API_KEY",
+    "ACTIONS_RUNTIME_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_URL",
+    "GITHUB_ENV",
+    "GITHUB_OUTPUT",
+    "GITHUB_PATH",
+    "GITHUB_STEP_SUMMARY",
+    "VERCEL_TOKEN",
+    "VERCEL_OIDC_TOKEN",
+    "HCLOUD_TOKEN",
+    "HETZNER_TOKEN",
+    "HETZNER_API_TOKEN"
+  ]) {
     delete env[name];
   }
   return env;
 }
 
+function sha256(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+export function triageSnapshotSha256(comment, marker) {
+  const text = String(comment?.body ?? "");
+  const afterMarker = text.slice(text.indexOf(marker) + String(marker).length);
+  const fences = [...afterMarker.matchAll(/```json\s*([\s\S]*?)```/gi)];
+  if (fences.length !== 1) throw new AgentError("trusted triage must contain exactly one structured decision", 1);
+  const decision = extractJson(fences[0][1]);
+  if (!/^[a-f0-9]{64}$/.test(String(decision?.issueSnapshotSha256 ?? ""))) {
+    throw new AgentError("trusted triage issue snapshot is invalid", 1);
+  }
+  return decision.issueSnapshotSha256;
+}
+
+export function assertIssueMatchesTriageSnapshot(issue, triage, marker) {
+  const expected = triageSnapshotSha256(triage, marker);
+  const current = issueSnapshotSha256(issue);
+  if (expected !== current) throw new AgentError(`source issue #${issue.number} changed after trusted triage`, 1);
+  return current;
+}
+
+function exactBaseSha(config, cwd = repoRoot()) {
+  const head = gitOutput(["rev-parse", "HEAD"], { cwd });
+  const remote = runCommand("git", ["rev-parse", `refs/remotes/origin/${config.repo.defaultBranch}`], {
+    cwd,
+    check: false
+  });
+  if (remote.status !== 0 || remote.stdout.trim() !== head) {
+    throw new AgentError(`validation base must equal origin/${config.repo.defaultBranch}`, 1);
+  }
+  return head;
+}
+
+function readArtifactMetadata(path, label = "integrity manifest") {
+  if (!existsSync(path)) throw new AgentError(`${label} not found: ${path}`, 2);
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new AgentError(`${label} is not valid JSON`, 1);
+  }
+  const expectedKeys = [
+    "baseSha",
+    "changedPaths",
+    "checks",
+    "codexOutputSha256",
+    "issueNumber",
+    "issueSnapshotSha256",
+    "patchSha256",
+    "resultTree",
+    "version"
+  ];
+  if (
+    JSON.stringify(Object.keys(manifest ?? {}).sort()) !== JSON.stringify(expectedKeys) ||
+    manifest?.version !== 1 ||
+    !Number.isInteger(manifest.issueNumber) ||
+    !/^[a-f0-9]{64}$/.test(manifest.issueSnapshotSha256 ?? "") ||
+    !/^[a-f0-9]{40,64}$/.test(manifest.baseSha ?? "") ||
+    !/^[a-f0-9]{40,64}$/.test(manifest.resultTree ?? "") ||
+    !/^[a-f0-9]{64}$/.test(manifest.patchSha256 ?? "") ||
+    !/^[a-f0-9]{64}$/.test(manifest.codexOutputSha256 ?? "") ||
+    !Array.isArray(manifest.changedPaths) ||
+    !manifest.changedPaths.every((path) => typeof path === "string") ||
+    new Set(manifest.changedPaths).size !== manifest.changedPaths.length ||
+    !Array.isArray(manifest.checks) ||
+    !manifest.checks.every((command) => typeof command === "string")
+  ) {
+    throw new AgentError(`${label} is invalid`, 1);
+  }
+  return manifest;
+}
+
+function readIntegrityManifest(path) {
+  return readArtifactMetadata(path);
+}
+
+function readImplementationIntent(path, issueNumber) {
+  if (!existsSync(path)) throw new AgentError(`implementation intent not found: ${path}`, 2);
+  let intent;
+  try {
+    intent = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new AgentError("implementation intent is not valid JSON", 1);
+  }
+  if (
+    JSON.stringify(Object.keys(intent ?? {}).sort()) !==
+      JSON.stringify(["issueNumber", "issueSnapshotSha256", "version"]) ||
+    intent.version !== 1 ||
+    intent.issueNumber !== issueNumber ||
+    !/^[a-f0-9]{64}$/.test(intent.issueSnapshotSha256 ?? "")
+  ) {
+    throw new AgentError("implementation intent is invalid", 1);
+  }
+  return intent;
+}
+
+function stagedChangedPaths(cwd) {
+  return runCommand("git", ["diff", "--cached", "--no-renames", "--name-only"], { cwd }).stdout
+    .split("\n")
+    .map((path) => path.trim())
+    .filter(Boolean)
+    .sort();
+}
+
+function pathWithin(parent, candidate) {
+  const path = relative(resolve(parent), resolve(candidate));
+  return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
+}
+
+export function preparePatchValidation(
+  config,
+  issueNumber,
+  patchPath,
+  codexOutputPath,
+  preparedPath,
+  candidateDir,
+  cwd = repoRoot(),
+  intentPath = join(dirname(patchPath), "implementation-intent.json")
+) {
+  if (typeof patchPath !== "string" || !existsSync(patchPath)) throw new AgentError(`patch not found: ${patchPath}`, 2);
+  if (typeof codexOutputPath !== "string" || !existsSync(codexOutputPath)) {
+    throw new AgentError(`agent output not found: ${codexOutputPath}`, 2);
+  }
+  if (typeof preparedPath !== "string" || !preparedPath) throw new AgentError("missing prepared metadata path", 2);
+  if (typeof candidateDir !== "string" || !candidateDir) throw new AgentError("missing candidate directory", 2);
+  if (pathWithin(cwd, candidateDir) || pathWithin(candidateDir, cwd)) {
+    throw new AgentError("candidate directory must be isolated from the trusted checkout", 2);
+  }
+  if (pathWithin(cwd, preparedPath) || pathWithin(candidateDir, preparedPath)) {
+    throw new AgentError("prepared metadata must be isolated from the checkout and candidate", 2);
+  }
+  if (existsSync(candidateDir)) throw new AgentError(`candidate directory already exists: ${candidateDir}`, 2);
+  const baseSha = exactBaseSha(config, cwd);
+  const intent = readImplementationIntent(intentPath, issueNumber);
+  const patchAction = applyPatchIdempotently(patchPath, cwd);
+  if (patchAction !== "applied") throw new AgentError("validation patch must apply cleanly to the exact base", 1);
+  const changed = stagedChangedPaths(cwd);
+  const blockedPaths = privilegedPatchPaths(changed);
+  if (blockedPaths.length) throw new AgentError("agent patch touches privileged paths", 1, { paths: blockedPaths });
+  runCommand("git", ["diff", "--cached", "--check"], { cwd });
+  const unstaged = runCommand("git", ["diff", "--no-renames", "--name-only"], { cwd }).stdout.trim();
+  if (unstaged) throw new AgentError("patch preparation produced unstaged changes", 1);
+  const resultTree = gitOutput(["write-tree"], { cwd });
+  const prepared = {
+    version: 1,
+    issueNumber,
+    issueSnapshotSha256: intent.issueSnapshotSha256,
+    baseSha,
+    resultTree,
+    patchSha256: sha256(patchPath),
+    codexOutputSha256: sha256(codexOutputPath),
+    changedPaths: changed,
+    checks: [...config.commands.defaultImplementChecks]
+  };
+  mkdirSync(candidateDir);
+  runCommand("git", ["checkout-index", "--all", `--prefix=${candidateDir}/`], { cwd });
+  writeFileSync(preparedPath, `${JSON.stringify(prepared, null, 2)}\n`);
+  return { ...prepared, candidateDir };
+}
+
+export function runPatchValidationChecks(config, cwd = repoRoot()) {
+  if (process.env.AGENT_VALIDATION_CONTAINER !== "1") {
+    throw new AgentError("implementation checks must run in the isolated validation container", 1);
+  }
+  const env = checkEnvironment();
+  for (const command of config.commands.defaultImplementChecks) runShell(command, { env, cwd });
+  return { checks: [...config.commands.defaultImplementChecks] };
+}
+
+export function finalizePatchValidation(
+  config,
+  issueNumber,
+  patchPath,
+  codexOutputPath,
+  preparedPath,
+  manifestPath,
+  cwd = repoRoot()
+) {
+  if (typeof patchPath !== "string" || !existsSync(patchPath)) throw new AgentError(`patch not found: ${patchPath}`, 2);
+  if (typeof codexOutputPath !== "string" || !existsSync(codexOutputPath)) {
+    throw new AgentError(`agent output not found: ${codexOutputPath}`, 2);
+  }
+  if (typeof manifestPath !== "string" || !manifestPath) throw new AgentError("missing integrity manifest path", 2);
+  const prepared = readArtifactMetadata(preparedPath, "prepared validation metadata");
+  if (prepared.issueNumber !== issueNumber) throw new AgentError("prepared validation issue does not match", 1);
+  if (JSON.stringify(prepared.checks) !== JSON.stringify(config.commands.defaultImplementChecks)) {
+    throw new AgentError("prepared validation checks do not match trusted config", 1);
+  }
+  if (prepared.baseSha !== exactBaseSha(config, cwd)) throw new AgentError("prepared validation base does not match", 1);
+  if (prepared.patchSha256 !== sha256(patchPath)) throw new AgentError("prepared patch integrity check failed", 1);
+  if (prepared.codexOutputSha256 !== sha256(codexOutputPath)) {
+    throw new AgentError("prepared agent output integrity check failed", 1);
+  }
+  const unstaged = runCommand("git", ["diff", "--no-renames", "--name-only"], { cwd }).stdout.trim();
+  if (unstaged) throw new AgentError("prepared validation checkout has unstaged changes", 1);
+  const changed = stagedChangedPaths(cwd);
+  if (JSON.stringify(changed) !== JSON.stringify(prepared.changedPaths)) {
+    throw new AgentError("prepared validation paths changed", 1);
+  }
+  const blockedPaths = privilegedPatchPaths(changed);
+  if (blockedPaths.length) throw new AgentError("prepared validation contains privileged paths", 1, { paths: blockedPaths });
+  if (gitOutput(["write-tree"], { cwd }) !== prepared.resultTree) {
+    throw new AgentError("prepared validation tree changed", 1);
+  }
+  writeFileSync(manifestPath, `${JSON.stringify(prepared, null, 2)}\n`);
+  return prepared;
+}
+
+export function verifyValidatedArtifactBase(
+  config,
+  issueNumber,
+  patchPath,
+  codexOutputPath,
+  manifestPath,
+  cwd = repoRoot(),
+  expectedIssueSnapshotSha256
+) {
+  if (typeof patchPath !== "string" || !existsSync(patchPath)) throw new AgentError(`patch not found: ${patchPath}`, 2);
+  if (typeof codexOutputPath !== "string" || !existsSync(codexOutputPath)) {
+    throw new AgentError(`agent output not found: ${codexOutputPath}`, 2);
+  }
+  const manifest = readIntegrityManifest(manifestPath);
+  if (manifest.issueNumber !== issueNumber) throw new AgentError("integrity manifest issue does not match", 1);
+  if (manifest.issueSnapshotSha256 !== expectedIssueSnapshotSha256) {
+    throw new AgentError("integrity manifest source issue snapshot does not match", 1);
+  }
+  if (manifest.baseSha !== exactBaseSha(config, cwd)) throw new AgentError("integrity manifest base does not match", 1);
+  if (manifest.patchSha256 !== sha256(patchPath)) throw new AgentError("patch integrity check failed", 1);
+  if (manifest.codexOutputSha256 !== sha256(codexOutputPath)) {
+    throw new AgentError("agent output integrity check failed", 1);
+  }
+  if (JSON.stringify(manifest.checks) !== JSON.stringify(config.commands.defaultImplementChecks)) {
+    throw new AgentError("integrity manifest checks do not match trusted config", 1);
+  }
+  const blockedPaths = privilegedPatchPaths(manifest.changedPaths);
+  if (blockedPaths.length) throw new AgentError("integrity manifest contains privileged paths", 1, { paths: blockedPaths });
+  return manifest;
+}
+
+function verifyValidatedTree(manifest, cwd = repoRoot()) {
+  const ancestor = runCommand("git", ["merge-base", "--is-ancestor", manifest.baseSha, "HEAD"], {
+    cwd,
+    check: false
+  });
+  if (ancestor.status !== 0) throw new AgentError("agent branch is not based on the validated base", 1);
+  const unstaged = runCommand("git", ["diff", "--no-renames", "--name-only"], { cwd }).stdout.trim();
+  if (unstaged) throw new AgentError("credentialed apply produced unstaged changes", 1);
+  const tree = gitOutput(["write-tree"], { cwd });
+  if (tree !== manifest.resultTree) throw new AgentError("applied tree does not match validated artifact", 1);
+  const changed = runCommand("git", ["diff", "--no-renames", "--name-only", manifest.baseSha], { cwd }).stdout
+    .split("\n")
+    .map((path) => path.trim())
+    .filter(Boolean)
+    .sort();
+  if (JSON.stringify(changed) !== JSON.stringify([...manifest.changedPaths].sort())) {
+    throw new AgentError("applied paths do not match validated artifact", 1);
+  }
+  return tree;
+}
+
 export function privilegedPatchPaths(paths) {
-  return paths.filter(
-    (path) =>
-      path.startsWith(".agent/") ||
-      path.startsWith(".github/") ||
-      path.startsWith("scripts/agent-") ||
-      path === "AGENTS.md" ||
-      path === "package.json" ||
-      path === "package-lock.json" ||
-      path === ".npmrc"
-  );
+  return privilegedCandidatePaths(paths);
+}
+
+export function assertImplementationSource(config, issue) {
+  const labels = issueLabels(issue);
+  if (labels.includes(config.labels.blocked)) {
+    throw new AgentError(`source issue #${issue.number} is blocked`, 1);
+  }
+  return labels;
 }
 
 export function implementationPullLabels(config, sourceLabels) {
@@ -251,13 +543,6 @@ export function implementationPullLabels(config, sourceLabels) {
     if (sourceLabels.includes(propagated)) labels.push(propagated);
   }
   return [...new Set(labels)];
-}
-
-function changedPaths(config, cwd = repoRoot()) {
-  const base = `refs/remotes/origin/${config.repo.defaultBranch}`;
-  const committed = runCommand("git", ["diff", "--name-only", `${base}...HEAD`], { cwd }).stdout;
-  const staged = runCommand("git", ["diff", "--cached", "--name-only"], { cwd }).stdout;
-  return [...new Set(`${committed}\n${staged}`.split("\n").map((path) => path.trim()).filter(Boolean))];
 }
 
 function normalizeImplementationError(error) {
@@ -301,13 +586,18 @@ ${markdownJsonBlock({
   return result;
 }
 
-export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputPath, dryRun) {
+export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputPath, manifestPath, dryRun) {
   if (!existsSync(patchPath)) throw new AgentError(`patch not found: ${patchPath}`, 2);
-  const { issue } = fetchIssue(config, issueNumber);
-  const labels = issueLabels(issue);
+  const { issue, comments } = fetchIssue(config, issueNumber);
+  const labels = assertImplementationSource(config, issue);
+  const triage = newestManagedComment(comments, config.comments.triage, config.repo.owner);
+  if (!triage) throw new AgentError(`source issue #${issueNumber} has no trusted managed triage`, 1);
+  const snapshotSha256 = assertIssueMatchesTriageSnapshot(issue, triage, config.comments.triage);
+  if (!dryRun) runCommand("gh", ["auth", "setup-git", "--hostname", "github.com"]);
   const metadata = {
     sourceIssue: issue.number,
     sourceLabels: labels,
+    issueSnapshotSha256: snapshotSha256,
     automergeEligible:
       labels.includes(config.labels.automerge) &&
       !labels.includes(config.labels.priorityHigh) &&
@@ -321,7 +611,7 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
   const codexOutput = codexOutputPath && existsSync(codexOutputPath) ? readText(codexOutputPath) : "";
 
   if (existingPull?.merged_at) {
-    if (!dryRun) removeLabels(config, issueNumber, [config.labels.implement, config.labels.blocked], false);
+    if (!dryRun) removeLabels(config, issueNumber, [config.labels.implement], false);
     return {
       branch,
       action: dryRun ? "would-reuse-merged-pr" : "reused-merged-pr",
@@ -336,6 +626,15 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
     }
     throw new AgentError(`existing agent PR #${existingPull.number} is closed`, 1);
   }
+  const manifest = verifyValidatedArtifactBase(
+    config,
+    issueNumber,
+    patchPath,
+    codexOutputPath,
+    manifestPath,
+    repoRoot(),
+    snapshotSha256
+  );
   if (dryRun) {
     return {
       branch,
@@ -346,17 +645,16 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
     };
   }
 
-  runCommand("gh", ["auth", "setup-git", "--hostname", "github.com"]);
   checkoutAgentBranch(config, branch, remoteExists);
-  const patchAction = applyPatchIdempotently(patchPath);
-  const env = checkEnvironment();
-  const privilegedPaths = privilegedPatchPaths(changedPaths(config));
-  if (privilegedPaths.length) {
-    throw new AgentError("agent patch touches privileged paths", 1, { paths: privilegedPaths });
+  const branchHead = gitOutput(["rev-parse", "HEAD"]);
+  const branchTree = gitOutput(["write-tree"]);
+  if (branchHead !== manifest.baseSha && branchTree !== manifest.resultTree) {
+    throw new AgentError("agent branch does not match the validated base or result tree", 1);
   }
+  const patchAction = applyPatchIdempotently(patchPath);
+  verifyValidatedTree(manifest);
   let committed = false;
   const staged = gitOutput(["diff", "--cached", "--name-only"]);
-  for (const command of config.commands.defaultImplementChecks) runShell(command, { env });
   if (staged) {
     runCommand("git", ["config", "user.name", "github-actions[bot]"]);
     runCommand("git", ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
@@ -373,7 +671,7 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
     ci: dispatchWorkflowAtRef(config, "ci.yml", branch),
     review: dispatchWorkflow(config, "agent-review.yml", { "pr-number": pull.number }, false)
   };
-  removeLabels(config, issueNumber, [config.labels.implement, config.labels.blocked], false);
+  removeLabels(config, issueNumber, [config.labels.implement], false);
   upsertManagedComment({
     config,
     number: issueNumber,
@@ -410,6 +708,45 @@ export async function main() {
     finish({ ok: true, message: `created implementation patch for #${issueNumber}`, ...createPatch(args["create-patch"]) }, Boolean(args.json));
     return;
   }
+  if (args["prepare-validation"]) {
+    if (!args["prepared-metadata"]) throw new AgentError("missing --prepared-metadata", 2);
+    if (!args["candidate-dir"]) throw new AgentError("missing --candidate-dir", 2);
+    const result = preparePatchValidation(
+      config,
+      issueNumber,
+      args["prepare-validation"],
+      args["codex-output"],
+      args["prepared-metadata"],
+      args["candidate-dir"]
+    );
+    finish(
+      { ok: true, message: `prepared isolated implementation validation for #${issueNumber}`, result },
+      Boolean(args.json)
+    );
+    return;
+  }
+  if (args["run-validation-checks"]) {
+    const result = runPatchValidationChecks(config);
+    finish({ ok: true, message: `ran isolated implementation checks for #${issueNumber}`, result }, Boolean(args.json));
+    return;
+  }
+  if (args["finalize-validation"]) {
+    if (!args["prepared-metadata"]) throw new AgentError("missing --prepared-metadata", 2);
+    if (!args["write-manifest"]) throw new AgentError("missing --write-manifest", 2);
+    const result = finalizePatchValidation(
+      config,
+      issueNumber,
+      args["finalize-validation"],
+      args["codex-output"],
+      args["prepared-metadata"],
+      args["write-manifest"]
+    );
+    finish(
+      { ok: true, message: `finalized isolated implementation validation for #${issueNumber}`, result },
+      Boolean(args.json)
+    );
+    return;
+  }
   if (args["mark-failed"]) {
     const actionsRun =
       process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
@@ -426,8 +763,16 @@ export async function main() {
     return;
   }
   if (args["apply-patch"]) {
+    if (!args["integrity-manifest"]) throw new AgentError("missing --integrity-manifest", 2);
     try {
-      const result = applyPatchAndOpenPr(config, issueNumber, args["apply-patch"], args["codex-output"], dryRun);
+      const result = applyPatchAndOpenPr(
+        config,
+        issueNumber,
+        args["apply-patch"],
+        args["codex-output"],
+        args["integrity-manifest"],
+        dryRun
+      );
       finish(
         { ok: true, message: `${dryRun ? "would upsert" : "upserted"} implementation PR for #${issueNumber}`, result },
         Boolean(args.json)
@@ -439,7 +784,10 @@ export async function main() {
     }
     return;
   }
-  throw new AgentError("missing --write-prompt, --create-patch, --apply-patch, or --mark-failed", 2);
+  throw new AgentError(
+    "missing --write-prompt, --create-patch, --prepare-validation, --run-validation-checks, --finalize-validation, --apply-patch, or --mark-failed",
+    2
+  );
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {

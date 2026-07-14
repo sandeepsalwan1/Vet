@@ -55,46 +55,109 @@ on:
         type: string
 
 permissions:
-  actions: write
   contents: read
-  issues: write
-  pull-requests: write
-  statuses: write
 
 concurrency:
   group: agent-proof-${{ inputs.target-kind }}-${{ inputs.target-number }}
   cancel-in-progress: false
 
 jobs:
-  proof:
-    name: proof
+  prepare:
+    name: prepare proof
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      statuses: write
+    outputs:
+      request_b64: ${{ steps.prepare.outputs.request_b64 }}
+      requested: ${{ steps.prepare.outputs.requested }}
+      proof_kind: ${{ steps.prepare.outputs.proof_kind }}
+      sha: ${{ steps.begin.outputs.sha }}
+      checkout_ref: ${{ steps.prepare.outputs.checkout_ref }}
     steps:
+      - name: Mark proof pending
+        id: begin
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_KIND: ${{ inputs.target-kind }}
+          TARGET_NUMBER: ${{ inputs.target-number }}
+        run: |
+          if [ "$TARGET_KIND" = pr ]; then
+            sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$TARGET_NUMBER" --jq .head.sha)"
+            gh api "repos/$GITHUB_REPOSITORY/statuses/$sha" -X POST \
+              -f state=pending \
+              -f context=agent-proof \
+              -f description="agent proof started" \
+              -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-      - run: npm ci
-      - name: Install Crabbox when remote proof is configured
+      - name: Prepare trusted proof request
+        id: prepare
         env:
           GH_TOKEN: ${{ github.token }}
-          CRABBOX_COORDINATOR_TOKEN: ${{ secrets.CRABBOX_COORDINATOR_TOKEN }}
-          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
-          HETZNER_TOKEN: ${{ secrets.HETZNER_TOKEN }}
-          HETZNER_API_TOKEN: ${{ secrets.HETZNER_API_TOKEN }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_OIDC_TOKEN: ${{ secrets.VERCEL_OIDC_TOKEN }}
-          CRABBOX_VERCEL_READY: ${{ vars.CRABBOX_VERCEL_READY }}
-          CRABBOX_HETZNER_READY: ${{ vars.CRABBOX_HETZNER_READY }}
+          PROOF_KIND: ${{ inputs.proof-kind }}
+          PROOF_ROUTE: ${{ inputs.route }}
+          STATUS_SHA: ${{ steps.begin.outputs.sha }}
         run: |
-          if [ -z "${CRABBOX_COORDINATOR_TOKEN:-}${HCLOUD_TOKEN:-}${HETZNER_TOKEN:-}${HETZNER_API_TOKEN:-}" ] && { [ "$CRABBOX_VERCEL_READY" != true ] || [ -z "${VERCEL_TOKEN:-}${VERCEL_OIDC_TOKEN:-}" ]; }; then
-            exit 0
+          args=(
+            --prepare
+            --prepare-file "$RUNNER_TEMP/agent-proof-request.json"
+            --target-kind "${{ inputs.target-kind }}"
+            --target-number "${{ inputs.target-number }}"
+            --status-sha "$STATUS_SHA"
+            --json
+          )
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            args+=(--explicit)
           fi
+          if [ -n "$PROOF_KIND" ] && [ "$PROOF_KIND" != auto ]; then
+            args+=(--proof-kind "$PROOF_KIND")
+          fi
+          if [ -n "$PROOF_ROUTE" ]; then
+            args+=(--route "$PROOF_ROUTE")
+          fi
+          node trusted/scripts/agent-proof.mjs "${args[@]}"
+
+  remote:
+    name: remote proof
+    needs: prepare
+    if: needs.prepare.outputs.requested == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      outcome_b64: ${{ steps.remote.outputs.outcome_b64 }}
+      needs_local: ${{ steps.remote.outputs.needs_local }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Crabbox without provider credentials
+        run: |
           download="$RUNNER_TEMP/crabbox-download"
           bin="$RUNNER_TEMP/crabbox-bin"
           mkdir -p "$download" "$bin"
-          if ! gh release download v0.38.0 --repo openclaw/crabbox --pattern crabbox_0.38.0_linux_amd64.tar.gz --pattern checksums.txt --dir "$download"; then
+          if ! curl -fsSLo "$download/crabbox_0.38.0_linux_amd64.tar.gz" \
+            https://github.com/openclaw/crabbox/releases/download/v0.38.0/crabbox_0.38.0_linux_amd64.tar.gz || \
+            ! curl -fsSLo "$download/checksums.txt" \
+            https://github.com/openclaw/crabbox/releases/download/v0.38.0/checksums.txt; then
             echo "Crabbox download unavailable; proof script will use its configured fallback."
             exit 0
           fi
@@ -105,26 +168,28 @@ jobs:
           tar -xzf "$download/crabbox_0.38.0_linux_amd64.tar.gz" -C "$bin"
           chmod 755 "$bin/crabbox"
           echo "$bin" >> "$GITHUB_PATH"
-      - name: Install Vercel Sandbox bridge when configured
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_OIDC_TOKEN: ${{ secrets.VERCEL_OIDC_TOKEN }}
-          CRABBOX_VERCEL_READY: ${{ vars.CRABBOX_VERCEL_READY }}
+      - name: Install Vercel Sandbox bridge without provider credentials
         run: |
-          if [ "$CRABBOX_VERCEL_READY" = true ] && [ -n "${VERCEL_TOKEN:-}${VERCEL_OIDC_TOKEN:-}" ]; then
-            bridge_dir="$RUNNER_TEMP/crabbox-vercel-bridge"
-            bridge="$RUNNER_TEMP/crabbox-vercel-sandbox-bridge"
-            if npm install --prefix "$bridge_dir" --no-save --package-lock=false @vercel/sandbox@2.6.0 sandbox@3.4.2; then
-              echo '#!/bin/sh' > "$bridge"
-              echo "cd '$bridge_dir'" >> "$bridge"
-              echo 'exec crabbox __vercel-sandbox-bridge "$@"' >> "$bridge"
-              chmod 755 "$bridge"
-              echo "CRABBOX_VERCEL_SANDBOX_BRIDGE=$bridge" >> "$GITHUB_ENV"
-            fi
+          bridge_dir="$RUNNER_TEMP/crabbox-vercel-bridge"
+          bridge="$RUNNER_TEMP/crabbox-vercel-sandbox-bridge"
+          mkdir -p "$bridge_dir"
+          cp trusted/.agent/crabbox-vercel-bridge/package.json trusted/.agent/crabbox-vercel-bridge/package-lock.json "$bridge_dir/"
+          if (cd "$bridge_dir" && npm ci --ignore-scripts --no-audit --no-fund); then
+            echo '#!/bin/sh' > "$bridge"
+            echo "cd '$bridge_dir'" >> "$bridge"
+            echo 'exec crabbox __vercel-sandbox-bridge "$@"' >> "$bridge"
+            chmod 755 "$bridge"
+            echo "CRABBOX_VERCEL_SANDBOX_BRIDGE=$bridge" >> "$GITHUB_ENV"
           fi
-      - name: Run proof
+      - name: Pin trusted Crabbox configuration
+        run: |
+          config="$RUNNER_TEMP/crabbox-trusted-config.yaml"
+          echo '{}' > "$config"
+          echo "CRABBOX_CONFIG=$config" >> "$GITHUB_ENV"
+      - name: Run remote proof orchestration
+        id: remote
         env:
-          GH_TOKEN: ${{ github.token }}
+          REQUEST_B64: ${{ needs.prepare.outputs.request_b64 }}
           CRABBOX_COORDINATOR_TOKEN: ${{ secrets.CRABBOX_COORDINATOR_TOKEN }}
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
           HETZNER_TOKEN: ${{ secrets.HETZNER_TOKEN }}
@@ -133,23 +198,139 @@ jobs:
           VERCEL_OIDC_TOKEN: ${{ secrets.VERCEL_OIDC_TOKEN }}
           CRABBOX_VERCEL_READY: ${{ vars.CRABBOX_VERCEL_READY }}
           CRABBOX_HETZNER_READY: ${{ vars.CRABBOX_HETZNER_READY }}
-          PROOF_KIND: ${{ inputs.proof-kind }}
-          PROOF_ROUTE: ${{ inputs.route }}
         run: |
-          args=(--target-kind "${{ inputs.target-kind }}" --target-number "${{ inputs.target-number }}" --run --json)
-          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
-            args+=(--explicit)
-          fi
-          if [ -n "$PROOF_KIND" ] && [ "$PROOF_KIND" != auto ]; then
-            args+=(--proof-kind "$PROOF_KIND")
-          fi
-          if [ -n "$PROOF_ROUTE" ]; then
-            args+=(--route "$PROOF_ROUTE")
-          fi
-          node scripts/agent-proof.mjs "${args[@]}"
+          node trusted/scripts/agent-proof.mjs \
+            --execute-remote \
+            --request-base64 "$REQUEST_B64" \
+            --workdir "$GITHUB_WORKSPACE/trusted" \
+            --json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: agent-proof-${{ inputs.target-kind }}-${{ inputs.target-number }}
-          path: .agent-output/*
+          path: trusted/.agent-output/*
           if-no-files-found: ignore
+
+  local:
+    name: credential-free fallback
+    needs:
+      - prepare
+      - remote
+    if: >-
+      always() &&
+      needs.prepare.outputs.requested == 'true' &&
+      needs.prepare.outputs.proof_kind == 'CI' &&
+      (needs.remote.result != 'success' || needs.remote.outputs.needs_local == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      outcome_b64: ${{ steps.local.outputs.outcome_b64 }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          path: target
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run credential-free local proof
+        id: local
+        env:
+          REQUEST_B64: ${{ needs.prepare.outputs.request_b64 }}
+          PRIOR_B64: ${{ needs.remote.outputs.outcome_b64 }}
+          REMOTE_JOB_RESULT: ${{ needs.remote.result }}
+        run: |
+          args=(
+            --execute-local
+            --request-base64 "$REQUEST_B64"
+            --remote-job-result "$REMOTE_JOB_RESULT"
+            --workdir "$GITHUB_WORKSPACE/target"
+            --json
+          )
+          if [ -n "$PRIOR_B64" ]; then
+            args+=(--prior-base64 "$PRIOR_B64")
+          fi
+          node trusted/scripts/agent-proof.mjs "${args[@]}"
+
+  finalize:
+    name: finalize proof
+    needs:
+      - prepare
+      - remote
+      - local
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+      issues: write
+      pull-requests: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@v5
+        continue-on-error: true
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - name: Finalize proof result
+        id: finalize
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUEST_B64: ${{ needs.prepare.outputs.request_b64 }}
+          REMOTE_OUTCOME_B64: ${{ needs.remote.outputs.outcome_b64 }}
+          LOCAL_OUTCOME_B64: ${{ needs.local.outputs.outcome_b64 }}
+          REMOTE_JOB_RESULT: ${{ needs.remote.result }}
+          LOCAL_JOB_RESULT: ${{ needs.local.result }}
+          STATUS_SHA: ${{ needs.prepare.outputs.sha }}
+          TERMINAL_MARKER: ${{ runner.temp }}/agent-proof-terminal.json
+        run: |
+          args=(
+            --finalize
+            --request-base64 "$REQUEST_B64"
+            --remote-job-result "$REMOTE_JOB_RESULT"
+            --local-job-result "$LOCAL_JOB_RESULT"
+            --status-sha "$STATUS_SHA"
+            --terminal-marker "$TERMINAL_MARKER"
+            --json
+          )
+          if [ -n "$REMOTE_OUTCOME_B64" ]; then
+            args+=(--remote-outcome-base64 "$REMOTE_OUTCOME_B64")
+          fi
+          if [ -n "$LOCAL_OUTCOME_B64" ]; then
+            args+=(--local-outcome-base64 "$LOCAL_OUTCOME_B64")
+          fi
+          node trusted/scripts/agent-proof.mjs "${args[@]}"
+      - name: Enforce terminal proof status
+        if: always() && needs.prepare.outputs.sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS_SHA: ${{ needs.prepare.outputs.sha }}
+          TERMINAL_MARKER: ${{ runner.temp }}/agent-proof-terminal.json
+        run: |
+          state=failure
+          description="agent proof workflow failed before terminal result"
+          if [ -s "$TERMINAL_MARKER" ] && \
+            [ "$(jq -r '.sha // ""' "$TERMINAL_MARKER")" = "$STATUS_SHA" ]; then
+            marker_state="$(jq -r '.state // ""' "$TERMINAL_MARKER")"
+            marker_description="$(jq -r '.description // ""' "$TERMINAL_MARKER")"
+            if [ "$marker_state" = success ] || [ "$marker_state" = failure ]; then
+              state="$marker_state"
+            fi
+            if [ -n "$marker_description" ]; then
+              description="${marker_description:0:140}"
+            fi
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$STATUS_SHA" -X POST \
+            -f state="$state" \
+            -f context=agent-proof \
+            -f description="$description" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

@@ -1,16 +1,35 @@
 agent: codex
 allow_repo_commands: false
 
-# These commands come from the trusted default branch. The clean environment
-# prevents normal child-process inheritance of the gate daemon's credentials.
-# This is defense in depth, not isolation from hostile same-user code.
+# Trusted default-branch commands copy the managed no-mistakes worktree into
+# an anonymous volume. Candidate code gets no network, host credentials, or
+# writable host mounts; preinstalled dependencies are mounted read-only.
 commands:
   test: >-
-    env -i HOME="$HOME" PATH="$PATH" CI=true TMPDIR="${TMPDIR:-/tmp}"
-    sh -c 'npm ci && npm run typecheck && npm run build && npm run test:scenarios'
+    docker run --rm --pull never --network none --read-only --cap-drop ALL
+    --pids-limit 512 --security-opt no-new-privileges
+    --tmpfs /tmp:rw,nosuid,nodev,size=1073741824
+    --mount type=bind,src="$PWD",dst=/source,readonly
+    --mount type=bind,src="${VET_GATE_DEPS:?missing VET_GATE_DEPS}/node_modules",dst=/workspace/node_modules,readonly
+    --mount type=volume,dst=/workspace --workdir /workspace
+    --env HOME=/tmp/home --env npm_config_cache=/tmp/npm-cache
+    node:22-bookworm@sha256:a25c9934ff6382cd4f08b6bc26c82bf4ea69b1e6f8dabfb2ead457374127c365 sh -lc
+    'mkdir -p "$HOME" && tar -C /source --exclude=./node_modules --exclude=./.git -cf - . | tar -xf - -C /workspace && npm run typecheck && npm run build && npm run test:scenarios'
   lint: >-
-    env -i HOME="$HOME" PATH="$PATH" CI=true TMPDIR="${TMPDIR:-/tmp}"
-    sh -c 'npm run lint && npm run lint:dead && npm run lint:duplicates && node --test scripts/agent-*.test.mjs && git diff --check'
+    docker run --rm --pull never --network none --read-only --cap-drop ALL
+    --pids-limit 512 --security-opt no-new-privileges
+    --tmpfs /tmp:rw,nosuid,nodev,size=1073741824
+    --mount type=bind,src="$PWD",dst=/source,readonly
+    --mount type=bind,src="${VET_GATE_DEPS:?missing VET_GATE_DEPS}/node_modules",dst=/workspace/node_modules,readonly
+    --mount type=volume,dst=/workspace --workdir /workspace
+    --env HOME=/tmp/home --env npm_config_cache=/tmp/npm-cache
+    node:22-bookworm@sha256:a25c9934ff6382cd4f08b6bc26c82bf4ea69b1e6f8dabfb2ead457374127c365 sh -lc
+    'mkdir -p "$HOME" && tar -C /source --exclude=./node_modules --exclude=./.git -cf - . | tar -xf - -C /workspace && npm run lint && npm run lint:dead && npm run lint:duplicates && node --test scripts/agent-*.test.mjs && git init -q && git add -A && git diff --cached --check'
 
 auto_fix:
+  rebase: 0
   review: 0
+  test: 0
+  document: 0
+  lint: 0
+  ci: 0

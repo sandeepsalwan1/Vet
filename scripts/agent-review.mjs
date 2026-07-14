@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import {
   AgentError,
   addLabels,
+  assertTrustedAgentPull,
   dispatchWorkflow,
-  extractJson,
   fail,
   finish,
   gh,
@@ -16,7 +16,10 @@ import {
   issueLabels,
   loadConfig,
   markdownJsonBlock,
+  newestManagedComment,
+  parseImplementationMetadata,
   parseArgs,
+  privilegedCandidatePaths,
   readAgentJson,
   readText,
   removeLabels,
@@ -30,31 +33,20 @@ export const MAX_REVIEW_DIFF_BYTES = 50000;
 
 function fetchPull(config, prNumber) {
   const pull = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/pulls/${prNumber}`);
-  if (pull.head.repo.full_name !== `${config.repo.owner}/${config.repo.name}`) {
-    throw new AgentError("refusing agent review for cross-repository PR", 1, {
-      head: pull.head.repo.full_name,
-      base: `${config.repo.owner}/${config.repo.name}`
-    });
-  }
+  const files = ghApiJson(
+    `repos/${config.repo.owner}/${config.repo.name}/pulls/${prNumber}/files?per_page=100`,
+    { paginate: true }
+  ) ?? [];
+  const trust = assertTrustedAgentPull(pull, config, { files, rejectPrivilegedPaths: true });
   const issue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${prNumber}`);
   const comments = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${prNumber}/comments`, {
     paginate: true
   });
-  return { pull, issue, comments };
+  return { pull, issue, comments, files, trust };
 }
 
 export function implementationMetadata(body) {
-  const marker = "<!-- agent-implementation:v1 -->";
-  const markerIndex = String(body ?? "").indexOf(marker);
-  if (markerIndex === -1) return {};
-  const afterMarker = String(body).slice(markerIndex + marker.length);
-  const fence = afterMarker.match(/```json\s*([\s\S]*?)```/i);
-  if (!fence) return {};
-  try {
-    return extractJson(fence[1]);
-  } catch {
-    return {};
-  }
+  return parseImplementationMetadata(body);
 }
 
 function referenceMatchesRepo(reference, config) {
@@ -79,8 +71,6 @@ function referenceMatchesRepo(reference, config) {
 
 export function resolveSourceIssueNumber(pull, closingReferences, config) {
   const metadataIssue = Number(implementationMetadata(pull.body).sourceIssue);
-  if (Number.isInteger(metadataIssue) && metadataIssue > 0) return metadataIssue;
-
   const candidates = [
     ...new Set(
       (closingReferences ?? [])
@@ -89,13 +79,13 @@ export function resolveSourceIssueNumber(pull, closingReferences, config) {
         .filter((number) => Number.isInteger(number) && number > 0)
     )
   ];
-  if (candidates.length === 1) return candidates[0];
-  if (candidates.length > 1) {
-    throw new AgentError("agent review has multiple closing issues; implementation metadata must identify one source issue", 1, {
+  if (candidates.length !== 1 || candidates[0] !== metadataIssue) {
+    throw new AgentError("agent review closing reference must exactly match implementation metadata", 1, {
+      metadataIssue,
       issues: candidates
     });
   }
-  throw new AgentError("agent review could not resolve a linked source issue", 1);
+  return metadataIssue;
 }
 
 export function assertReviewDiffFits(diff) {
@@ -151,14 +141,15 @@ ${diff}
 `;
 }
 
-export function requireManagedTriageComment(comments, marker, sourceIssueNumber) {
-  const triageComment = (comments ?? []).find((comment) => String(comment.body ?? "").includes(marker));
+export function requireManagedTriageComment(comments, marker, sourceIssueNumber, repoOwner) {
+  const triageComment = newestManagedComment(comments, marker, repoOwner);
   if (!triageComment) throw new AgentError(`source issue #${sourceIssueNumber} has no managed triage context`, 1);
   return triageComment;
 }
 
-function writePrompt(config, prNumber, outputPath) {
-  const { pull, issue, comments } = fetchPull(config, prNumber);
+function writePrompt(config, prNumber, outputPath, expectedHeadSha) {
+  const { pull, issue, comments, files } = fetchPull(config, prNumber);
+  assertReviewedHead(pull, expectedHeadSha);
   const closing = ghJson([
     "pr",
     "view",
@@ -170,10 +161,16 @@ function writePrompt(config, prNumber, outputPath) {
   ]);
   const sourceIssueNumber = resolveSourceIssueNumber(pull, closing?.closingIssuesReferences, config);
   const sourceIssue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${sourceIssueNumber}`);
+  assertTrustedAgentPull(pull, config, { files, sourceIssue, rejectPrivilegedPaths: true });
   const sourceComments = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${sourceIssueNumber}/comments`, {
     paginate: true
   });
-  const triageComment = requireManagedTriageComment(sourceComments, config.comments.triage, sourceIssueNumber);
+  const triageComment = requireManagedTriageComment(
+    sourceComments,
+    config.comments.triage,
+    sourceIssueNumber,
+    config.repo.owner
+  );
   const diff = gh(["pr", "diff", String(prNumber), "--repo", `${config.repo.owner}/${config.repo.name}`, "--patch"]).stdout;
   const prompt = buildReviewPrompt({
     template: readText(join(repoRoot(), ".agent/prompts/review.md")),
@@ -207,21 +204,25 @@ function createPatch(outputPath) {
 
 function checkoutPullHead(pull) {
   runCommand("gh", ["auth", "setup-git", "--hostname", "github.com"]);
-  runCommand("git", ["fetch", "origin", pull.head.ref]);
+  runCommand("git", ["fetch", "origin", pull.head.sha]);
   runCommand("git", ["switch", "-C", pull.head.ref, "FETCH_HEAD"]);
 }
 
-function privilegedPatchPaths(paths) {
-  return paths.filter(
-    (path) =>
-      path.startsWith(".agent/") ||
-      path.startsWith(".github/") ||
-      path.startsWith("scripts/agent-") ||
-      path === "AGENTS.md" ||
-      path === "package.json" ||
-      path === "package-lock.json" ||
-      path === ".npmrc"
-  );
+export function privilegedPatchPaths(paths) {
+  return privilegedCandidatePaths(paths);
+}
+
+export function assertReviewedHead(pull, expectedHeadSha) {
+  const expected = String(expectedHeadSha ?? "").trim();
+  const current = String(pull?.head?.sha ?? "").trim();
+  if (!expected) throw new AgentError("missing reviewed head SHA", 2);
+  if (current !== expected) {
+    throw new AgentError("PR head changed after agent review generation", 1, {
+      expectedHeadSha: expected,
+      currentHeadSha: current || null
+    });
+  }
+  return current;
 }
 
 function reviewBody(review) {
@@ -250,12 +251,46 @@ ${markdownJsonBlock(review)}`;
 }
 
 export function normalizeReviewPolicy(review) {
-  if (review.remainingRisk !== "high" || review.mergeRecommendation !== "ready") return review;
+  validateReviewResult(review);
+  if (
+    review.mergeRecommendation !== "ready" ||
+    (review.remainingRisk !== "high" && !review.humanQuestion.trim())
+  ) {
+    return review;
+  }
   return {
     ...review,
     mergeRecommendation: "ready-human-review",
     humanQuestion: review.humanQuestion || "High-risk work requires human review before merge."
   };
+}
+
+export function validateReviewResult(review) {
+  const expectedKeys = [
+    "bugsFound",
+    "checksRun",
+    "fixesMade",
+    "humanQuestion",
+    "mergeRecommendation",
+    "proofNeeded",
+    "remainingRisk",
+    "unifiedDiff"
+  ];
+  const stringArrays = ["bugsFound", "fixesMade", "checksRun"];
+  if (
+    !review ||
+    Array.isArray(review) ||
+    JSON.stringify(Object.keys(review).sort()) !== JSON.stringify(expectedKeys) ||
+    !stringArrays.every((key) => Array.isArray(review[key]) && review[key].every((item) => typeof item === "string")) ||
+    !["low", "medium", "high"].includes(review.remainingRisk) ||
+    !["none", "CI", "UI", "GIF"].includes(review.proofNeeded) ||
+    !["ready", "ready-human-review", "blocked"].includes(review.mergeRecommendation) ||
+    typeof review.humanQuestion !== "string" ||
+    typeof review.unifiedDiff !== "string"
+  ) {
+    throw new AgentError("agent review result is invalid", 1);
+  }
+  return review;
 }
 
 export function reviewPolicyOutcome(review) {
@@ -292,9 +327,23 @@ export function reviewLabelChanges(config, review) {
   };
 }
 
-function applyReview(config, prNumber, reviewPath, patchPath, dryRun) {
-  const { pull } = fetchPull(config, prNumber);
+function applyReview(config, prNumber, reviewPath, patchPath, dryRun, expectedHeadSha) {
+  const { pull, files } = fetchPull(config, prNumber);
+  assertReviewedHead(pull, expectedHeadSha);
+  const closing = ghJson([
+    "pr",
+    "view",
+    String(prNumber),
+    "--repo",
+    `${config.repo.owner}/${config.repo.name}`,
+    "--json",
+    "closingIssuesReferences"
+  ]);
+  const sourceIssueNumber = resolveSourceIssueNumber(pull, closing?.closingIssuesReferences, config);
+  const sourceIssue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${sourceIssueNumber}`);
+  assertTrustedAgentPull(pull, config, { files, sourceIssue, rejectPrivilegedPaths: true });
   let review = readAgentJson(reviewPath);
+  validateReviewResult(review);
   let effectivePatchPath = patchPath;
   let patchText = patchPath && existsSync(patchPath) ? readText(patchPath) : "";
   if (!patchText.trim() && typeof review.unifiedDiff === "string" && review.unifiedDiff.trim()) {
@@ -312,7 +361,7 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun) {
   if (!dryRun && hasPatch) {
     checkoutPullHead(pull);
     runCommand("git", ["apply", "--index", effectivePatchPath]);
-    const staged = runCommand("git", ["diff", "--cached", "--name-only"]).stdout.trim();
+    const staged = runCommand("git", ["diff", "--cached", "--no-renames", "--name-only"]).stdout.trim();
     if (staged) {
       privilegedPaths = privilegedPatchPaths(staged.split("\n").filter(Boolean));
       if (privilegedPaths.length) {
@@ -380,7 +429,14 @@ async function main() {
   const dryRun = Boolean(args["dry-run"]);
 
   if (args["write-prompt"]) {
-    finish({ ok: true, message: `wrote review prompt for #${prNumber}`, ...writePrompt(config, prNumber, args["write-prompt"]) }, Boolean(args.json));
+    finish(
+      {
+        ok: true,
+        message: `wrote review prompt for #${prNumber}`,
+        ...writePrompt(config, prNumber, args["write-prompt"], args["expected-head-sha"])
+      },
+      Boolean(args.json)
+    );
     return;
   }
   if (args["create-patch"]) {
@@ -388,7 +444,14 @@ async function main() {
     return;
   }
   if (args["from-file"]) {
-    const result = applyReview(config, prNumber, args["from-file"], args["apply-patch"], dryRun);
+    const result = applyReview(
+      config,
+      prNumber,
+      args["from-file"],
+      args["apply-patch"],
+      dryRun,
+      args["expected-head-sha"]
+    );
     finish(
       { ok: result.technicalSuccess, message: `${dryRun ? "would apply" : "applied"} review for #${prNumber}`, result },
       Boolean(args.json),

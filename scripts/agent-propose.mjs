@@ -36,6 +36,42 @@ export function proposalIdentityMarker(proposal) {
   return `<!-- agent-proposal-id:v1:${proposalIdentity(proposal)} -->`;
 }
 
+export function validateProposalOutput(data) {
+  const levels = new Set(["low", "medium", "high"]);
+  const proofKinds = new Set(["none", "CI", "UI", "GIF"]);
+  const issues = data?.issues;
+  if (
+    !data ||
+    Array.isArray(data) ||
+    JSON.stringify(Object.keys(data).sort()) !== JSON.stringify(["issues"]) ||
+    !Array.isArray(issues) ||
+    issues.length === 0 ||
+    issues.length > 3
+  ) {
+    throw new AgentError("proposal output is invalid", 1);
+  }
+  const expectedKeys = ["body", "priority", "proof", "risk", "title", "value"];
+  for (const proposal of issues) {
+    if (
+      !proposal ||
+      Array.isArray(proposal) ||
+      JSON.stringify(Object.keys(proposal).sort()) !== JSON.stringify(expectedKeys) ||
+      typeof proposal.title !== "string" ||
+      proposal.title.trim().length < 8 ||
+      proposal.title.length > 120 ||
+      typeof proposal.body !== "string" ||
+      proposal.body.trim().length < 20 ||
+      !levels.has(proposal.value) ||
+      !levels.has(proposal.priority) ||
+      !levels.has(proposal.risk) ||
+      !proofKinds.has(proposal.proof)
+    ) {
+      throw new AgentError("proposal output is invalid", 1);
+    }
+  }
+  return issues;
+}
+
 export function issueBody(config, proposal) {
   return `${proposal.body.trim()}
 
@@ -117,8 +153,7 @@ export async function main() {
   const fromFile = args["from-file"];
   if (!fromFile) throw new AgentError("missing --from-file", 2);
   const data = readAgentJson(fromFile);
-  const proposals = Array.isArray(data.issues) ? data.issues.slice(0, 3) : [];
-  if (proposals.length === 0) throw new AgentError("proposal output contains no issues", 1);
+  const proposals = validateProposalOutput(data);
   const existingIssues = dryRun ? [] : listExistingIssues(config);
   const results = [];
   for (const proposal of proposals) {

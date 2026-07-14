@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
   MAX_REVIEW_DIFF_BYTES,
+  assertReviewedHead,
   assertReviewDiffFits,
   buildReviewPrompt,
   normalizeReviewPolicy,
+  privilegedPatchPaths,
   requireManagedTriageComment,
   resolveSourceIssueNumber,
   reviewLabelChanges,
-  reviewPolicyOutcome
+  reviewPolicyOutcome,
+  validateReviewResult
 } from "./agent-review.mjs";
 
 const config = {
@@ -35,20 +39,33 @@ function review(overrides = {}) {
   };
 }
 
-test("source issue metadata takes precedence over closing references", () => {
-  const pull = {
-    body: `<!-- agent-implementation:v1 -->
+function implementationBody(sourceIssue = 42) {
+  return `<!-- agent-implementation:v1 -->
 Agent implementation metadata:
 \`\`\`json
-{"sourceIssue":42}
-\`\`\``
+${JSON.stringify({
+  sourceIssue,
+  sourceLabels: ["agent:automerge"],
+  automergeEligible: true,
+  issueSnapshotSha256: "a".repeat(64)
+})}
+\`\`\``;
+}
+
+test("source issue metadata must exactly match the closing reference", () => {
+  const pull = {
+    body: implementationBody(42)
   };
 
-  assert.equal(resolveSourceIssueNumber(pull, [{ number: 17 }], config), 42);
+  assert.equal(resolveSourceIssueNumber(pull, [{ number: 42 }], config), 42);
+  assert.throws(
+    () => resolveSourceIssueNumber(pull, [{ number: 17 }], config),
+    /must exactly match implementation metadata/
+  );
 });
 
-test("same-repository closing reference resolves source issue", () => {
-  const pull = { body: "Closes #17" };
+test("only the same-repository closing reference enters source authorization", () => {
+  const pull = { body: implementationBody(17) };
   const references = [
     { number: 9, url: "https://github.com/example/Elsewhere/issues/9" },
     { number: 17, url: "https://github.com/sandeepsalwan1/Vet/issues/17" }
@@ -93,6 +110,50 @@ test("missing managed triage context blocks prompt construction", () => {
   );
 });
 
+test("managed triage rejects marker squatters and accepts the repo owner", () => {
+  const marker = "<!-- agent-triage:v1 -->";
+  const squatter = { id: 2, body: `${marker}\nspoof`, user: { login: "someone" } };
+  const owner = { id: 1, body: `${marker}\ntrusted`, user: { login: "sandeepsalwan1" } };
+
+  assert.equal(requireManagedTriageComment([squatter, owner], marker, 17, "sandeepsalwan1"), owner);
+  assert.throws(
+    () => requireManagedTriageComment([squatter], marker, 17, "sandeepsalwan1"),
+    /no managed triage context/
+  );
+});
+
+test("review patches cannot change automation control-plane files", () => {
+  assert.deepEqual(
+    privilegedPatchPaths([
+      "src/safe.ts",
+      "scripts/agent-review.mjs",
+      "scripts/agent-review.test.mjs",
+      "scripts/agent-new-control-plane.js",
+      ".no-mistakes.yaml",
+      "packages/agents/AGENTS.md",
+      "packages/widget/package.json",
+      ".agents/skills/reviewer/SKILL.md"
+    ]),
+    [
+      "scripts/agent-review.mjs",
+      "scripts/agent-review.test.mjs",
+      "scripts/agent-new-control-plane.js",
+      ".no-mistakes.yaml",
+      "packages/agents/AGENTS.md",
+      "packages/widget/package.json",
+      ".agents/skills/reviewer/SKILL.md"
+    ]
+  );
+});
+
+test("review result is bound to the exact generated head", () => {
+  const pull = { head: { sha: "reviewed123" } };
+
+  assert.equal(assertReviewedHead(pull, "reviewed123"), "reviewed123");
+  assert.throws(() => assertReviewedHead(pull, "newer456"), /head changed after agent review generation/);
+  assert.throws(() => assertReviewedHead(pull, ""), /missing reviewed head SHA/);
+});
+
 test("oversized diff blocks instead of truncating", () => {
   assert.throws(
     () => assertReviewDiffFits("x".repeat(MAX_REVIEW_DIFF_BYTES + 1)),
@@ -128,4 +189,43 @@ test("human review adds blocked and removes automerge", () => {
 
   assert.ok(changes.add.includes(config.labels.blocked));
   assert.ok(changes.remove.includes(config.labels.automerge));
+});
+
+test("review schema and unresolved questions fail closed", () => {
+  assert.throws(
+    () => validateReviewResult(review({ remainingRisk: "unknown" })),
+    /agent review result is invalid/
+  );
+  assert.throws(
+    () => validateReviewResult({ ...review(), unexpected: true }),
+    /agent review result is invalid/
+  );
+  const normalized = normalizeReviewPolicy(review({ humanQuestion: "Choose behavior?" }));
+  assert.equal(normalized.mergeRecommendation, "ready-human-review");
+});
+
+test("review generation is read-only and bound to the prepared head", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/agent-review.yml", import.meta.url), "utf8");
+  const prepare = workflow.match(/\n  prepare-review:\n([\s\S]*?)\n  generate-review:/)?.[1] ?? "";
+  const generate = workflow.match(/\n  generate-review:\n([\s\S]*?)\n  apply-review:/)?.[1] ?? "";
+  const apply = workflow.match(/\n  apply-review:\n([\s\S]*?)\n  no-mistakes:/)?.[1] ?? "";
+  const failure = workflow.match(/\n  report-review-failure:\n([\s\S]*)$/)?.[1] ?? "";
+
+  assert.match(prepare, /statuses: write/);
+  assert.match(prepare, /ref: main\n          persist-credentials: false/);
+  assert.match(prepare, /--expected-head-sha "\$REVIEWED_HEAD_SHA"/);
+  assert.match(prepare, /-f state=pending/);
+
+  assert.match(generate, /needs: prepare-review/);
+  assert.match(generate, /ref: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
+  assert.match(generate, /permissions:\n      contents: read\n      pull-requests: read\n      issues: read/);
+  assert.doesNotMatch(generate, /(?:actions|contents|issues|pull-requests|statuses): write/);
+  assert.match(generate, /sandbox: read-only/);
+  assert.match(generate, /codex-version: "0\.144\.1"/);
+
+  assert.match(apply, /REVIEWED_HEAD_SHA: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
+  assert.match(apply, /ref: main\n          fetch-depth: 0\n          persist-credentials: false/);
+  assert.match(failure, /REVIEWED_HEAD_SHA: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
+  assert.match(failure, /statuses\/\$REVIEWED_HEAD_SHA/);
+  assert.doesNotMatch(failure, /pulls\/\$PR_NUMBER|--jq \.head\.sha/);
 });

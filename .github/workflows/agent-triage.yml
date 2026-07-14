@@ -16,30 +16,61 @@ on:
         type: number
 
 permissions:
-  actions: write
   contents: read
-  issues: write
 
 concurrency:
   group: agent-triage-${{ inputs.issue-number }}
   cancel-in-progress: false
 
 jobs:
-  triage:
-    name: triage
+  prepare:
+    name: prepare triage
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: mkdir -p .agent-output
-      - name: Build triage prompt
+      - name: Capture trusted issue snapshot and mark pending
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/agent-triage.mjs --issue-number "${{ inputs.issue-number }}" --write-prompt .agent-output/triage-prompt.md --json
-      - name: Run Codex triage
-        uses: openai/codex-action@v1
+        run: >-
+          node scripts/agent-triage.mjs
+          --issue-number "${{ inputs.issue-number }}"
+          --prepare
+          --write-prompt .agent-output/triage-prompt.md
+          --write-manifest .agent-output/triage-manifest.json
+          --json
+      - run: cp .agent/schemas/triage.schema.json .agent-output/triage.schema.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-triage-context-${{ inputs.issue-number }}
+          path: .agent-output/*
+          if-no-files-found: error
+
+  generate:
+    name: generate triage
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-triage-context-${{ inputs.issue-number }}
+          path: .agent-output
+      - name: Run read-only Codex triage
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           prompt-file: .agent-output/triage-prompt.md
@@ -47,9 +78,79 @@ jobs:
           effort: low
           allow-users: ${{ github.repository_owner }}
           allow-bots: true
-          codex-args: '["--output-schema",".agent/schemas/triage.schema.json"]'
+          codex-version: "0.144.1"
+          output-schema-file: .agent-output/triage.schema.json
           output-file: .agent-output/triage.json
-      - name: Apply triage labels
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-triage-result-${{ inputs.issue-number }}
+          path: .agent-output/triage.json
+          if-no-files-found: error
+
+  apply:
+    name: apply triage
+    needs:
+      - prepare
+      - generate
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-triage-context-${{ inputs.issue-number }}
+          path: .agent-output
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-triage-result-${{ inputs.issue-number }}
+          path: .agent-output
+      - name: Apply triage only to the unchanged issue snapshot
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/agent-triage.mjs --issue-number "${{ inputs.issue-number }}" --from-file .agent-output/triage.json --json
+        run: >-
+          node scripts/agent-triage.mjs
+          --issue-number "${{ inputs.issue-number }}"
+          --from-file .agent-output/triage.json
+          --manifest .agent-output/triage-manifest.json
+          --json
+
+  finalize-failure:
+    name: finalize triage failure
+    needs:
+      - prepare
+      - generate
+      - apply
+    if: >-
+      always() &&
+      (needs.prepare.result != 'success' ||
+      needs.generate.result != 'success' ||
+      needs.apply.result != 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Record trusted triage failure
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/agent-triage.mjs
+          --issue-number "${{ inputs.issue-number }}"
+          --mark-failed
+          --json

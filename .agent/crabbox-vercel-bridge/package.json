@@ -1,0 +1,9 @@
+{
+  "name": "@central-vet/crabbox-vercel-bridge-runtime",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "@vercel/sandbox": "2.6.0",
+    "sandbox": "3.4.2"
+  }
+}

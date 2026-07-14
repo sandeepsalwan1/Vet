@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -168,6 +169,152 @@ export function repoSlug(config = loadConfig()) {
   return `${config.repo.owner}/${config.repo.name}`;
 }
 
+const IMPLEMENTATION_MARKER = "<!-- agent-implementation:v1 -->";
+const PRIVILEGED_AGENT_DIRECTORIES = new Set([
+  ".agent",
+  ".agents",
+  ".claude",
+  ".codex",
+  ".github",
+  "skills"
+]);
+const PRIVILEGED_PACKAGE_FILES = new Set([
+  ".npmrc",
+  ".yarnrc",
+  ".yarnrc.yml",
+  "bun.lock",
+  "bun.lockb",
+  "npm-shrinkwrap.json",
+  "package-lock.json",
+  "package.json",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+  "yarn.lock"
+]);
+
+function candidatePathValues(candidate) {
+  if (typeof candidate === "string") return [candidate];
+  if (!candidate || typeof candidate !== "object") return [];
+  return [candidate.filename, candidate.previous_filename].filter((value) => typeof value === "string");
+}
+
+export function candidatePaths(candidates) {
+  return [...new Set((candidates ?? []).flatMap(candidatePathValues).filter(Boolean))];
+}
+
+export function privilegedCandidatePaths(candidates) {
+  return candidatePaths(candidates).filter((candidate) => {
+    const path = candidate.replaceAll("\\", "/").replace(/^\.\//, "");
+    const segments = path.split("/").filter(Boolean);
+    const basename = segments.at(-1) ?? "";
+    return (
+      basename === "AGENTS.md" ||
+      basename === "CLAUDE.md" ||
+      basename === ".no-mistakes.yaml" ||
+      basename === ".no-mistakes.yml" ||
+      PRIVILEGED_PACKAGE_FILES.has(basename) ||
+      segments.some((segment) => PRIVILEGED_AGENT_DIRECTORIES.has(segment)) ||
+      path.startsWith("scripts/agent-")
+    );
+  });
+}
+
+export function issueSnapshotSha256(issue) {
+  const snapshot = {
+    number: Number(issue?.number),
+    title: String(issue?.title ?? ""),
+    body: String(issue?.body ?? "")
+  };
+  return createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
+}
+
+export function parseImplementationMetadata(body) {
+  const text = String(body ?? "");
+  if (text.split(IMPLEMENTATION_MARKER).length !== 2) {
+    throw new AgentError("PR must contain exactly one agent implementation marker", 1);
+  }
+  const afterMarker = text.slice(text.indexOf(IMPLEMENTATION_MARKER) + IMPLEMENTATION_MARKER.length);
+  const match = afterMarker.match(/^\s*Agent implementation metadata:\s*```json\s*([\s\S]*?)```/i);
+  if (!match) throw new AgentError("agent implementation metadata JSON is missing", 1);
+  const metadata = extractJson(match[1]);
+  const keys = Object.keys(metadata ?? {}).sort();
+  const expectedKeys = ["automergeEligible", "issueSnapshotSha256", "sourceIssue", "sourceLabels"];
+  if (
+    !metadata ||
+    Array.isArray(metadata) ||
+    JSON.stringify(keys) !== JSON.stringify(expectedKeys) ||
+    !Number.isInteger(metadata.sourceIssue) ||
+    metadata.sourceIssue <= 0 ||
+    !Array.isArray(metadata.sourceLabels) ||
+    !metadata.sourceLabels.every((label) => typeof label === "string" && label.length > 0) ||
+    new Set(metadata.sourceLabels).size !== metadata.sourceLabels.length ||
+    typeof metadata.automergeEligible !== "boolean" ||
+    !/^[a-f0-9]{64}$/.test(metadata.issueSnapshotSha256)
+  ) {
+    throw new AgentError("agent implementation metadata is invalid", 1);
+  }
+  return metadata;
+}
+
+export function assertTrustedAgentPull(pull, config, options = {}) {
+  const { files, sourceIssue, rejectPrivilegedPaths = Boolean(files) } = Array.isArray(options)
+    ? { files: options, rejectPrivilegedPaths: true }
+    : options;
+  const expectedRepo = repoSlug(config).toLowerCase();
+  const headRepo = String(pull?.head?.repo?.full_name ?? "").toLowerCase();
+  const baseRepo = String(pull?.base?.repo?.full_name ?? "").toLowerCase();
+  if (headRepo !== expectedRepo || baseRepo !== expectedRepo) {
+    throw new AgentError("agent PR must use a same-repository branch", 1);
+  }
+  if (pull?.state !== "open" || pull?.merged || pull?.merged_at) {
+    throw new AgentError("agent PR must be open and unmerged", 1);
+  }
+  if (pull?.base?.ref !== config.repo.defaultBranch) {
+    throw new AgentError(`agent PR base must be ${config.repo.defaultBranch}`, 1);
+  }
+  if (String(pull?.user?.login ?? "").toLowerCase() !== "github-actions[bot]") {
+    throw new AgentError("agent PR author must be github-actions[bot]", 1);
+  }
+  if (!/^[a-f0-9]{40}$/.test(String(pull?.head?.sha ?? ""))) {
+    throw new AgentError("agent PR head SHA is invalid", 1);
+  }
+
+  const metadata = parseImplementationMetadata(pull.body);
+  const branch = String(pull?.head?.ref ?? "");
+  const branchMatch = branch.match(/^agent\/issue-(\d+)-[a-z0-9]+(?:-[a-z0-9]+)*$/);
+  if (!branchMatch || Number(branchMatch[1]) !== metadata.sourceIssue) {
+    throw new AgentError("agent PR branch does not match implementation source issue", 1);
+  }
+
+  if (files !== undefined) {
+    if (
+      !Array.isArray(files) ||
+      files.length === 0 ||
+      (Number.isInteger(pull.changed_files) && pull.changed_files !== files.length)
+    ) {
+      throw new AgentError("agent PR has no complete changed-file inventory", 1);
+    }
+    const blocked = rejectPrivilegedPaths ? privilegedCandidatePaths(files) : [];
+    if (blocked.length) {
+      throw new AgentError("agent PR changes privileged candidate paths", 1, { paths: blocked });
+    }
+  }
+
+  if (sourceIssue !== undefined) {
+    if (
+      sourceIssue?.pull_request ||
+      sourceIssue?.number !== metadata.sourceIssue ||
+      sourceIssue?.state !== "open"
+    ) {
+      throw new AgentError("implementation metadata does not match an open source issue", 1);
+    }
+    if (issueSnapshotSha256(sourceIssue) !== metadata.issueSnapshotSha256) {
+      throw new AgentError("source issue changed after trusted triage", 1);
+    }
+  }
+  return { metadata, sourceIssue: metadata.sourceIssue };
+}
+
 export function getIssueComments(config, number) {
   const path = `repos/${config.repo.owner}/${config.repo.name}/issues/${number}/comments`;
   return ghApiJson(path, { paginate: true }) ?? [];
@@ -178,19 +325,41 @@ export function commentHasManagedMarker(body, marker) {
   return text === marker || text.startsWith(`${marker}\n`);
 }
 
-export function upsertManagedComment({ config, number, marker, body, dryRun = false }) {
+export function trustedManagedComment(comment, marker, repoOwner) {
+  if (!commentHasManagedMarker(comment?.body, marker)) return false;
+  const login = String(comment?.user?.login ?? "").toLowerCase();
+  const owner = String(repoOwner ?? "").toLowerCase();
+  return login === "github-actions[bot]" || Boolean(owner && login === owner);
+}
+
+export function newestManagedComment(comments, marker, repoOwner) {
+  return [...(comments ?? [])]
+    .filter((comment) => trustedManagedComment(comment, marker, repoOwner))
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.updated_at ?? left.created_at ?? "") || 0;
+      const rightTime = Date.parse(right.updated_at ?? right.created_at ?? "") || 0;
+      if (leftTime !== rightTime) return rightTime - leftTime;
+      return Number(right.id ?? 0) - Number(left.id ?? 0);
+    })[0] ?? null;
+}
+
+export function upsertManagedComment({ config, number, marker, body, dryRun = false }, dependencies = {}) {
   const fullBody = `${marker}\n${body.trim()}\n`;
   if (dryRun) {
     return { ok: true, dryRun: true, number, marker, body: fullBody };
   }
-  const comments = getIssueComments(config, number);
-  const existing = comments.find((comment) => commentHasManagedMarker(comment.body, marker));
-  return withTempJson({ body: fullBody }, (path) => {
+  const getComments = dependencies.getIssueComments ?? getIssueComments;
+  const tempJson = dependencies.withTempJson ?? withTempJson;
+  const runGh = dependencies.gh ?? gh;
+  const apiJson = dependencies.ghJson ?? ghJson;
+  const comments = getComments(config, number);
+  const existing = newestManagedComment(comments, marker, config.repo.owner);
+  return tempJson({ body: fullBody }, (path) => {
     if (existing) {
-      gh(["api", `repos/${config.repo.owner}/${config.repo.name}/issues/comments/${existing.id}`, "-X", "PATCH", "--input", path]);
+      runGh(["api", `repos/${config.repo.owner}/${config.repo.name}/issues/comments/${existing.id}`, "-X", "PATCH", "--input", path]);
       return { ok: true, action: "updated", commentId: existing.id };
     }
-    const created = ghJson(["api", `repos/${config.repo.owner}/${config.repo.name}/issues/${number}/comments`, "-X", "POST", "--input", path]);
+    const created = apiJson(["api", `repos/${config.repo.owner}/${config.repo.name}/issues/${number}/comments`, "-X", "POST", "--input", path]);
     return { ok: true, action: "created", commentId: created?.id };
   });
 }
@@ -311,13 +480,24 @@ export function markdownJsonBlock(value) {
   return `\n\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\`\n`;
 }
 
+export function actionsRunUrl(config, env = process.env) {
+  const server = String(env.GITHUB_SERVER_URL ?? "").replace(/\/$/, "");
+  const repository = String(env.GITHUB_REPOSITORY ?? "");
+  const runId = String(env.GITHUB_RUN_ID ?? "");
+  if (server !== "https://github.com" || repository.toLowerCase() !== repoSlug(config).toLowerCase() || !/^\d+$/.test(runId)) {
+    return "";
+  }
+  return `${server}/${repository}/actions/runs/${runId}`;
+}
+
 export function setCommitStatus({ config, sha, state, context, description, targetUrl, dryRun = false }) {
   const payload = {
     state,
     context,
     description: String(description ?? "").slice(0, 140)
   };
-  if (targetUrl) payload.target_url = targetUrl;
+  const resolvedTargetUrl = targetUrl || actionsRunUrl(config);
+  if (resolvedTargetUrl) payload.target_url = resolvedTargetUrl;
   if (dryRun) return { ok: true, dryRun: true, sha, ...payload };
   return withTempJson(payload, (path) => {
     const created = ghJson([
