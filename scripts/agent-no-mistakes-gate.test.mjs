@@ -28,6 +28,7 @@ test("authenticated reviewer is read-only and all source changes fail closed", (
 
   assert.match(workflow, /- --sandbox\s+- read-only/);
   assert.doesNotMatch(workflow, /- workspace-write/);
+  assert.match(workflow, /tar --no-same-owner -xf/);
   assert.match(gate, /"--untracked-files=all"/);
 });
 
