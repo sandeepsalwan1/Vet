@@ -235,6 +235,7 @@ jobs:
             --workdir /workspace \
             --env HOME=/tmp/home \
             --env npm_config_cache=/tmp/npm-cache \
+            --env npm_config_nodedir=/usr/local \
             "$DOCKER_IMAGE" \
             sh -euc 'tar -C /source --exclude=./node_modules --exclude=./.git -cf - . | tar --no-same-owner -xf - -C /workspace && npm rebuild --offline --no-audit --no-fund'
       - uses: actions/download-artifact@v4

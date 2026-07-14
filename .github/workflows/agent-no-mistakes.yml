@@ -155,8 +155,9 @@ jobs:
             --mount "type=bind,src=$PWD/node_modules,dst=/workspace/node_modules" \
             --mount type=volume,dst=/workspace \
             --workdir /workspace \
+            --env npm_config_nodedir=/usr/local \
             "$DOCKER_IMAGE" \
-            sh -lc 'tar -C /source --exclude=./node_modules --exclude=./.git -cf - . | tar --no-same-owner -xf - -C /workspace && npm rebuild --no-audit --no-fund'
+            sh -lc 'tar -C /source --exclude=./node_modules --exclude=./.git -cf - . | tar --no-same-owner -xf - -C /workspace && npm rebuild --offline --no-audit --no-fund'
           git diff --exit-code
           git diff --cached --exit-code
       - name: Install pinned gate tools before agent auth

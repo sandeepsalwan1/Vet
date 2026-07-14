@@ -355,6 +355,7 @@ test("implementation workflow isolates candidate checks from credentials, artifa
   assert.match(validation, /npm ci --ignore-scripts/);
   assert.match(validation, /npm rebuild --offline/);
   assert.match(validation, /tar --no-same-owner -xf/);
+  assert.match(validation, /npm_config_nodedir=\/usr\/local/);
   assert.match(validation, /--network none/);
   assert.match(validation, /--read-only/);
   assert.match(validation, /node_modules,dst=\/workspace\/node_modules,readonly/);
