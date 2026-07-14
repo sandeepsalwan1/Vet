@@ -52,6 +52,7 @@ test("authenticated reviewer is read-only and all source changes fail closed", (
 test("application fonts are self-hosted for offline gates", () => {
   const layout = readFileSync(new URL("../apps/internal/app/layout.tsx", import.meta.url), "utf8");
   const css = readFileSync(new URL("../apps/internal/app/globals.css", import.meta.url), "utf8");
+  const license = readFileSync(new URL("../apps/internal/app/fonts/OFL.txt", import.meta.url), "utf8");
   const fonts = [
     "fraunces-latin-variable.woff2",
     "fraunces-latin-ext-variable.woff2",
@@ -63,6 +64,8 @@ test("application fonts are self-hosted for offline gates", () => {
   ];
 
   assert.doesNotMatch(layout, /next\/font\/google/);
+  assert.match(license, /Copyright 2018 The Fraunces Project Authors/);
+  assert.match(license, /Copyright 2021 The Hanken Grotesk Project Authors/);
   for (const font of fonts) {
     assert.equal(css.includes(`url("./fonts/${font}")`), true, font);
     assert.equal(existsSync(new URL(`../apps/internal/app/fonts/${font}`, import.meta.url)), true, font);
