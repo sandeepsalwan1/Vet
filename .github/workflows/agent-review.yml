@@ -145,22 +145,23 @@ jobs:
           REVIEWED_HEAD_SHA: ${{ needs.prepare-review.outputs.reviewed-head-sha }}
         run: node scripts/agent-review.mjs --pr-number "${{ inputs.pr-number }}" --expected-head-sha "$REVIEWED_HEAD_SHA" --from-file .agent-output/review.json --json
 
-  no-mistakes:
+  dispatch-no-mistakes:
+    name: dispatch no-mistakes
     needs: apply-review
     if: always() && (needs.apply-review.result == 'success' || needs.apply-review.result == 'failure')
+    runs-on: ubuntu-latest
     permissions:
       actions: write
-      contents: write
-      pull-requests: write
-      issues: write
-      statuses: write
-      checks: read
-    uses: ./.github/workflows/agent-no-mistakes.yml
-    with:
-      pr-number: ${{ inputs.pr-number }}
-      intent: Validate the agent-created PR after automated review. The PR must satisfy its linked issue, preserve repo architecture, pass CI, and remain blocked rather than auto-merged if no-mistakes finds ask-user or high-risk issues.
-    secrets:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      contents: read
+    steps:
+      - name: Dispatch standalone no-mistakes gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh workflow run agent-no-mistakes.yml
+          --ref main
+          -f pr-number="${{ inputs.pr-number }}"
+          -f intent='Validate the agent-created PR after automated review. The PR must satisfy its linked issue, preserve repo architecture, pass CI, and remain blocked rather than auto-merged if no-mistakes finds ask-user or high-risk issues.'
 
   report-review-failure:
     name: report-review-failure

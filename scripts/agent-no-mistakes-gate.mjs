@@ -155,7 +155,19 @@ function parseRunFields(output) {
   for (const line of lines.slice(runIndex + 1)) {
     if (!line.startsWith("  ")) break;
     const match = line.match(/^\s{2}(id|head):\s*(.+?)\s*$/);
-    if (match) fields[match[1]] = match[2];
+    if (match) {
+      const value = match[2];
+      if (value.startsWith('"') && value.endsWith('"')) {
+        try {
+          const parsed = JSON.parse(value);
+          fields[match[1]] = typeof parsed === "string" ? parsed : value;
+        } catch {
+          fields[match[1]] = value;
+        }
+      } else {
+        fields[match[1]] = value;
+      }
+    }
   }
   return fields;
 }

@@ -208,7 +208,8 @@ test("review generation is read-only and bound to the prepared head", () => {
   const workflow = readFileSync(new URL("../.github/workflows/agent-review.yml", import.meta.url), "utf8");
   const prepare = workflow.match(/\n  prepare-review:\n([\s\S]*?)\n  generate-review:/)?.[1] ?? "";
   const generate = workflow.match(/\n  generate-review:\n([\s\S]*?)\n  apply-review:/)?.[1] ?? "";
-  const apply = workflow.match(/\n  apply-review:\n([\s\S]*?)\n  no-mistakes:/)?.[1] ?? "";
+  const apply = workflow.match(/\n  apply-review:\n([\s\S]*?)\n  dispatch-no-mistakes:/)?.[1] ?? "";
+  const noMistakes = workflow.match(/\n  dispatch-no-mistakes:\n([\s\S]*?)\n  report-review-failure:/)?.[1] ?? "";
   const failure = workflow.match(/\n  report-review-failure:\n([\s\S]*)$/)?.[1] ?? "";
 
   assert.match(prepare, /statuses: write/);
@@ -225,6 +226,11 @@ test("review generation is read-only and bound to the prepared head", () => {
 
   assert.match(apply, /REVIEWED_HEAD_SHA: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
   assert.match(apply, /ref: main\n          fetch-depth: 0\n          persist-credentials: false/);
+  assert.match(noMistakes, /actions: write/);
+  assert.match(noMistakes, /gh workflow run agent-no-mistakes\.yml/);
+  assert.match(noMistakes, /--ref main/);
+  assert.match(noMistakes, /-f pr-number="\$\{\{ inputs\.pr-number \}\}"/);
+  assert.doesNotMatch(noMistakes, /uses: \.\/\.github\/workflows\/agent-no-mistakes\.yml/);
   assert.match(failure, /REVIEWED_HEAD_SHA: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
   assert.match(failure, /statuses\/\$REVIEWED_HEAD_SHA/);
   assert.doesNotMatch(failure, /pulls\/\$PR_NUMBER|--jq \.head\.sha/);
