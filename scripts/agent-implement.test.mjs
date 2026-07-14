@@ -349,6 +349,7 @@ test("isolated validation command environment removes credentials and workflow c
 test("implementation workflow isolates candidate checks from credentials, artifacts, and command channels", () => {
   const workflow = readFileSync(join(process.cwd(), ".github/workflows/agent-implement.yml"), "utf8");
   const validation = workflow.slice(workflow.indexOf("  validate-patch:"), workflow.indexOf("  open-pr:"));
+  const openPr = workflow.slice(workflow.indexOf("  open-pr:"), workflow.indexOf("  report-failure:"));
 
   assert.match(workflow, /codex-version: "0\.144\.1"/);
   assert.match(validation, /node:22-bookworm@sha256:[a-f0-9]{64}/);
@@ -370,6 +371,7 @@ test("implementation workflow isolates candidate checks from credentials, artifa
   assert.ok(validation.indexOf("npm ci --ignore-scripts") < validation.indexOf("actions/download-artifact"));
   assert.ok(validation.indexOf("--run-validation-checks") < validation.indexOf("--finalize-validation"));
   assert.ok(validation.indexOf("--finalize-validation") < validation.indexOf("actions/upload-artifact"));
+  assert.match(openPr, /if: always\(\) && needs\.validate-patch\.result == 'success'/);
 });
 
 test("applyPatchIdempotently applies once and recognizes the same committed intent on retry", (t) => {
