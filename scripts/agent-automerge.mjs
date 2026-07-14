@@ -158,7 +158,7 @@ export async function recoverStaleBase(
   { config, prNumber, pull, decision, baseState, dryRun = false },
   dependencies = {}
 ) {
-  if (!decision.trustedPull || !decision.allowed || baseState?.stale !== true) {
+  if (!decision.trustedPull || !decision.staleRecoveryAllowed || baseState?.stale !== true) {
     throw new AgentError("stale-base recovery requires an eligible trusted PR that is behind its base", 1);
   }
 
@@ -166,6 +166,11 @@ export async function recoverStaleBase(
   const headRef = pull.head?.ref;
   const expectedRepo = repoSlug(config);
   if (!/^[a-f0-9]{40}$/.test(String(oldHead ?? ""))) throw new AgentError("PR head SHA is invalid", 1);
+  const execute = dependencies.runCommand ?? runCommand;
+  const nativeAutomerge = revokeNativeAutomerge(
+    { config, prNumber, pull, dryRun },
+    { runCommand: execute }
+  );
 
   if (dryRun) {
     return {
@@ -178,13 +183,13 @@ export async function recoverStaleBase(
           oldHead,
           newHead: null,
           dispatches: [],
-          proofRequested: decision.proofRequested
+          proofRequested: decision.proofRequested,
+          nativeAutomerge
         }
       }
     };
   }
 
-  const execute = dependencies.runCommand ?? runCommand;
   const getPull = dependencies.getPull ?? (() => ghApiJson(`repos/${expectedRepo}/pulls/${prNumber}`));
   const hasAncestor =
     dependencies.hasAncestor ??
@@ -252,6 +257,7 @@ export async function recoverStaleBase(
         newHead,
         baseHead,
         proofRequested: decision.proofRequested,
+        nativeAutomerge,
         dispatches,
         dispatchErrors
       }
@@ -335,7 +341,8 @@ export function trustedClosingIssueNumbers(closingReferences, config) {
 export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments, combined, checks, files, closingReferences }) {
   const prLabels = issueLabels(pullIssue);
   const sourceLabels = issueLabels(sourceIssue ?? {});
-  const blockers = [];
+  const policyBlockers = [];
+  const gateBlockers = [];
   let metadata = null;
   let triage = null;
   let trustedPull = false;
@@ -343,83 +350,83 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
   try {
     metadata = implementationMetadata(pull.body);
   } catch (error) {
-    blockers.push(error.message);
+    policyBlockers.push(error.message);
   }
 
   try {
     assertTrustedAgentPull(pull, config, { files, rejectPrivilegedPaths: true });
     trustedPull = true;
   } catch (error) {
-    blockers.push(error.message);
+    policyBlockers.push(error.message);
   }
 
   const expectedRepo = `${config.repo.owner}/${config.repo.name}`;
   const branchMatch = String(pull.head?.ref ?? "").match(/^agent\/issue-(\d+)-[a-z0-9][a-z0-9-]*$/);
   if (pull.head?.repo?.full_name !== expectedRepo || pull.base?.repo?.full_name !== expectedRepo) {
-    blockers.push("PR must use a same-repository branch");
+    policyBlockers.push("PR must use a same-repository branch");
   }
-  if (pull.base?.ref !== config.repo.defaultBranch) blockers.push(`PR base must be ${config.repo.defaultBranch}`);
-  if (!branchMatch) blockers.push("PR head must match agent/issue-<number>-<slug>");
-  if (pull.state !== "open" || pull.merged) blockers.push("PR must be open and unmerged");
+  if (pull.base?.ref !== config.repo.defaultBranch) policyBlockers.push(`PR base must be ${config.repo.defaultBranch}`);
+  if (!branchMatch) policyBlockers.push("PR head must match agent/issue-<number>-<slug>");
+  if (pull.state !== "open" || pull.merged) policyBlockers.push("PR must be open and unmerged");
 
   if (metadata) {
     const branchIssue = Number(branchMatch?.[1]);
-    if (branchIssue !== metadata.sourceIssue) blockers.push("PR branch does not match implementation source issue");
+    if (branchIssue !== metadata.sourceIssue) policyBlockers.push("PR branch does not match implementation source issue");
     if (sourceIssue?.number !== metadata.sourceIssue || sourceIssue?.pull_request) {
-      blockers.push("implementation metadata does not match a source issue");
+      policyBlockers.push("implementation metadata does not match a source issue");
     }
     if (!includesClosingReference(pull.body, metadata.sourceIssue)) {
-      blockers.push(`PR does not close source issue #${metadata.sourceIssue}`);
+      policyBlockers.push(`PR does not close source issue #${metadata.sourceIssue}`);
     }
     const referencedIssues = trustedClosingIssueNumbers(closingReferences, config);
     if (referencedIssues.length !== 1 || referencedIssues[0] !== metadata.sourceIssue) {
-      blockers.push("PR closing reference does not exactly match implementation source issue");
+      policyBlockers.push("PR closing reference does not exactly match implementation source issue");
     }
-    if (!metadata.automergeEligible) blockers.push("implementation metadata does not authorize automerge");
+    if (!metadata.automergeEligible) policyBlockers.push("implementation metadata does not authorize automerge");
     try {
       assertTrustedAgentPull(pull, config, { files, sourceIssue, rejectPrivilegedPaths: true });
     } catch (error) {
-      blockers.push(error.message);
+      policyBlockers.push(error.message);
     }
   }
 
-  if (!sourceIssue || sourceIssue.state !== "open") blockers.push("source issue must be open");
+  if (!sourceIssue || sourceIssue.state !== "open") policyBlockers.push("source issue must be open");
   try {
     triage = triageDecision(sourceComments, config.comments.triage, config.repo.owner);
   } catch (error) {
-    blockers.push(error.message);
+    policyBlockers.push(error.message);
   }
   if (triage) {
     if (metadata && triage.issueSnapshotSha256 !== metadata.issueSnapshotSha256) {
-      blockers.push("source triage snapshot does not match implementation metadata");
+      policyBlockers.push("source triage snapshot does not match implementation metadata");
     }
     if (sourceIssue && triage.issueSnapshotSha256 !== issueSnapshotSha256(sourceIssue)) {
-      blockers.push("source issue changed after trusted triage");
+      policyBlockers.push("source issue changed after trusted triage");
     }
-    if (triage.alignment !== "yes") blockers.push(`source triage alignment is ${triage.alignment}`);
-    if (!["low", "medium"].includes(triage.risk)) blockers.push(`source triage risk is ${triage.risk}`);
-    if (!["low", "medium"].includes(triage.priority)) blockers.push(`source triage priority is ${triage.priority}`);
+    if (triage.alignment !== "yes") policyBlockers.push(`source triage alignment is ${triage.alignment}`);
+    if (!["low", "medium"].includes(triage.risk)) policyBlockers.push(`source triage risk is ${triage.risk}`);
+    if (!["low", "medium"].includes(triage.priority)) policyBlockers.push(`source triage priority is ${triage.priority}`);
     if (triage.automationDecision !== "implement") {
-      blockers.push(`source triage automation decision is ${triage.automationDecision}`);
+      policyBlockers.push(`source triage automation decision is ${triage.automationDecision}`);
     }
-    if (triage.humanQuestion.trim()) blockers.push("source triage has an unresolved human question");
+    if (triage.humanQuestion.trim()) policyBlockers.push("source triage has an unresolved human question");
   }
 
   for (const label of config.automerge.requiredLabels) {
-    if (!prLabels.includes(label)) blockers.push(`PR missing label ${label}`);
+    if (!prLabels.includes(label)) policyBlockers.push(`PR missing label ${label}`);
   }
   if (!sourceLabels.includes(config.labels.automerge)) {
-    blockers.push(`source issue missing label ${config.labels.automerge}`);
+    policyBlockers.push(`source issue missing label ${config.labels.automerge}`);
   }
   for (const label of config.automerge.blockedLabels) {
-    if (prLabels.includes(label)) blockers.push(`PR blocked by label ${label}`);
-    if (sourceLabels.includes(label)) blockers.push(`source issue blocked by label ${label}`);
+    if (prLabels.includes(label)) policyBlockers.push(`PR blocked by label ${label}`);
+    if (sourceLabels.includes(label)) policyBlockers.push(`source issue blocked by label ${label}`);
   }
 
-  if (combined?.sha !== pull.head?.sha) blockers.push("commit statuses are not for the current PR head");
+  if (combined?.sha !== pull.head?.sha) gateBlockers.push("commit statuses are not for the current PR head");
   for (const context of config.automerge.requiredStatuses) {
     const state = statusState(combined?.statuses ?? [], context, config);
-    if (state !== "success") blockers.push(`${context} status ${state}`);
+    if (state !== "success") gateBlockers.push(`${context} status ${state}`);
   }
 
   const proofRequested =
@@ -429,17 +436,19 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
     triage?.proofNeeded === "GIF";
   if (proofRequested) {
     const state = statusState(combined?.statuses ?? [], config.automerge.proofStatus, config);
-    if (state !== "success") blockers.push(`${config.automerge.proofStatus} status ${state}`);
+    if (state !== "success") gateBlockers.push(`${config.automerge.proofStatus} status ${state}`);
   }
   for (const name of config.automerge.requiredChecks) {
     const state = checkState(checks?.check_runs ?? [], name, pull.head?.sha, config);
-    if (state !== "success") blockers.push(`${name} check ${state}`);
+    if (state !== "success") gateBlockers.push(`${name} check ${state}`);
   }
 
+  const blockers = [...new Set([...policyBlockers, ...gateBlockers])];
   return {
     allowed: blockers.length === 0,
+    staleRecoveryAllowed: trustedPull && policyBlockers.length === 0,
     trustedPull,
-    blockers: [...new Set(blockers)],
+    blockers,
     metadata,
     triage,
     proofRequested,
@@ -834,9 +843,11 @@ async function main() {
     closingReferences
   });
 
-  const baseState = decision.allowed ? resolveBaseState({ config, pull }) : null;
+  const baseState = decision.allowed || decision.staleRecoveryAllowed
+    ? resolveBaseState({ config, pull })
+    : null;
   const outcome =
-    decision.allowed && baseState.stale
+    decision.staleRecoveryAllowed && baseState.stale
       ? await recoverStaleBase({ config, prNumber, pull, decision, baseState, dryRun })
       : settleAutomerge({ config, prNumber, pull, decision, baseState, dryRun });
   finish(outcome.result, Boolean(args.json), outcome.code);

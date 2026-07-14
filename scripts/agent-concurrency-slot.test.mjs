@@ -90,8 +90,9 @@ test("actionlint ignores only its stale concurrency queue schema error", () => {
     "utf8"
   );
 
-  assert.match(
-    workflow,
-    /flags: '-ignore "unexpected key \.[*]queue\.[*] for \.[*]concurrency\.[*] section"'/
+  assert.ok(
+    workflow.includes(
+      String.raw`flags: '-ignore ^unexpected\s+key\s+\x22queue\x22\s+for\s+\x22concurrency\x22\s+section\.'`
+    )
   );
 });

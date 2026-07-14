@@ -283,6 +283,66 @@ test("stale base recovery uses the authorized head and reruns head-bound gates",
   assert.equal(commands.some(([, args]) => args[0] === "pr" && args[1] === "merge"), false);
 });
 
+test("stale base recovery replaces failed old-head gates only for a policy-eligible PR", async () => {
+  const value = fixture();
+  value.pull.auto_merge = { merge_method: "merge" };
+  value.combined.statuses = [
+    status("agent-review", "success", 1),
+    status("no-mistakes", "failure", 2)
+  ];
+  value.checks.check_runs = [];
+  const decision = evaluate(value);
+  const commands = [];
+
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.staleRecoveryAllowed, true);
+  const outcome = await recoverStaleBase(
+    {
+      config,
+      prNumber: 18,
+      pull: value.pull,
+      decision,
+      baseState: { stale: true, baseHead: baseSha }
+    },
+    {
+      runCommand: (command, args) => commands.push([command, args]),
+      getPull: () => ({ ...value.pull, head: { ...value.pull.head, sha: updatedSha } }),
+      hasAncestor: (ancestor, descendant) =>
+        (ancestor === sha || ancestor === baseSha) && descendant === updatedSha,
+      wait: () => Promise.resolve()
+    }
+  );
+
+  assert.equal(outcome.code, 0);
+  assert.equal(outcome.result.recovery.nativeAutomerge, "disabled");
+  assert.deepEqual(commands, [
+    ["gh", disableNativeAutomergeArgs(18, config)],
+    ["gh", updateBranchArgs(18, config, sha)],
+    ...recoveryDispatchArgs(18, config, updatedSha).map((args) => ["gh", args])
+  ]);
+});
+
+test("stale recovery dry run reports native automerge revocation without mutations", async () => {
+  const value = fixture();
+  value.pull.auto_merge = { merge_method: "merge" };
+  const commands = [];
+
+  const outcome = await recoverStaleBase(
+    {
+      config,
+      prNumber: 18,
+      pull: value.pull,
+      decision: evaluate(value),
+      baseState: { stale: true, baseHead: baseSha },
+      dryRun: true
+    },
+    { runCommand: (...args) => commands.push(args) }
+  );
+
+  assert.equal(outcome.result.recovery.nativeAutomerge, "would-disable");
+  assert.deepEqual(commands, []);
+});
+
 test("stale base recovery fails closed when the updated head lacks authorized ancestry", async () => {
   const value = fixture();
   value.pull.mergeable_state = "behind";
@@ -640,6 +700,7 @@ test("non-bot PR authors cannot authorize or mutate automerge", () => {
   );
 
   assert.equal(decision.trustedPull, false);
+  assert.equal(decision.staleRecoveryAllowed, false);
   assert.ok(decision.blockers.includes("agent PR author must be github-actions[bot]"));
   assert.equal(outcome.result.nativeAutomerge, "not-touched");
   assert.deepEqual(commands, []);
@@ -654,9 +715,19 @@ test("source issue and branch authorization fail closed", () => {
   const result = evaluate(value);
 
   assert.equal(result.allowed, false);
+  assert.equal(result.staleRecoveryAllowed, false);
   assert.ok(result.blockers.includes("PR must use a same-repository branch"));
   assert.ok(result.blockers.includes("PR branch does not match implementation source issue"));
   assert.ok(result.blockers.includes("source issue blocked by label agent:blocked"));
+});
+
+test("privileged automation changes cannot enter stale recovery", () => {
+  const value = fixture({ files: [{ filename: ".github/workflows/ci.yml" }] });
+  const result = evaluate(value);
+
+  assert.equal(result.allowed, false);
+  assert.equal(result.staleRecoveryAllowed, false);
+  assert.ok(result.blockers.includes("agent PR changes privileged candidate paths"));
 });
 
 test("high-risk triage or a human question blocks automerge", () => {
@@ -665,6 +736,7 @@ test("high-risk triage or a human question blocks automerge", () => {
   const result = evaluate(value);
 
   assert.equal(result.allowed, false);
+  assert.equal(result.staleRecoveryAllowed, false);
   assert.ok(result.blockers.includes("source triage risk is high"));
   assert.ok(result.blockers.includes("source triage has an unresolved human question"));
 });

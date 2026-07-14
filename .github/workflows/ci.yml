@@ -97,7 +97,7 @@ jobs:
         uses: raven-actions/actionlint@v2
         with:
           # actionlint v1.7.12 predates GitHub's supported concurrency queue key.
-          flags: '-ignore "unexpected key .*queue.* for .*concurrency.* section"'
+          flags: '-ignore ^unexpected\s+key\s+\x22queue\x22\s+for\s+\x22concurrency\x22\s+section\.'
 
   build:
     name: build
