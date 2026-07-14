@@ -251,13 +251,17 @@ gate:
   assert.equal(artifact.status, "blocked");
   assert.equal(artifact.outcome, "ask-user");
   assert.deepEqual(artifact.findings, [
-    { id: "r1", severity: "error", file: "src/auth.ts", action: "ask-user" },
+    {
+      id: "r1",
+      severity: "error",
+      file: "src/auth.ts",
+      action: "ask-user",
+      description: "Leaked [redacted], requires a decision"
+    },
   ]);
   assert.doesNotMatch(comment, new RegExp(secret));
-  assert.match(
-    comment,
-    /source intent, and process output are intentionally omitted/,
-  );
+  assert.match(comment, /Finding descriptions are sanitized/);
+  assert.match(comment, /Leaked \[redacted\], requires a decision/);
 });
 
 test("unknown decision gate fails closed", () => {
@@ -317,6 +321,24 @@ test("isolated review environment blocker receives one fresh daemon retry", () =
 
 test("review environment retry stays bounded and excludes product blockers", () => {
   const soleEnvironmentBlock = parseAxiResult(environmentBlockOutput(), 0);
+  const validationEnvironmentBlock = parseAxiResult(
+    environmentBlockOutput().replace(
+      "review-environment-blocked",
+      "validation-environment-blocked",
+    ),
+    0,
+  );
+  const wrongStep = parseAxiResult(
+    environmentBlockOutput().replace("step: review", "step: test"),
+    0,
+  );
+  const fileFinding = parseAxiResult(
+    environmentBlockOutput().replace(
+      "review-environment-blocked,error,,ask-user",
+      "review-environment-blocked,error,src/test.ts,ask-user",
+    ),
+    0,
+  );
   const mixedBlock = parseAxiResult(
     environmentBlockOutput().replace(
       "findings[1]{id,severity,file,action}:\n    review-environment-blocked,error,,ask-user",
@@ -325,6 +347,9 @@ test("review environment retry stays bounded and excludes product blockers", () 
     0,
   );
   assert.equal(isRetryableReviewEnvironmentBlock(soleEnvironmentBlock), true);
+  assert.equal(isRetryableReviewEnvironmentBlock(validationEnvironmentBlock), false);
+  assert.equal(isRetryableReviewEnvironmentBlock(wrongStep), false);
+  assert.equal(isRetryableReviewEnvironmentBlock(fileFinding), false);
   assert.equal(isRetryableReviewEnvironmentBlock(mixedBlock), false);
 
   let calls = 0;

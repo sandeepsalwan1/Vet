@@ -22,7 +22,7 @@ import {
   upsertManagedComment,
 } from "./agent-lib.mjs";
 
-const ARTIFACT_VERSION = 1;
+const ARTIFACT_VERSION = 2;
 const NO_MISTAKES_COMMENT_MARKER = "<!-- agent-gate-no-mistakes:v1 -->";
 const STATUS_CONTEXT = "no-mistakes";
 const PASSING_OUTCOMES = new Set(["checks-passed", "passed"]);
@@ -142,6 +142,7 @@ export function parseGateFindings(output) {
       severity: row.severity,
       file: row.file,
       action: row.action,
+      description: row.description,
     });
   }
   return findings;
@@ -172,6 +173,18 @@ function parseRunFields(output) {
   return fields;
 }
 
+function parseGateStep(output) {
+  const lines = String(output ?? "").split(/\r?\n/);
+  const gateIndex = lines.findIndex((line) => line === "gate:");
+  if (gateIndex === -1) return "";
+  for (const line of lines.slice(gateIndex + 1)) {
+    if (!line.startsWith("  ")) break;
+    const match = line.match(/^\s{2}step:\s*(\S+)\s*$/);
+    if (match) return match[1];
+  }
+  return "";
+}
+
 export function parseAxiResult(output, exitStatus) {
   const text = String(output ?? "");
   const outcomes = [
@@ -181,6 +194,7 @@ export function parseAxiResult(output, exitStatus) {
   ].map((match) => match[1]);
   const run = parseRunFields(text);
   const findings = parseGateFindings(text);
+  const step = parseGateStep(text);
 
   if (outcomes.length === 1) {
     const outcome = outcomes[0];
@@ -197,6 +211,7 @@ export function parseAxiResult(output, exitStatus) {
         : "decision-gate",
       run,
       findings,
+      step,
     };
   }
   return { status: "failed", outcome: "invalid-output", run, findings };
@@ -206,8 +221,10 @@ export function isRetryableReviewEnvironmentBlock(gate) {
   return (
     gate?.status === "blocked" &&
     gate?.outcome === "ask-user" &&
+    gate?.step === "review" &&
     gate?.findings?.length === 1 &&
     gate.findings[0]?.id === "review-environment-blocked" &&
+    !gate.findings[0]?.file &&
     gate.findings[0]?.action === "ask-user"
   );
 }
@@ -238,6 +255,7 @@ function safeFinding(finding) {
     severity: safePublicText(finding?.severity, 32),
     file: safePublicText(finding?.file, 240),
     action: safePublicText(finding?.action, 32),
+    description: safePublicText(finding?.description, 1000),
   };
 }
 
@@ -407,7 +425,7 @@ Status: ${artifact.status}
 Branch: ${branch}
 Head: ${sha}
 ${runUrl ? `Actions run: ${runUrl}\n` : ""}
-Finding descriptions, source intent, and process output are intentionally omitted from this public comment.
+Finding descriptions are sanitized. Source intent and process output are omitted.
 
 Structured gate:
 ${markdownJsonBlock({
