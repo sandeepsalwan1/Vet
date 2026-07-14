@@ -153,6 +153,46 @@ export function recoveryDispatchArgs(prNumber, config, headSha, proofRequested =
   return dispatches;
 }
 
+export function postMergeDispatchArgs(config, mergeSha) {
+  if (!/^[a-f0-9]{40}$/.test(String(mergeSha ?? ""))) {
+    throw new AgentError("post-merge commit SHA is invalid", 1);
+  }
+  const repo = repoSlug(config);
+  const common = ["--repo", repo, "--ref", config.repo.defaultBranch];
+  return [
+    ["workflow", "run", "ci.yml", ...common, "-f", `main-sha=${mergeSha}`],
+    [
+      "workflow",
+      "run",
+      "codeql.yml",
+      ...common,
+      "-f",
+      `candidate-sha=${mergeSha}`,
+      "-f",
+      `candidate-ref=refs/heads/${config.repo.defaultBranch}`
+    ]
+  ];
+}
+
+export function dispatchPostMergeChecks({ config, mergeSha }, dependencies = {}) {
+  const execute = dependencies.runCommand ?? runCommand;
+  const dispatches = postMergeDispatchArgs(config, mergeSha);
+  const dispatchErrors = [];
+  for (const args of dispatches) {
+    try {
+      execute("gh", args);
+    } catch (error) {
+      dispatchErrors.push(error?.message ?? String(error));
+    }
+  }
+  return {
+    ok: dispatchErrors.length === 0,
+    mergeSha,
+    dispatches,
+    dispatchErrors
+  };
+}
+
 function comparisonHasAncestor(comparison, ancestor) {
   return comparison?.merge_base_commit?.sha === ancestor;
 }
@@ -666,6 +706,9 @@ export function settleAutomerge(
 ) {
   const execute = dependencies.runCommand ?? runCommand;
   const upsert = dependencies.upsertManagedComment ?? upsertManagedComment;
+  const getPull =
+    dependencies.getPull ??
+    (() => ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/pulls/${prNumber}`));
 
   if (!decision.trustedPull) {
     return {
@@ -715,25 +758,60 @@ export function settleAutomerge(
     };
   }
 
+  let postMerge = {
+    ok: true,
+    dryRun: true,
+    mergeSha: null,
+    dispatches: [],
+    dispatchErrors: []
+  };
   if (!dryRun) {
     revokeNativeAutomerge({ config, prNumber, pull }, { runCommand: execute });
     if (pull.draft) {
       execute("gh", ["pr", "ready", String(prNumber), "--repo", `${config.repo.owner}/${config.repo.name}`]);
     }
     execute("gh", nativeMergeArgs(prNumber, config, pull.head.sha));
+    try {
+      const mergedPull = getPull();
+      const mergeSha = String(mergedPull?.merge_commit_sha ?? "");
+      if (
+        mergedPull?.state !== "closed" ||
+        mergedPull?.merged !== true ||
+        mergedPull?.head?.sha !== pull.head.sha ||
+        mergedPull?.base?.ref !== config.repo.defaultBranch ||
+        !/^[a-f0-9]{40}$/.test(mergeSha)
+      ) {
+        throw new AgentError("could not resolve the trusted post-merge commit", 1);
+      }
+      postMerge = dispatchPostMergeChecks(
+        { config, mergeSha },
+        { runCommand: execute }
+      );
+    } catch (error) {
+      postMerge = {
+        ok: false,
+        mergeSha: null,
+        dispatches: [],
+        dispatchErrors: [error?.message ?? String(error)]
+      };
+    }
   }
   const cleanup = closeAgentLoop(
     { config, prNumber, decision, dryRun },
     { runCommand: execute, getIssue: dependencies.getIssue }
   );
-  if (!cleanup.ok) {
+  if (!postMerge.ok || !cleanup.ok) {
+    const failures = [];
+    if (!postMerge.ok) failures.push("post-merge check dispatch failed");
+    if (!cleanup.ok) failures.push("loop cleanup failed");
     return {
       code: 1,
       result: {
         ok: false,
         merged: !dryRun,
-        message: `${dryRun ? "would merge" : "merged"} PR #${prNumber}, but loop cleanup failed`,
+        message: `${dryRun ? "would merge" : "merged"} PR #${prNumber}, but ${failures.join(" and ")}`,
         decision,
+        postMerge,
         cleanup
       }
     };
@@ -744,6 +822,7 @@ export function settleAutomerge(
       ok: true,
       message: `${dryRun ? "would merge" : "merged"} PR #${prNumber}`,
       decision,
+      postMerge,
       cleanup
     }
   };

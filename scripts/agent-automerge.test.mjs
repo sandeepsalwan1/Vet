@@ -9,10 +9,12 @@ import {
   checkState,
   closeAgentLoop,
   closeIssueArgs,
+  dispatchPostMergeChecks,
   disableNativeAutomergeArgs,
   evaluate,
   isStaleBase,
   nativeMergeArgs,
+  postMergeDispatchArgs,
   recoverStaleBase,
   recoveryDispatchArgs,
   removeLabelArgs,
@@ -27,6 +29,7 @@ import {
 const sha = "a".repeat(40);
 const baseSha = "b".repeat(40);
 const updatedSha = "c".repeat(40);
+const mergeSha = "d".repeat(40);
 const config = {
   repo: { owner: "sandeepsalwan1", name: "Vet", defaultBranch: "main" },
   labels: {
@@ -161,7 +164,7 @@ function expectedCleanupCommands() {
   ];
 }
 
-function cleanupHarness(decision, { failLabel = "" } = {}) {
+function cleanupHarness(decision, { failLabel = "", failWorkflow = "" } = {}) {
   const commands = [];
   const state = new Map([
     [18, { number: 18, state: "open", labels: [...decision.prLabels] }],
@@ -169,12 +172,25 @@ function cleanupHarness(decision, { failLabel = "" } = {}) {
   ]);
   return {
     commands,
+    getPull() {
+      return {
+        number: 18,
+        state: "closed",
+        merged: true,
+        merge_commit_sha: mergeSha,
+        head: { sha },
+        base: { ref: "main" }
+      };
+    },
     getIssue(number) {
       const issue = state.get(Number(number));
       return { ...issue, labels: [...issue.labels] };
     },
     runCommand(command, args) {
       commands.push([command, args]);
+      if (args[0] === "workflow" && args.includes(failWorkflow)) {
+        throw new Error("workflow dispatch unavailable");
+      }
       if (args[0] === "issue" && args[1] === "edit") {
         const number = Number(args[2]);
         const label = args[args.indexOf("--remove-label") + 1];
@@ -217,8 +233,10 @@ test("eligible PR is merged immediately after making a draft ready", () => {
   assert.deepEqual(harness.commands, [
     ["gh", ["pr", "ready", "18", "--repo", "sandeepsalwan1/Vet"]],
     ["gh", nativeMergeArgs(18, config, sha)],
+    ...postMergeDispatchArgs(config, mergeSha).map((args) => ["gh", args]),
     ...expectedCleanupCommands()
   ]);
+  assert.equal(outcome.result.postMerge.mergeSha, mergeSha);
 });
 
 test("eligible PR revokes stale native automerge before immediate merge", () => {
@@ -235,8 +253,44 @@ test("eligible PR revokes stale native automerge before immediate merge", () => 
   assert.deepEqual(harness.commands, [
     ["gh", disableNativeAutomergeArgs(18, config)],
     ["gh", nativeMergeArgs(18, config, sha)],
+    ...postMergeDispatchArgs(config, mergeSha).map((args) => ["gh", args]),
     ...expectedCleanupCommands()
   ]);
+});
+
+test("post-merge checks are dispatched against the exact merge commit", () => {
+  const commands = [];
+  const result = dispatchPostMergeChecks(
+    { config, mergeSha },
+    { runCommand: (command, args) => commands.push([command, args]) }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.mergeSha, mergeSha);
+  assert.deepEqual(
+    commands,
+    postMergeDispatchArgs(config, mergeSha).map((args) => ["gh", args])
+  );
+  assert.throws(() => postMergeDispatchArgs(config, "not-a-sha"), /commit SHA is invalid/);
+});
+
+test("post-merge dispatch failure is visible after merge and cleanup still completes", () => {
+  const value = fixture();
+  const decision = evaluate(value);
+  const harness = cleanupHarness(decision, { failWorkflow: "codeql.yml" });
+
+  const outcome = settleAutomerge(
+    { config, prNumber: 18, pull: value.pull, decision },
+    harness
+  );
+
+  assert.equal(outcome.code, 1);
+  assert.equal(outcome.result.merged, true);
+  assert.match(outcome.result.message, /post-merge check dispatch failed/);
+  assert.equal(outcome.result.postMerge.ok, false);
+  assert.equal(outcome.result.postMerge.dispatchErrors.length, 1);
+  assert.equal(outcome.result.cleanup.ok, true);
+  assert.ok(harness.commands.some(([, args]) => args.join(" ") === closeIssueArgs(17, config).join(" ")));
 });
 
 test("stale base recovery uses the authorized head and reruns head-bound gates", async () => {

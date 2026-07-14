@@ -193,6 +193,9 @@ Fix technical failures, answer real product questions, or use the exact-head app
 
 Normal automerge requires CI checks `quality`, `build`, `scenarios`, `audit`, and `dependency-review`, plus `agent-review` and `no-mistakes` statuses.
 `agent-proof` is also required when trusted labels or managed triage request visual proof.
+After an agent PR merges, automerge explicitly dispatches baseline CI and CodeQL against the exact merge commit.
+This explicit dispatch is required because GitHub suppresses recursive workflow events caused by its workflow token.
+If either dispatch is rejected, the automerge run fails visibly even though the already-completed merge cannot be rolled back.
 The active agent-job cap is eight, the hard configurable ceiling is fifteen, and each lane has its own lower cap.
 `.agent/config.json` is the machine-readable source for gate names, lane-specific model settings, backend selection, and capacity; `.agent/agent-policy.md` owns risk and approval meaning.
 
@@ -204,5 +207,10 @@ Mutating automation CLIs support `--dry-run`; structured workflow calls use `--j
     node scripts/agent-router.mjs --event-file event.json --json
     node scripts/agent-worker.mjs --validate-backend --lane implement --json
     node scripts/agent-concurrency-slot.mjs --lane implement --key 42 --json
+
+Backfill missing post-merge checks with the merge commit SHA:
+
+    gh workflow run ci.yml --repo sandeepsalwan1/Vet --ref main -f main-sha=<merge-sha>
+    gh workflow run codeql.yml --repo sandeepsalwan1/Vet --ref main -f candidate-sha=<merge-sha> -f candidate-ref=refs/heads/main
 
 GitHub comments use managed markers and temporary body files. Never interpolate untrusted issue text into a shell command.

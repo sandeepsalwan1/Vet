@@ -9,18 +9,25 @@ on:
     inputs:
       pr-number:
         description: Pull request whose exact head is being validated
-        required: true
-        type: number
+        required: false
+        type: string
+        default: ""
       expected-head-sha:
         description: Exact current pull request head SHA
-        required: true
+        required: false
         type: string
+        default: ""
+      main-sha:
+        description: Exact merged commit already reachable from main
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ inputs.expected-head-sha || github.ref }}
+  group: ci-${{ inputs.expected-head-sha || inputs.main-sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -40,21 +47,36 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_PR: ${{ inputs.pr-number }}
           REQUESTED_SHA: ${{ inputs.expected-head-sha }}
+          REQUESTED_MAIN_SHA: ${{ inputs.main-sha }}
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
           EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
-            [[ "$REQUESTED_PR" =~ ^[0-9]+$ && "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
-            pull_file="$RUNNER_TEMP/ci-pull.json"
-            gh api "repos/$GITHUB_REPOSITORY/pulls/$REQUESTED_PR" > "$pull_file"
-            test "$(jq -r '.state' "$pull_file")" = open
-            test "$(jq -r '.head.repo.full_name' "$pull_file")" = "$GITHUB_REPOSITORY"
-            test "$(jq -r '.base.repo.full_name' "$pull_file")" = "$GITHUB_REPOSITORY"
-            test "$(jq -r '.base.ref' "$pull_file")" = "${{ github.event.repository.default_branch }}"
-            test "$(jq -r '.head.sha' "$pull_file")" = "$REQUESTED_SHA"
-            candidate_sha="$REQUESTED_SHA"
-            base_sha="$(jq -r '.base.sha' "$pull_file")"
+            if [ -n "$REQUESTED_MAIN_SHA" ]; then
+              test -z "$REQUESTED_PR" && test -z "$REQUESTED_SHA"
+              [[ "$REQUESTED_MAIN_SHA" =~ ^[0-9a-f]{40}$ ]]
+              commit_file="$RUNNER_TEMP/ci-main-commit.json"
+              gh api "repos/$GITHUB_REPOSITORY/commits/$REQUESTED_MAIN_SHA" > "$commit_file"
+              base_sha="$(jq -r '.parents[0].sha // empty' "$commit_file")"
+              default_head="$(gh api "repos/$GITHUB_REPOSITORY/commits/$DEFAULT_BRANCH" --jq .sha)"
+              compare_file="$RUNNER_TEMP/ci-main-compare.json"
+              gh api "repos/$GITHUB_REPOSITORY/compare/$REQUESTED_MAIN_SHA...$default_head" > "$compare_file"
+              test "$(jq -r '.merge_base_commit.sha' "$compare_file")" = "$REQUESTED_MAIN_SHA"
+              candidate_sha="$REQUESTED_MAIN_SHA"
+            else
+              [[ "$REQUESTED_PR" =~ ^[0-9]+$ && "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+              pull_file="$RUNNER_TEMP/ci-pull.json"
+              gh api "repos/$GITHUB_REPOSITORY/pulls/$REQUESTED_PR" > "$pull_file"
+              test "$(jq -r '.state' "$pull_file")" = open
+              test "$(jq -r '.head.repo.full_name' "$pull_file")" = "$GITHUB_REPOSITORY"
+              test "$(jq -r '.base.repo.full_name' "$pull_file")" = "$GITHUB_REPOSITORY"
+              test "$(jq -r '.base.ref' "$pull_file")" = "$DEFAULT_BRANCH"
+              test "$(jq -r '.head.sha' "$pull_file")" = "$REQUESTED_SHA"
+              candidate_sha="$REQUESTED_SHA"
+              base_sha="$(jq -r '.base.sha' "$pull_file")"
+            fi
           else
             candidate_sha="$EVENT_HEAD_SHA"
             base_sha="$EVENT_BASE_SHA"
