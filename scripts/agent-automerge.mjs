@@ -32,7 +32,10 @@ function newest(items, timestampFields) {
 
 function actionsUrlPattern(config, allowJob = false) {
   const repo = `${config.repo.owner}/${config.repo.name}`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`^https://github\\.com/${repo}/actions/runs/\\d+${allowJob ? "(?:/job/\\d+)?" : ""}$`, "i");
+  const path = allowJob
+    ? "(?:actions/runs/\\d+(?:/job/\\d+)?|runs/\\d+)"
+    : "actions/runs/\\d+";
+  return new RegExp(`^https://github\\.com/${repo}/${path}$`, "i");
 }
 
 export function statusState(statuses, context, config) {

@@ -669,6 +669,24 @@ test("custom statuses and checks require GitHub Actions provenance", () => {
   assert.equal(checkState([forgedCheck], "quality", sha, config), "missing");
 });
 
+test("GitHub canonical check-run URLs retain trusted Actions provenance", () => {
+  const canonicalCheck = {
+    ...check("quality"),
+    details_url: "https://github.com/sandeepsalwan1/Vet/runs/87210913027",
+  };
+  const foreignCheck = {
+    ...canonicalCheck,
+    details_url: "https://github.com/attacker/repo/runs/87210913027",
+  };
+  const arbitraryRepoUrl = {
+    ...canonicalCheck,
+    details_url: "https://github.com/sandeepsalwan1/Vet/issues/15",
+  };
+
+  assert.equal(checkState([canonicalCheck], "quality", sha, config), "success");
+  assert.equal(checkState([foreignCheck, arbitraryRepoUrl], "quality", sha, config), "missing");
+});
+
 test("automerge reads creator provenance from the direct statuses endpoint", () => {
   const source = readFileSync(
     new URL("./agent-automerge.mjs", import.meta.url),
