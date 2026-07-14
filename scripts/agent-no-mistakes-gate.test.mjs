@@ -28,11 +28,11 @@ test("authenticated reviewer is read-only and all source changes fail closed", (
 
   assert.match(workflow, /- --sandbox\s+- read-only/);
   assert.doesNotMatch(workflow, /- workspace-write/);
-  assert.match(workflow, /tar --no-same-owner -xf/);
+  assert.doesNotMatch(workflow, /tar -C \/source/);
   assert.match(workflow, /npm rebuild --offline/);
   assert.match(workflow, /npm_config_nodedir=\/usr\/local/);
   assert.match(workflow, /--user "\$\(id -u\):\$\(id -g\)"/);
-  assert.match(workflow, /type=tmpfs,dst=\/workspace,tmpfs-mode=1777/);
+  assert.match(workflow, /src=\$PWD,dst=\/workspace,readonly/);
   assert.match(workflow, /--read-only/);
   assert.match(gate, /"--untracked-files=all"/);
 });

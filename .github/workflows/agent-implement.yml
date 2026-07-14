@@ -229,16 +229,15 @@ jobs:
             --cap-drop ALL \
             --security-opt no-new-privileges \
             --read-only \
-            --mount "type=bind,src=$PWD,dst=/source,readonly" \
+            --mount "type=bind,src=$PWD,dst=/workspace,readonly" \
             --mount "type=bind,src=$PWD/node_modules,dst=/workspace/node_modules" \
-            --mount type=tmpfs,dst=/workspace,tmpfs-mode=1777 \
             --mount type=tmpfs,dst=/tmp,tmpfs-mode=1777 \
             --workdir /workspace \
             --env HOME=/tmp/home \
             --env npm_config_cache=/tmp/npm-cache \
             --env npm_config_nodedir=/usr/local \
             "$DOCKER_IMAGE" \
-            sh -euc 'tar -C /source --exclude=./node_modules --exclude=./.git -cf - . | tar --no-same-owner -xf - -C /workspace && npm rebuild --offline --no-audit --no-fund'
+            npm rebuild --offline --no-audit --no-fund
       - uses: actions/download-artifact@v4
         with:
           name: agent-implementation-${{ inputs.issue-number }}

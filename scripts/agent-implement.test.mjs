@@ -354,11 +354,11 @@ test("implementation workflow isolates candidate checks from credentials, artifa
   assert.match(validation, /node:22-bookworm@sha256:[a-f0-9]{64}/);
   assert.match(validation, /npm ci --ignore-scripts/);
   assert.match(validation, /npm rebuild --offline/);
-  assert.match(validation, /tar --no-same-owner -xf/);
+  assert.doesNotMatch(validation, /tar -C \/source/);
   assert.match(validation, /npm_config_nodedir=\/usr\/local/);
   assert.match(validation, /--network none/);
   assert.match(validation, /--user "\$\(id -u\):\$\(id -g\)"/);
-  assert.match(validation, /type=tmpfs,dst=\/workspace,tmpfs-mode=1777/);
+  assert.match(validation, /src=\$PWD,dst=\/workspace,readonly/);
   assert.match(validation, /--read-only/);
   assert.match(validation, /node_modules,dst=\/workspace\/node_modules,readonly/);
   assert.match(validation, /::stop-commands::/);
