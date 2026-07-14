@@ -3,6 +3,7 @@
   "workspaces": {
     ".": {
       "entry": ["scripts/*.mjs", "eslint.config.mjs"],
+      "ignoreBinaries": ["no-mistakes"],
       "project": ["scripts/*.mjs"]
     },
     "apps/internal": {

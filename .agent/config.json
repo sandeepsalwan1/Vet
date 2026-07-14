@@ -82,6 +82,10 @@
   },
   "crabbox": {
     "preferWhenProviderAuthExists": true,
+    "readiness": {
+      "vercel": "CRABBOX_VERCEL_READY",
+      "hetzner": "CRABBOX_HETZNER_READY"
+    },
     "nonVisualProviders": [
       "vercel-sandbox",
       "github-actions"
@@ -90,6 +94,7 @@
       "hetzner"
     ],
     "lanes": {
+      "implementRemote": [],
       "ciRemote": [
         "npm run build",
         "npm run test:scenarios"

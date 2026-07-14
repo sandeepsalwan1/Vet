@@ -41,7 +41,14 @@ Automerge is forbidden for high-priority or high-risk work even if all checks pa
 
 - GitHub Actions owns label events and CI status.
 - Crabbox is preferred for implementation/proof when provider auth exists.
+- A provider is eligible only after a live smoke passes and its repository readiness variable is enabled.
 - GitHub-hosted Actions is the fallback for non-visual work when provider auth is missing.
 - The raw `crabbox` binary is not the issue brain; the worker script plus configured backend is.
 - Codex/OpenAI is one backend choice, not the control plane.
 - Sandcastle is optional inside a worker when TypeScript orchestration would simplify planner/reviewer flows.
+
+## Gate Trust
+
+- Hosted no-mistakes runs only for same-repository `agent/issue-*` branches with trusted implementation metadata and managed triage.
+- Repository commands run without normal credential inheritance, but the shared runner identity is defense in depth rather than hostile-code isolation.
+- `ask-user`, malformed output, setup failure, or a stale validated head blocks automerge.

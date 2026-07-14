@@ -1,0 +1,16 @@
+agent: codex
+allow_repo_commands: false
+
+# These commands come from the trusted default branch. The clean environment
+# prevents normal child-process inheritance of the gate daemon's credentials.
+# This is defense in depth, not isolation from hostile same-user code.
+commands:
+  test: >-
+    env -i HOME="$HOME" PATH="$PATH" CI=true TMPDIR="${TMPDIR:-/tmp}"
+    sh -c 'npm ci && npm run typecheck && npm run build && npm run test:scenarios'
+  lint: >-
+    env -i HOME="$HOME" PATH="$PATH" CI=true TMPDIR="${TMPDIR:-/tmp}"
+    sh -c 'npm run lint && npm run lint:dead && npm run lint:duplicates && node --test scripts/agent-*.test.mjs && git diff --check'
+
+auto_fix:
+  review: 0

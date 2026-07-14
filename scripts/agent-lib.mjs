@@ -173,13 +173,18 @@ export function getIssueComments(config, number) {
   return ghApiJson(path, { paginate: true }) ?? [];
 }
 
+export function commentHasManagedMarker(body, marker) {
+  const text = String(body ?? "");
+  return text === marker || text.startsWith(`${marker}\n`);
+}
+
 export function upsertManagedComment({ config, number, marker, body, dryRun = false }) {
   const fullBody = `${marker}\n${body.trim()}\n`;
   if (dryRun) {
     return { ok: true, dryRun: true, number, marker, body: fullBody };
   }
   const comments = getIssueComments(config, number);
-  const existing = comments.find((comment) => typeof comment.body === "string" && comment.body.includes(marker));
+  const existing = comments.find((comment) => commentHasManagedMarker(comment.body, marker));
   return withTempJson({ body: fullBody }, (path) => {
     if (existing) {
       gh(["api", `repos/${config.repo.owner}/${config.repo.name}/issues/comments/${existing.id}`, "-X", "PATCH", "--input", path]);
@@ -331,12 +336,13 @@ export function issueLabels(issueOrPull) {
   return (issueOrPull.labels ?? []).map((label) => (typeof label === "string" ? label : label.name)).filter(Boolean);
 }
 
-export function dispatchWorkflow(config, workflow, fields = {}, dryRun = false) {
+export function dispatchWorkflow(config, workflow, fields = {}, dryRun = false, ref = "") {
   const args = ["workflow", "run", workflow, "--repo", repoSlug(config)];
+  if (ref) args.push("--ref", ref);
   for (const [key, value] of Object.entries(fields)) {
     args.push("-f", `${key}=${value}`);
   }
-  if (dryRun) return { ok: true, dryRun: true, workflow, fields };
+  if (dryRun) return { ok: true, dryRun: true, workflow, fields, ref };
   gh(args);
-  return { ok: true, workflow, fields };
+  return { ok: true, workflow, fields, ref };
 }

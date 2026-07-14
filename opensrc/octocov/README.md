@@ -14,7 +14,7 @@ Local cache:
 /Users/sandeep/.opensrc/repos/github.com/k1LoW/octocov/main
 ```
 
-Current checked state on 2026-07-09:
+Current checked state on 2026-07-13:
 
 - latest release: `v0.75.9`
 - latest release time: `2026-07-08T06:36:29Z`

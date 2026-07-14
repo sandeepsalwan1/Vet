@@ -14,7 +14,7 @@ Local cache:
 /Users/sandeep/.opensrc/repos/github.com/mattpocock/sandcastle/main
 ```
 
-Current checked state on 2026-07-09:
+Current checked state on 2026-07-13:
 
 - latest release: `v0.12.0`
 - latest release time: `2026-06-29T20:16:27Z`

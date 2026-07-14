@@ -9,18 +9,27 @@ on:
       target-number:
         required: true
         type: number
-      artifact-path:
+      proof-kind:
+        required: false
+        type: string
+        default: auto
+      route:
         required: false
         type: string
         default: ""
-      provider:
+    secrets:
+      CRABBOX_COORDINATOR_TOKEN:
         required: false
-        type: string
-        default: ""
-      lease-id:
+      HCLOUD_TOKEN:
         required: false
-        type: string
-        default: ""
+      HETZNER_TOKEN:
+        required: false
+      HETZNER_API_TOKEN:
+        required: false
+      VERCEL_TOKEN:
+        required: false
+      VERCEL_OIDC_TOKEN:
+        required: false
   workflow_dispatch:
     inputs:
       target-kind:
@@ -32,17 +41,21 @@ on:
       target-number:
         required: true
         type: number
-      artifact-path:
+      proof-kind:
         required: false
-        type: string
-      provider:
-        required: false
-        type: string
-      lease-id:
+        type: choice
+        default: auto
+        options:
+          - auto
+          - CI
+          - UI
+          - GIF
+      route:
         required: false
         type: string
 
 permissions:
+  actions: write
   contents: read
   issues: write
   pull-requests: write
@@ -63,10 +76,77 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
+      - name: Install Crabbox when remote proof is configured
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CRABBOX_COORDINATOR_TOKEN: ${{ secrets.CRABBOX_COORDINATOR_TOKEN }}
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          HETZNER_TOKEN: ${{ secrets.HETZNER_TOKEN }}
+          HETZNER_API_TOKEN: ${{ secrets.HETZNER_API_TOKEN }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_OIDC_TOKEN: ${{ secrets.VERCEL_OIDC_TOKEN }}
+          CRABBOX_VERCEL_READY: ${{ vars.CRABBOX_VERCEL_READY }}
+          CRABBOX_HETZNER_READY: ${{ vars.CRABBOX_HETZNER_READY }}
+        run: |
+          if [ -z "${CRABBOX_COORDINATOR_TOKEN:-}${HCLOUD_TOKEN:-}${HETZNER_TOKEN:-}${HETZNER_API_TOKEN:-}" ] && { [ "$CRABBOX_VERCEL_READY" != true ] || [ -z "${VERCEL_TOKEN:-}${VERCEL_OIDC_TOKEN:-}" ]; }; then
+            exit 0
+          fi
+          download="$RUNNER_TEMP/crabbox-download"
+          bin="$RUNNER_TEMP/crabbox-bin"
+          mkdir -p "$download" "$bin"
+          if ! gh release download v0.38.0 --repo openclaw/crabbox --pattern crabbox_0.38.0_linux_amd64.tar.gz --pattern checksums.txt --dir "$download"; then
+            echo "Crabbox download unavailable; proof script will use its configured fallback."
+            exit 0
+          fi
+          if ! (cd "$download" && sha256sum --check --ignore-missing checksums.txt); then
+            echo "Crabbox checksum verification failed; proof script will use its configured fallback."
+            exit 0
+          fi
+          tar -xzf "$download/crabbox_0.38.0_linux_amd64.tar.gz" -C "$bin"
+          chmod 755 "$bin/crabbox"
+          echo "$bin" >> "$GITHUB_PATH"
+      - name: Install Vercel Sandbox bridge when configured
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_OIDC_TOKEN: ${{ secrets.VERCEL_OIDC_TOKEN }}
+          CRABBOX_VERCEL_READY: ${{ vars.CRABBOX_VERCEL_READY }}
+        run: |
+          if [ "$CRABBOX_VERCEL_READY" = true ] && [ -n "${VERCEL_TOKEN:-}${VERCEL_OIDC_TOKEN:-}" ]; then
+            bridge_dir="$RUNNER_TEMP/crabbox-vercel-bridge"
+            bridge="$RUNNER_TEMP/crabbox-vercel-sandbox-bridge"
+            if npm install --prefix "$bridge_dir" --no-save --package-lock=false @vercel/sandbox@2.6.0 sandbox@3.4.2; then
+              echo '#!/bin/sh' > "$bridge"
+              echo "cd '$bridge_dir'" >> "$bridge"
+              echo 'exec crabbox __vercel-sandbox-bridge "$@"' >> "$bridge"
+              chmod 755 "$bridge"
+              echo "CRABBOX_VERCEL_SANDBOX_BRIDGE=$bridge" >> "$GITHUB_ENV"
+            fi
+          fi
       - name: Run proof
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/agent-proof.mjs --target-kind "${{ inputs.target-kind }}" --target-number "${{ inputs.target-number }}" --artifact-path "${{ inputs.artifact-path }}" --provider "${{ inputs.provider }}" --lease-id "${{ inputs.lease-id }}" --run --json
+          CRABBOX_COORDINATOR_TOKEN: ${{ secrets.CRABBOX_COORDINATOR_TOKEN }}
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          HETZNER_TOKEN: ${{ secrets.HETZNER_TOKEN }}
+          HETZNER_API_TOKEN: ${{ secrets.HETZNER_API_TOKEN }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_OIDC_TOKEN: ${{ secrets.VERCEL_OIDC_TOKEN }}
+          CRABBOX_VERCEL_READY: ${{ vars.CRABBOX_VERCEL_READY }}
+          CRABBOX_HETZNER_READY: ${{ vars.CRABBOX_HETZNER_READY }}
+          PROOF_KIND: ${{ inputs.proof-kind }}
+          PROOF_ROUTE: ${{ inputs.route }}
+        run: |
+          args=(--target-kind "${{ inputs.target-kind }}" --target-number "${{ inputs.target-number }}" --run --json)
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            args+=(--explicit)
+          fi
+          if [ -n "$PROOF_KIND" ] && [ "$PROOF_KIND" != auto ]; then
+            args+=(--proof-kind "$PROOF_KIND")
+          fi
+          if [ -n "$PROOF_ROUTE" ]; then
+            args+=(--route "$PROOF_ROUTE")
+          fi
+          node scripts/agent-proof.mjs "${args[@]}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

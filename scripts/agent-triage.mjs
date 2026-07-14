@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   AgentError,
   addLabels,
@@ -80,12 +81,13 @@ Structured decision:
 ${markdownJsonBlock(decision)}`;
 }
 
-function applyDecision(config, issueNumber, decision, dryRun) {
+export function triageLabelChanges(config, decision) {
   const add = [];
   const remove = [];
   const blocked =
     decision.alignment !== "yes" ||
     decision.automationDecision === "blocked" ||
+    decision.automationDecision === "manual-review" ||
     decision.automationDecision === "reject" ||
     decision.risk === "high" ||
     decision.priority === "high";
@@ -100,13 +102,22 @@ function applyDecision(config, issueNumber, decision, dryRun) {
     remove.push(config.labels.implement, config.labels.automerge);
   } else if (decision.automationDecision === "implement") {
     add.push(config.labels.implement);
-    remove.push(config.labels.blocked);
     if (decision.risk !== "high" && decision.priority !== "high") add.push(config.labels.automerge);
   }
 
   if (decision.priority !== "high") remove.push(config.labels.priorityHigh);
   if (decision.priority !== "low") remove.push(config.labels.priorityLow);
   if (!requiresVisualProof) remove.push(config.labels.proof);
+
+  return {
+    blocked,
+    add: [...new Set(add)],
+    remove: [...new Set(remove)]
+  };
+}
+
+function applyDecision(config, issueNumber, decision, dryRun) {
+  const changes = triageLabelChanges(config, decision);
 
   const comment = upsertManagedComment({
     config,
@@ -117,12 +128,13 @@ function applyDecision(config, issueNumber, decision, dryRun) {
   });
   return {
     comment,
-    added: addLabels(config, issueNumber, [...new Set(add)], dryRun),
-    removed: removeLabels(config, issueNumber, [...new Set(remove)], dryRun),
+    added: addLabels(config, issueNumber, changes.add, dryRun),
+    removed: removeLabels(config, issueNumber, changes.remove, dryRun),
     dispatch:
-      add.includes(config.labels.implement) && !dryRun
+      changes.add.includes(config.labels.implement) && !dryRun
         ? dispatchWorkflow(config, "agent-implement.yml", { "issue-number": issueNumber }, false)
-        : null
+        : null,
+    blocked: changes.blocked
   };
 }
 
@@ -154,4 +166,6 @@ async function main() {
   );
 }
 
-main().catch((error) => fail(error, Boolean(parseArgs().json)));
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => fail(error, Boolean(parseArgs().json)));
+}

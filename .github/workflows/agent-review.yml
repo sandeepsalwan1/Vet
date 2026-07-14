@@ -6,6 +6,9 @@ on:
       pr-number:
         required: true
         type: number
+    secrets:
+      OPENAI_API_KEY:
+        required: true
   workflow_dispatch:
     inputs:
       pr-number:
@@ -94,7 +97,7 @@ jobs:
 
   no-mistakes:
     needs: apply-review
-    if: needs.apply-review.result == 'success'
+    if: always() && (needs.apply-review.result == 'success' || needs.apply-review.result == 'failure')
     permissions:
       actions: write
       contents: write
@@ -106,3 +109,5 @@ jobs:
     with:
       pr-number: ${{ inputs.pr-number }}
       intent: Validate the agent-created PR after automated review. The PR must satisfy its linked issue, preserve repo architecture, pass CI, and remain blocked rather than auto-merged if no-mistakes finds ask-user or high-risk issues.
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

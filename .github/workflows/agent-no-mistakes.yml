@@ -9,6 +9,9 @@ on:
       intent:
         required: true
         type: string
+    secrets:
+      OPENAI_API_KEY:
+        required: true
   workflow_dispatch:
     inputs:
       pr-number:
@@ -42,22 +45,74 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install no-mistakes if missing
+      - name: Mark gate pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/agent-no-mistakes-gate.mjs --pr-number "${{ inputs.pr-number }}" --prepare --json
+      # no-mistakes v1.37 rewrites existing PR bodies with its supplied intent.
+      # Keep the agent metadata authoritative while allowing its CI reads.
+      - name: Preserve pull request metadata
+        run: |
+          node scripts/agent-no-mistakes-gate.mjs --write-gh-shim "$RUNNER_TEMP/no-mistakes-gh-shim/gh" --json
+          echo "$RUNNER_TEMP/no-mistakes-gh-shim" >> "$GITHUB_PATH"
+      - name: Install pinned gate tools
         env:
           NO_MISTAKES_TELEMETRY: "0"
         run: |
-          if ! command -v no-mistakes >/dev/null 2>&1; then
-            curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/v1.34.0/docs/install.sh | sh
-            echo "$HOME/.no-mistakes/bin" >> "$GITHUB_PATH"
-            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          npm install --global @openai/codex@0.144.1
+          mkdir -p "$RUNNER_TEMP/no-mistakes-bin"
+          curl -fsSL https://github.com/kunchenguid/no-mistakes/releases/download/v1.37.0/no-mistakes-v1.37.0-linux-amd64.tar.gz -o "$RUNNER_TEMP/no-mistakes.tar.gz"
+          echo "29d000f6443997c4f65eb8cf42780d0b7e702fe5943dc17e737bfddcc6797bf4  $RUNNER_TEMP/no-mistakes.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/no-mistakes.tar.gz" -C "$RUNNER_TEMP/no-mistakes-bin"
+          chmod 755 "$RUNNER_TEMP/no-mistakes-bin/no-mistakes"
+          echo "$RUNNER_TEMP/no-mistakes-bin" >> "$GITHUB_PATH"
+      - name: Configure isolated gate home
+        env:
+          NM_HOME: ${{ runner.temp }}/no-mistakes
+        run: |
+          mkdir -p "$NM_HOME"
+          umask 077
+          cat > "$NM_HOME/config.yaml" <<'EOF'
+          agent: codex
+          session_reuse: true
+          intent:
+            enabled: false
+          auto_fix:
+            review: 0
+          agent_args_override:
+            codex:
+              - --sandbox
+              - workspace-write
+              - --ask-for-approval
+              - never
+              - -c
+              - 'shell_environment_policy.inherit="core"'
+              - -c
+              - 'shell_environment_policy.ignore_default_excludes=false'
+              - -c
+              - 'sandbox_workspace_write.network_access=false'
+          EOF
+      # Trusted same-repo agent PRs only. no-mistakes and repository commands
+      # still share a runner identity; .no-mistakes.yaml limits normal secret
+      # inheritance but cannot isolate credentials from hostile same-user code.
+      - name: Run authenticated no-mistakes gate
+        id: gate
+        env:
+          CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GATE_INTENT: ${{ inputs.intent }}
+          GH_TOKEN: ${{ github.token }}
+          NM_HOME: ${{ runner.temp }}/no-mistakes
+          NO_MISTAKES_TELEMETRY: "0"
+          NO_MISTAKES_FINALIZED_FILE: ${{ runner.temp }}/no-mistakes-finalized
+        run: |
+          env -u GATE_INTENT no-mistakes init
+          node scripts/agent-no-mistakes-gate.mjs --pr-number "${{ inputs.pr-number }}" --intent "$GATE_INTENT" --json
+      - name: Record setup or runner failure
+        if: ${{ always() && steps.gate.outcome != 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NO_MISTAKES_FINALIZED_FILE: ${{ runner.temp }}/no-mistakes-finalized
+        run: |
+          if [ ! -f "$NO_MISTAKES_FINALIZED_FILE" ]; then
+            node scripts/agent-no-mistakes-gate.mjs --pr-number "${{ inputs.pr-number }}" --setup-failed --json
           fi
-      - name: Refresh no-mistakes repo gate
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NO_MISTAKES_TELEMETRY: "0"
-        run: no-mistakes init
-      - name: Run no-mistakes gate
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NO_MISTAKES_TELEMETRY: "0"
-        run: node scripts/agent-no-mistakes-gate.mjs --pr-number "${{ inputs.pr-number }}" --intent "${{ inputs.intent }}" --json

@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   AgentError,
   addLabels,
   dispatchWorkflow,
+  extractJson,
   fail,
   finish,
   gh,
   ghApiJson,
+  ghJson,
   gitOutput,
   issueLabels,
   loadConfig,
@@ -23,6 +26,8 @@ import {
   upsertManagedComment
 } from "./agent-lib.mjs";
 
+export const MAX_REVIEW_DIFF_BYTES = 50000;
+
 function fetchPull(config, prNumber) {
   const pull = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/pulls/${prNumber}`);
   if (pull.head.repo.full_name !== `${config.repo.owner}/${config.repo.name}`) {
@@ -35,19 +40,84 @@ function fetchPull(config, prNumber) {
   const comments = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${prNumber}/comments`, {
     paginate: true
   });
-  const diff = gh(["pr", "diff", String(prNumber), "--repo", `${config.repo.owner}/${config.repo.name}`, "--patch"]).stdout;
-  return { pull, issue, comments, diff };
+  return { pull, issue, comments };
 }
 
-function writePrompt(config, prNumber, outputPath) {
-  const { pull, issue, comments, diff } = fetchPull(config, prNumber);
-  const prompt = `${readText(join(repoRoot(), ".agent/prompts/review.md"))}
+export function implementationMetadata(body) {
+  const marker = "<!-- agent-implementation:v1 -->";
+  const markerIndex = String(body ?? "").indexOf(marker);
+  if (markerIndex === -1) return {};
+  const afterMarker = String(body).slice(markerIndex + marker.length);
+  const fence = afterMarker.match(/```json\s*([\s\S]*?)```/i);
+  if (!fence) return {};
+  try {
+    return extractJson(fence[1]);
+  } catch {
+    return {};
+  }
+}
+
+function referenceMatchesRepo(reference, config) {
+  const expected = `${config.repo.owner}/${config.repo.name}`.toLowerCase();
+  const referencedRepo =
+    reference?.repository?.nameWithOwner ??
+    reference?.repository?.name_with_owner ??
+    reference?.repository?.fullName ??
+    reference?.repository?.full_name;
+  if (referencedRepo && String(referencedRepo).toLowerCase() !== expected) return false;
+  if (reference?.url) {
+    try {
+      const url = new URL(reference.url);
+      const pathRepo = url.pathname.split("/").filter(Boolean).slice(0, 2).join("/").toLowerCase();
+      if (pathRepo && pathRepo !== expected) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function resolveSourceIssueNumber(pull, closingReferences, config) {
+  const metadataIssue = Number(implementationMetadata(pull.body).sourceIssue);
+  if (Number.isInteger(metadataIssue) && metadataIssue > 0) return metadataIssue;
+
+  const candidates = [
+    ...new Set(
+      (closingReferences ?? [])
+        .filter((reference) => referenceMatchesRepo(reference, config))
+        .map((reference) => Number(reference.number))
+        .filter((number) => Number.isInteger(number) && number > 0)
+    )
+  ];
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.length > 1) {
+    throw new AgentError("agent review has multiple closing issues; implementation metadata must identify one source issue", 1, {
+      issues: candidates
+    });
+  }
+  throw new AgentError("agent review could not resolve a linked source issue", 1);
+}
+
+export function assertReviewDiffFits(diff) {
+  const bytes = Buffer.byteLength(diff, "utf8");
+  if (bytes > MAX_REVIEW_DIFF_BYTES) {
+    throw new AgentError(`PR diff is too large for complete automated review (${bytes} bytes)`, 1, {
+      bytes,
+      limit: MAX_REVIEW_DIFF_BYTES
+    });
+  }
+  return bytes;
+}
+
+export function buildReviewPrompt({ template, pull, pullIssue, pullComments, sourceIssue, triageComment, diff }) {
+  assertReviewDiffFits(diff);
+  return `${template}
 
 ## Pull Request
 
 Number: ${pull.number}
 Title: ${pull.title}
-Labels: ${issueLabels(issue).join(", ") || "none"}
+Labels: ${issueLabels(pullIssue).join(", ") || "none"}
 Head: ${pull.head.ref} ${pull.head.sha}
 Base: ${pull.base.ref}
 
@@ -57,17 +127,66 @@ ${pull.body ?? ""}
 
 ## Comments
 
-${comments.map((comment) => `### Comment ${comment.id}\n\n${comment.body ?? ""}`).join("\n\n") || "none"}
+${pullComments.map((comment) => `### Comment ${comment.id}\n\n${comment.body ?? ""}`).join("\n\n") || "none"}
+
+## Source Issue
+
+Number: ${sourceIssue.number}
+Title: ${sourceIssue.title}
+Labels: ${issueLabels(sourceIssue).join(", ") || "none"}
+
+Body:
+
+${sourceIssue.body ?? ""}
+
+## Managed Agent Triage
+
+${triageComment.body}
 
 ## Diff
 
 \`\`\`diff
-${diff.slice(0, 50000)}
+${diff}
 \`\`\`
 `;
+}
+
+export function requireManagedTriageComment(comments, marker, sourceIssueNumber) {
+  const triageComment = (comments ?? []).find((comment) => String(comment.body ?? "").includes(marker));
+  if (!triageComment) throw new AgentError(`source issue #${sourceIssueNumber} has no managed triage context`, 1);
+  return triageComment;
+}
+
+function writePrompt(config, prNumber, outputPath) {
+  const { pull, issue, comments } = fetchPull(config, prNumber);
+  const closing = ghJson([
+    "pr",
+    "view",
+    String(prNumber),
+    "--repo",
+    `${config.repo.owner}/${config.repo.name}`,
+    "--json",
+    "closingIssuesReferences"
+  ]);
+  const sourceIssueNumber = resolveSourceIssueNumber(pull, closing?.closingIssuesReferences, config);
+  const sourceIssue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${sourceIssueNumber}`);
+  const sourceComments = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${sourceIssueNumber}/comments`, {
+    paginate: true
+  });
+  const triageComment = requireManagedTriageComment(sourceComments, config.comments.triage, sourceIssueNumber);
+  const diff = gh(["pr", "diff", String(prNumber), "--repo", `${config.repo.owner}/${config.repo.name}`, "--patch"]).stdout;
+  const prompt = buildReviewPrompt({
+    template: readText(join(repoRoot(), ".agent/prompts/review.md")),
+    pull,
+    pullIssue: issue,
+    pullComments: comments,
+    sourceIssue,
+    triageComment,
+    diff
+  });
   mkdirSync(join(repoRoot(), ".agent-output"), { recursive: true });
   writeFileSync(outputPath, prompt);
-  return { prNumber, outputPath };
+  return { prNumber, sourceIssueNumber, diffBytes: Buffer.byteLength(diff, "utf8"), outputPath };
 }
 
 function createPatch(outputPath) {
@@ -130,9 +249,52 @@ Structured review:
 ${markdownJsonBlock(review)}`;
 }
 
+export function normalizeReviewPolicy(review) {
+  if (review.remainingRisk !== "high" || review.mergeRecommendation !== "ready") return review;
+  return {
+    ...review,
+    mergeRecommendation: "ready-human-review",
+    humanQuestion: review.humanQuestion || "High-risk work requires human review before merge."
+  };
+}
+
+export function reviewPolicyOutcome(review) {
+  const hardBlocked = review.mergeRecommendation === "blocked";
+  const requiresHumanReview = review.mergeRecommendation === "ready-human-review" || review.remainingRisk === "high";
+  const manualBlock = hardBlocked || requiresHumanReview;
+  return {
+    hardBlocked,
+    requiresHumanReview,
+    manualBlock,
+    technicalSuccess: !hardBlocked,
+    statusState: manualBlock ? "failure" : "success",
+    statusDescription: hardBlocked
+      ? "agent review blocked"
+      : requiresHumanReview
+        ? "agent review needs human review"
+        : "agent review passed"
+  };
+}
+
+export function reviewLabelChanges(config, review) {
+  const policy = reviewPolicyOutcome(review);
+  const add = [];
+  const remove = [];
+  if (review.proofNeeded === "UI" || review.proofNeeded === "GIF") add.push(config.labels.proof);
+  if (policy.manualBlock) {
+    add.push(config.labels.blocked);
+    remove.push(config.labels.automerge);
+  }
+  return {
+    ...policy,
+    add: [...new Set(add)],
+    remove: [...new Set(remove)]
+  };
+}
+
 function applyReview(config, prNumber, reviewPath, patchPath, dryRun) {
   const { pull } = fetchPull(config, prNumber);
-  const review = readAgentJson(reviewPath);
+  let review = readAgentJson(reviewPath);
   let effectivePatchPath = patchPath;
   let patchText = patchPath && existsSync(patchPath) ? readText(patchPath) : "";
   if (!patchText.trim() && typeof review.unifiedDiff === "string" && review.unifiedDiff.trim()) {
@@ -145,6 +307,7 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun) {
   const hasPatch = patchText.trim();
   let statusSha = pull.head.sha;
   let privilegedPaths = [];
+  let ciDispatch = null;
 
   if (!dryRun && hasPatch) {
     checkoutPullHead(pull);
@@ -164,9 +327,13 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun) {
         statusSha = gitOutput(["rev-parse", "HEAD"]);
         runCommand("gh", ["auth", "setup-git", "--hostname", "github.com"]);
         runCommand("git", ["push", "origin", `HEAD:${pull.head.ref}`]);
+        ciDispatch = dispatchWorkflow(config, "ci.yml", {}, false, pull.head.ref);
       }
     }
   }
+
+  review = normalizeReviewPolicy(review);
+  const policy = reviewLabelChanges(config, review);
 
   const comment = upsertManagedComment({
     config,
@@ -176,43 +343,33 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun) {
     dryRun
   });
 
-  const add = [];
-  const remove = [];
-  let state = "success";
-  let description = "agent review passed";
-  if (review.proofNeeded === "UI" || review.proofNeeded === "GIF") add.push(config.labels.proof);
-  const blocked =
-    review.mergeRecommendation === "blocked" ||
-    review.mergeRecommendation === "ready-human-review" ||
-    review.remainingRisk === "high";
-  if (blocked) {
-    add.push(config.labels.blocked);
-    remove.push(config.labels.automerge);
-    state = "failure";
-    description =
-      review.mergeRecommendation === "ready-human-review"
-        ? "agent review needs human review"
-        : "agent review blocked";
-  } else {
-    remove.push(config.labels.blocked);
-  }
   const labels = {
-    added: addLabels(config, prNumber, [...new Set(add)], dryRun),
-    removed: removeLabels(config, prNumber, [...new Set(remove)], dryRun)
+    added: addLabels(config, prNumber, policy.add, dryRun),
+    removed: removeLabels(config, prNumber, policy.remove, dryRun)
   };
-  const dispatch =
-    add.includes(config.labels.proof) && !dryRun
+  const proofDispatch =
+    policy.add.includes(config.labels.proof) && !dryRun
       ? dispatchWorkflow(config, "agent-proof.yml", { "target-kind": "pr", "target-number": prNumber }, false)
       : null;
   const status = setCommitStatus({
     config,
     sha: statusSha,
-    state,
+    state: policy.statusState,
     context: "agent-review",
-    description,
+    description: policy.statusDescription,
     dryRun
   });
-  return { review, comment, labels, dispatch, status, patchApplied: Boolean(hasPatch && !privilegedPaths.length), privilegedPaths };
+  return {
+    review,
+    comment,
+    labels,
+    dispatch: { ci: ciDispatch, proof: proofDispatch },
+    status,
+    patchApplied: Boolean(hasPatch && !privilegedPaths.length),
+    privilegedPaths,
+    technicalSuccess: policy.technicalSuccess,
+    manualBlock: policy.manualBlock
+  };
 }
 
 async function main() {
@@ -232,18 +389,16 @@ async function main() {
   }
   if (args["from-file"]) {
     const result = applyReview(config, prNumber, args["from-file"], args["apply-patch"], dryRun);
-    const blocked =
-      result.review.mergeRecommendation === "blocked" ||
-      result.review.mergeRecommendation === "ready-human-review" ||
-      result.review.remainingRisk === "high";
     finish(
-      { ok: !blocked, message: `${dryRun ? "would apply" : "applied"} review for #${prNumber}`, result },
+      { ok: result.technicalSuccess, message: `${dryRun ? "would apply" : "applied"} review for #${prNumber}`, result },
       Boolean(args.json),
-      blocked ? 1 : 0
+      result.technicalSuccess ? 0 : 1
     );
     return;
   }
   throw new AgentError("missing --write-prompt, --create-patch, or --from-file", 2);
 }
 
-main().catch((error) => fail(error, Boolean(parseArgs().json)));
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => fail(error, Boolean(parseArgs().json)));
+}

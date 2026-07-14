@@ -28,23 +28,39 @@ permissions:
   checks: read
 
 concurrency:
-  group: agent-automerge-${{ inputs.pr-number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
+  group: agent-automerge-${{ inputs.pr-number || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_branch || github.run_id }}
   cancel-in-progress: false
 
 jobs:
   automerge:
     name: automerge
     runs-on: ubuntu-latest
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.pull_requests[0].number > 0
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Resolve pull request
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_PR: ${{ inputs.pr-number }}
+          EVENT_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+          WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          pr_number="${REQUESTED_PR:-${EVENT_PR:-}}"
+          if [ -z "$pr_number" ] && [ -n "${WORKFLOW_SHA:-}" ]; then
+            pr_number="$(
+              gh api --method GET "repos/$GITHUB_REPOSITORY/commits/$WORKFLOW_SHA/pulls" \
+                --jq '[.[] | select(.state == "open")] | if length == 1 then .[0].number else empty end'
+            )"
+          fi
+          echo "pr-number=$pr_number" >> "$GITHUB_OUTPUT"
       - name: Evaluate automerge
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ inputs.pr-number || github.event.workflow_run.pull_requests[0].number }}
+          PR_NUMBER: ${{ steps.resolve.outputs.pr-number }}
         run: |
           if [ -z "$PR_NUMBER" ]; then
             echo "No pull request associated with this workflow run; skipping automerge."
