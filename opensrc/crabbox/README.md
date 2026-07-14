@@ -16,6 +16,7 @@ Local cache:
 
 Use in this repo:
 
+- OpenClaw's `openclaw/crabbox` repository is the execution-host reference implementation
 - default remote worker host when provider auth exists
 - remote agent execution and proof runs
 - desktop/browser proof when explicitly requested
