@@ -237,7 +237,7 @@ jobs:
               - -c
               - 'shell_environment_policy.ignore_default_excludes=false'
               - -c
-              - 'developer_instructions="This is an isolated no-mistakes pipeline stage. Execute the requested stage directly. Do not invoke skills, autoreview, no-mistakes, external reviewers, or nested agents. Do not run tests, builds, linters, or package managers; trusted credential-free steps provide deterministic validation. Never edit files; report required edits as findings. Return the requested structured JSON."'
+              - 'developer_instructions="This is an isolated no-mistakes pipeline stage. Execute the requested stage directly. Do not invoke skills, autoreview, no-mistakes, external reviewers, or nested agents. Do not run tests, builds, linters, or package managers; trusted credential-free steps provide deterministic validation. Treat test-only assertion changes as documentation-complete when they do not alter runtime behavior, APIs, configuration, workflows, or user-visible behavior and the trusted intent does not request docs. Never edit files; report required edits as findings. Return the requested structured JSON."'
           EOF
       - name: Run trusted offline test baseline before agent auth
         working-directory: candidate
