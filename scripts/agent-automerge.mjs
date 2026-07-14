@@ -358,7 +358,12 @@ async function main() {
   } catch {
     // Evaluation reports malformed or missing metadata without trusting a source issue.
   }
-  const combined = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/commits/${pull.head.sha}/status`);
+  const statuses =
+    ghApiJson(
+      `repos/${config.repo.owner}/${config.repo.name}/commits/${pull.head.sha}/statuses?per_page=100`,
+      { paginate: true },
+    ) ?? [];
+  const combined = { sha: pull.head.sha, statuses };
   const checks = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/commits/${pull.head.sha}/check-runs`);
   const closing = ghJson([
     "pr",

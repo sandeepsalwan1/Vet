@@ -189,7 +189,7 @@ jobs:
           umask 077
           cat > "$NM_HOME/config.yaml" <<'EOF'
           agent: codex
-          session_reuse: true
+          session_reuse: false
           intent:
             enabled: false
           auto_fix:

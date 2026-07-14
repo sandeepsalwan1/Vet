@@ -202,6 +202,16 @@ export function parseAxiResult(output, exitStatus) {
   return { status: "failed", outcome: "invalid-output", run, findings };
 }
 
+export function isRetryableReviewEnvironmentBlock(gate) {
+  return (
+    gate?.status === "blocked" &&
+    gate?.outcome === "ask-user" &&
+    gate?.findings?.length === 1 &&
+    gate.findings[0]?.id === "review-environment-blocked" &&
+    gate.findings[0]?.action === "ask-user"
+  );
+}
+
 export function validatedHeadMatches(result, sha) {
   const expected = String(sha ?? "");
   const validated = String(result?.run?.head ?? "");
@@ -410,6 +420,16 @@ ${markdownJsonBlock({
 })}`;
 }
 
+export function gateLabelChanges(config, artifact) {
+  if (artifact?.outcome !== "ask-user") {
+    return { add: [], remove: [] };
+  }
+  return {
+    add: [config.labels.blocked],
+    remove: [config.labels.automerge],
+  };
+}
+
 function recordTerminal({ config, pull, artifact, dryRun = false }) {
   const failed = artifact.status !== "passed";
   const runUrl = actionsRunUrl();
@@ -424,17 +444,11 @@ function recordTerminal({ config, pull, artifact, dryRun = false }) {
     targetUrl: runUrl,
     dryRun,
   });
-  const labels = failed
-    ? {
-        added: addLabels(config, pull.number, [config.labels.blocked], dryRun),
-        removed: removeLabels(
-          config,
-          pull.number,
-          [config.labels.automerge],
-          dryRun,
-        ),
-      }
-    : { added: [], removed: [] };
+  const labelChanges = gateLabelChanges(config, artifact);
+  const labels = {
+    added: addLabels(config, pull.number, labelChanges.add, dryRun),
+    removed: removeLabels(config, pull.number, labelChanges.remove, dryRun),
+  };
   const comment = upsertManagedComment({
     config,
     number: pull.number,
@@ -469,25 +483,53 @@ export function gateEnvironment(source = process.env) {
   return env;
 }
 
-function runNoMistakesGate(intent, repoDir) {
-  const env = gateEnvironment();
-  runCommand("no-mistakes", ["init"], { cwd: repoDir, env });
-  const result = spawnSync(
-    "no-mistakes",
-    ["axi", "run", "--intent", intent, "--skip", "push,pr,ci"],
-    {
-      cwd: repoDir,
-      env,
-      encoding: "utf8",
-      stdio: "pipe",
-    },
-  );
-  if (result.error) throw new AgentError("no-mistakes gate could not start", 1);
-  return {
-    stdout: result.stdout ?? "",
-    stderr: result.stderr ?? "",
-    status: result.status ?? 1,
-  };
+export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
+  const env = gateEnvironment(dependencies.env ?? process.env);
+  const execute = dependencies.runCommand ?? runCommand;
+  const spawn = dependencies.spawnSync ?? spawnSync;
+  const onRetry =
+    dependencies.onRetry ??
+    (() =>
+      process.stderr.write(
+        "retrying no-mistakes once after an isolated review environment blocker\n",
+      ));
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    execute("no-mistakes", ["init"], { cwd: repoDir, env });
+    const result = spawn(
+      "no-mistakes",
+      ["axi", "run", "--intent", intent, "--skip", "push,pr,ci"],
+      {
+        cwd: repoDir,
+        env,
+        encoding: "utf8",
+        stdio: "pipe",
+      },
+    );
+    if (result.error) {
+      throw new AgentError("no-mistakes gate could not start", 1);
+    }
+    const run = {
+      stdout: result.stdout ?? "",
+      stderr: result.stderr ?? "",
+      status: result.status ?? 1,
+      attempts: attempt,
+    };
+    const parsed = parseAxiResult(
+      `${run.stdout}\n${run.stderr}`.trim(),
+      run.status,
+    );
+    if (attempt === 1 && isRetryableReviewEnvironmentBlock(parsed)) {
+      execute("no-mistakes", ["daemon", "stop", "--force"], {
+        cwd: repoDir,
+        env,
+      });
+      onRetry(parsed);
+      continue;
+    }
+    return run;
+  }
+  throw new AgentError("no-mistakes retry limit was exhausted", 1);
 }
 
 function writePrivateFile(path, content) {

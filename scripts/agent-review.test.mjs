@@ -13,6 +13,7 @@ import {
   resolveSourceIssueNumber,
   reviewLabelChanges,
   reviewPolicyOutcome,
+  selectTrustedPullWorkflowRuns,
   validateReviewResult
 } from "./agent-review.mjs";
 
@@ -154,6 +155,65 @@ test("review result is bound to the exact generated head", () => {
   assert.throws(() => assertReviewedHead(pull, ""), /missing reviewed head SHA/);
 });
 
+function workflowRun(path, name, overrides = {}) {
+  const head = "b".repeat(40);
+  return {
+    id: path.includes("codeql") ? 2 : 1,
+    name,
+    path,
+    event: "pull_request",
+    status: "completed",
+    conclusion: "action_required",
+    head_sha: head,
+    head_branch: "agent/issue-42-fix-flow",
+    actor: { login: "github-actions[bot]" },
+    triggering_actor: { login: "github-actions[bot]" },
+    repository: { full_name: "sandeepsalwan1/Vet" },
+    pull_requests: [{ number: 8, head: { sha: head } }],
+    ...overrides,
+  };
+}
+
+test("only exact bot-authored PR CI and CodeQL runs are approvable", () => {
+  const head = "b".repeat(40);
+  const pull = {
+    number: 8,
+    head: { ref: "agent/issue-42-fix-flow", sha: head },
+  };
+  const ci = workflowRun(".github/workflows/ci.yml", "CI");
+  const codeql = workflowRun(".github/workflows/codeql.yml", "CodeQL");
+  const foreign = workflowRun(".github/workflows/codeql.yml", "CodeQL", {
+    id: 3,
+    repository: { full_name: "attacker/Vet" },
+  });
+  const selection = selectTrustedPullWorkflowRuns(
+    [ci, codeql, foreign],
+    pull,
+    head,
+    config,
+  );
+
+  assert.deepEqual(selection.missing, []);
+  assert.deepEqual(selection.approvable.map((run) => run.id), [1, 2]);
+
+  for (const forged of [
+    { actor: { login: "contributor" } },
+    { triggering_actor: { login: "contributor" } },
+    { event: "workflow_dispatch" },
+    { head_sha: "c".repeat(40) },
+    { path: ".github/workflows/other.yml" },
+    { pull_requests: [{ number: 9, head: { sha: head } }] },
+  ]) {
+    const invalid = selectTrustedPullWorkflowRuns(
+      [{ ...ci, ...forged }, codeql],
+      pull,
+      head,
+      config,
+    );
+    assert.ok(invalid.missing.includes(".github/workflows/ci.yml"));
+  }
+});
+
 test("oversized diff blocks instead of truncating", () => {
   assert.throws(
     () => assertReviewDiffFits("x".repeat(MAX_REVIEW_DIFF_BYTES + 1)),
@@ -214,9 +274,11 @@ test("review generation is read-only and bound to the prepared head", () => {
   const failure = workflow.match(/\n  report-review-failure:\n([\s\S]*)$/)?.[1] ?? "";
 
   assert.match(prepare, /statuses: write/);
+  assert.match(prepare, /actions: write/);
   assert.match(prepare, /ref: main\n          persist-credentials: false/);
   assert.match(prepare, /--expected-head-sha "\$REVIEWED_HEAD_SHA"/);
   assert.match(prepare, /-f state=pending/);
+  assert.match(prepare, /--approve-pr-runs/);
 
   assert.match(generate, /needs: prepare-review/);
   assert.match(generate, /ref: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);

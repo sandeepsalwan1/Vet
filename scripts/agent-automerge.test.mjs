@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { issueSnapshotSha256 } from "./agent-lib.mjs";
 
@@ -279,6 +280,24 @@ test("custom statuses and checks require GitHub Actions provenance", () => {
 
   assert.equal(statusState([forgedStatus, foreignStatus], "agent-review", config), "missing");
   assert.equal(checkState([forgedCheck], "quality", sha, config), "missing");
+});
+
+test("automerge reads creator provenance from the direct statuses endpoint", () => {
+  const source = readFileSync(
+    new URL("./agent-automerge.mjs", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /commits\/\$\{pull\.head\.sha\}\/statuses\?per_page=100/);
+  assert.doesNotMatch(source, /commits\/\$\{pull\.head\.sha\}\/status`/);
+  assert.equal(
+    statusState(
+      [{ ...status("agent-review"), creator: null }],
+      "agent-review",
+      config,
+    ),
+    "missing",
+  );
 });
 
 test("non-bot PR authors cannot authorize or mutate automerge", () => {

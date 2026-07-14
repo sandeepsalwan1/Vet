@@ -6,10 +6,13 @@ import {
   assertTrustedAgentPull,
   composeEffectiveIntent,
   gateEnvironment,
+  gateLabelChanges,
   gateCommentBody,
+  isRetryableReviewEnvironmentBlock,
   noMistakesCommentMarker,
   normalizeGateArtifact,
   parseAxiResult,
+  runNoMistakesGate,
   sanitizedGateArtifact,
   selectTrustedManagedTriageComment,
   validatedHeadMatches,
@@ -33,6 +36,7 @@ test("authenticated reviewer is read-only and all source changes fail closed", (
   assert.doesNotMatch(workflow, /- --ask-for-approval/);
   assert.match(workflow, /codex exec \\\n\s+--sandbox read-only/);
   assert.match(workflow, /NM_TEST_START_DAEMON: "1"/);
+  assert.match(workflow, /session_reuse: false/);
   assert.match(workflow, /if: \$\{\{ always\(\) \}\}\n\s+continue-on-error: true\n[\s\S]*?run: no-mistakes daemon stop --force/);
   assert.doesNotMatch(workflow, /- workspace-write/);
   assert.doesNotMatch(workflow, /tar -C \/source/);
@@ -264,6 +268,103 @@ test("unknown decision gate fails closed", () => {
 
   assert.equal(result.status, "blocked");
   assert.equal(result.outcome, "decision-gate");
+});
+
+function environmentBlockOutput(id = "run-environment") {
+  return `run:
+  id: ${id}
+  head: abcdef12
+gate:
+  step: review
+  status: awaiting_approval
+  findings[1]{id,severity,file,action}:
+    review-environment-blocked,error,,ask-user`;
+}
+
+test("isolated review environment blocker receives one fresh daemon retry", () => {
+  const commands = [];
+  const outputs = [
+    { stdout: environmentBlockOutput(), stderr: "", status: 0 },
+    {
+      stdout: "run:\n  id: run-passed\n  head: abcdef12\noutcome: passed\n",
+      stderr: "",
+      status: 0,
+    },
+  ];
+  let retries = 0;
+
+  const result = runNoMistakesGate("Validate the PR", "/repo", {
+    env: { CODEX_API_KEY: "model-key", NM_TEST_START_DAEMON: "1" },
+    runCommand: (command, args) => {
+      commands.push([command, args]);
+      return { status: 0 };
+    },
+    spawnSync: () => outputs.shift(),
+    onRetry: () => {
+      retries += 1;
+    },
+  });
+
+  assert.equal(result.attempts, 2);
+  assert.equal(retries, 1);
+  assert.deepEqual(commands, [
+    ["no-mistakes", ["init"]],
+    ["no-mistakes", ["daemon", "stop", "--force"]],
+    ["no-mistakes", ["init"]],
+  ]);
+  assert.equal(parseAxiResult(result.stdout, result.status).status, "passed");
+});
+
+test("review environment retry stays bounded and excludes product blockers", () => {
+  const soleEnvironmentBlock = parseAxiResult(environmentBlockOutput(), 0);
+  const mixedBlock = parseAxiResult(
+    environmentBlockOutput().replace(
+      "findings[1]{id,severity,file,action}:\n    review-environment-blocked,error,,ask-user",
+      "findings[2]{id,severity,file,action}:\n    review-environment-blocked,error,,ask-user\n    product-decision,error,src/policy.ts,ask-user",
+    ),
+    0,
+  );
+  assert.equal(isRetryableReviewEnvironmentBlock(soleEnvironmentBlock), true);
+  assert.equal(isRetryableReviewEnvironmentBlock(mixedBlock), false);
+
+  let calls = 0;
+  const repeated = runNoMistakesGate("Validate the PR", "/repo", {
+    runCommand: () => ({ status: 0 }),
+    spawnSync: () => {
+      calls += 1;
+      return { stdout: environmentBlockOutput(`run-${calls}`), stderr: "", status: 0 };
+    },
+    onRetry: () => {},
+  });
+  assert.equal(calls, 2);
+  assert.equal(repeated.attempts, 2);
+  assert.equal(
+    isRetryableReviewEnvironmentBlock(
+      parseAxiResult(repeated.stdout, repeated.status),
+    ),
+    true,
+  );
+});
+
+test("only ask-user outcomes change no-mistakes policy labels", () => {
+  const labelConfig = {
+    labels: { blocked: "agent:blocked", automerge: "agent:automerge" },
+  };
+  assert.deepEqual(
+    gateLabelChanges(labelConfig, { status: "blocked", outcome: "ask-user" }),
+    { add: ["agent:blocked"], remove: ["agent:automerge"] },
+  );
+  for (const artifact of [
+    { status: "passed", outcome: "passed" },
+    { status: "failed", outcome: "failed" },
+    { status: "failed", outcome: "cancelled" },
+    { status: "failed", outcome: "setup-failed" },
+  ]) {
+    assert.deepEqual(gateLabelChanges(labelConfig, artifact), {
+      add: [],
+      remove: [],
+    });
+  }
 });
 
 test("trusted gate scope rejects forks, manual branches, and policy changes", () => {
