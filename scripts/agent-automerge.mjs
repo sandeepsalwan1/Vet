@@ -33,12 +33,11 @@ function actionsUrlPattern(config, allowJob = false) {
   return new RegExp(`^https://github\\.com/${repo}/actions/runs/\\d+${allowJob ? "(?:/job/\\d+)?" : ""}$`, "i");
 }
 
-export function statusState(statuses, context, headSha, config) {
+export function statusState(statuses, context, config) {
   const actionsUrl = actionsUrlPattern(config);
   const candidates = statuses.filter(
     (item) =>
       item.context === context &&
-      item.sha === headSha &&
       String(item.creator?.login ?? "").toLowerCase() === "github-actions[bot]" &&
       actionsUrl.test(String(item.target_url ?? ""))
   );
@@ -191,7 +190,7 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
 
   if (combined?.sha !== pull.head?.sha) blockers.push("commit statuses are not for the current PR head");
   for (const context of config.automerge.requiredStatuses) {
-    const state = statusState(combined?.statuses ?? [], context, pull.head?.sha, config);
+    const state = statusState(combined?.statuses ?? [], context, config);
     if (state !== "success") blockers.push(`${context} status ${state}`);
   }
 
@@ -201,7 +200,7 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
     triage?.proofNeeded === "UI" ||
     triage?.proofNeeded === "GIF";
   if (proofRequested) {
-    const state = statusState(combined?.statuses ?? [], config.automerge.proofStatus, pull.head?.sha, config);
+    const state = statusState(combined?.statuses ?? [], config.automerge.proofStatus, config);
     if (state !== "success") blockers.push(`${config.automerge.proofStatus} status ${state}`);
   }
   for (const name of config.automerge.requiredChecks) {

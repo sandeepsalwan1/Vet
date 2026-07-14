@@ -29,12 +29,11 @@ const config = {
   }
 };
 
-function status(context, state = "success", id = 1, itemSha = sha) {
+function status(context, state = "success", id = 1) {
   return {
     id,
     context,
     state,
-    sha: itemSha,
     creator: { login: "github-actions[bot]" },
     target_url: `https://github.com/sandeepsalwan1/Vet/actions/runs/${id}`,
     created_at: `2026-07-13T00:00:${String(id).padStart(2, "0")}Z`
@@ -243,12 +242,11 @@ test("stale native automerge revocation is dry-run safe", () => {
   assert.deepEqual(commands, [["gh", disableNativeAutomergeArgs(18, config)]]);
 });
 
-test("newest status and check run win while stale or foreign SHA data is ignored", () => {
+test("newest API-shaped status and current-head check run win", () => {
   assert.equal(
     statusState(
-      [status("agent-review", "success", 1), status("agent-review", "failure", 2), status("agent-review", "success", 3, "old")],
+      [status("agent-review", "success", 1), status("agent-review", "failure", 2)],
       "agent-review",
-      sha,
       config
     ),
     "failure"
@@ -262,6 +260,10 @@ test("newest status and check run win while stale or foreign SHA data is ignored
     ),
     "in_progress"
   );
+
+  const staleCombined = fixture();
+  staleCombined.combined = { ...staleCombined.combined, sha: "b".repeat(40) };
+  assert.ok(evaluate(staleCombined).blockers.includes("commit statuses are not for the current PR head"));
 });
 
 test("custom statuses and checks require GitHub Actions provenance", () => {
@@ -275,7 +277,7 @@ test("custom statuses and checks require GitHub Actions provenance", () => {
   };
   const forgedCheck = { ...check("quality"), app: { slug: "custom-ci" } };
 
-  assert.equal(statusState([forgedStatus, foreignStatus], "agent-review", sha, config), "missing");
+  assert.equal(statusState([forgedStatus, foreignStatus], "agent-review", config), "missing");
   assert.equal(checkState([forgedCheck], "quality", sha, config), "missing");
 });
 
