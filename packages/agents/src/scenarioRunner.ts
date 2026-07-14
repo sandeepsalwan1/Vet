@@ -214,7 +214,7 @@ const scenarios: Scenario[] = [
       callerPhone: "(415) 555-0134",
       transcript: "Hi, I parked outside with Biscuit. Can you check us in?"
     }),
-    expect: all(expectIntent("checkin"), expectNoTask)
+    expect: all(expectIntent("checkin"), expectNoTask, expectResult("matched", true))
   }
 ];
 
