@@ -40,6 +40,14 @@ test("authenticated reviewer is read-only while trusted checks and source seals 
   assert.match(workflow, /codex exec \\\n\s+--sandbox read-only/);
   assert.match(workflow, /NM_TEST_START_DAEMON: "1"/);
   assert.match(workflow, /session_reuse: false/);
+  assert.match(
+    workflow,
+    /Do not invoke skills, autoreview, no-mistakes, external reviewers, or nested agents/,
+  );
+  assert.match(
+    workflow,
+    /trusted credential-free steps provide deterministic validation/,
+  );
   assert.match(gate, /"--skip",\s+"rebase,test,push,pr,ci"/);
   assert.doesNotMatch(workflow, /git config --global user\./);
   assert.match(workflow, /if: \$\{\{ always\(\) \}\}\n\s+continue-on-error: true\n[\s\S]*?run: no-mistakes daemon stop --force/);
