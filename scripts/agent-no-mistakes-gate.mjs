@@ -46,6 +46,10 @@ const PUBLIC_FINDING_SUMMARIES = new Map([
     "validation-environment-blocked",
     "The isolated evidence agent could not demonstrate the requested behavior.",
   ],
+  [
+    "test-environment-blocked",
+    "The isolated test evidence agent could not complete in its current environment.",
+  ],
 ]);
 const PUBLIC_FAILURE_STAGES = new Set([
   "intent",
@@ -281,6 +285,18 @@ export function isRetryableReviewEnvironmentBlock(gate) {
     gate?.step === "review" &&
     gate?.findings?.length === 1 &&
     gate.findings[0]?.id === "review-environment-blocked" &&
+    !gate.findings[0]?.file &&
+    gate.findings[0]?.action === "ask-user"
+  );
+}
+
+export function isRetryableTestEnvironmentBlock(gate) {
+  return (
+    gate?.status === "blocked" &&
+    gate?.outcome === "ask-user" &&
+    gate?.step === "test" &&
+    gate?.findings?.length === 1 &&
+    gate.findings[0]?.id === "test-environment-blocked" &&
     !gate.findings[0]?.file &&
     gate.findings[0]?.action === "ask-user"
   );
@@ -526,12 +542,22 @@ export function gateLabelChanges(config, artifact) {
   };
 }
 
-function recordTerminal({ config, pull, artifact, dryRun = false }) {
+export function terminalHeadBinding(expectedHead, currentHead) {
+  if (!/^[0-9a-f]{40}$/.test(String(expectedHead ?? ""))) {
+    throw new AgentError("terminal status head is invalid", 2);
+  }
+  return {
+    mutatePull: expectedHead === currentHead,
+    statusSha: expectedHead,
+  };
+}
+
+function recordTerminal({ config, pull, artifact, statusSha = pull.head.sha, mutatePull = true, dryRun = false }) {
   const failed = artifact.status !== "passed";
   const runUrl = actionsRunUrl();
   const commitStatus = setCommitStatus({
     config,
-    sha: pull.head.sha,
+    sha: statusSha,
     state: failed ? "failure" : "success",
     context: STATUS_CONTEXT,
     description: failed
@@ -540,6 +566,13 @@ function recordTerminal({ config, pull, artifact, dryRun = false }) {
     targetUrl: runUrl,
     dryRun,
   });
+  if (!mutatePull) {
+    return {
+      labels: { added: [], removed: [] },
+      comment: null,
+      status: commitStatus,
+    };
+  }
   const labelChanges = gateLabelChanges(config, artifact);
   const labels = {
     added: addLabels(config, pull.number, labelChanges.add, dryRun),
@@ -625,6 +658,7 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
     if (
       attempt === 1 &&
       (isRetryableReviewEnvironmentBlock(parsed) ||
+        isRetryableTestEnvironmentBlock(parsed) ||
         isRetryableTechnicalFailure(parsed, dependencies.expectedHead))
     ) {
       execute("no-mistakes", ["daemon", "stop", "--force"], {
@@ -679,6 +713,10 @@ async function main() {
     }
     const snapshot = fetchTrustedPull(config, prNumber);
     const { pull, trust } = snapshot;
+    const expectedHead = readExpectedHead(args["expected-head"]);
+    if (pull.head.sha !== expectedHead) {
+      throw new AgentError("PR head changed before no-mistakes preparation", 1);
+    }
     const context = fetchIntentContext(config, trust.sourceIssue);
     assertTrustedIntentSource(config, snapshot, context);
     const status = markPending(config, pull, dryRun);
@@ -816,7 +854,8 @@ async function main() {
         artifact = setupFailureArtifact(expectedHead);
       }
     }
-    const result = recordTerminal({ config, pull, artifact, dryRun });
+    const binding = terminalHeadBinding(expectedHead, pull.head.sha);
+    const result = recordTerminal({ config, pull, artifact, ...binding, dryRun });
     const exitCode = artifact.status === "passed" ? 0 : 1;
     finish(
       {

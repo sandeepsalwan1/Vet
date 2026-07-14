@@ -26,6 +26,8 @@ jobs:
   prepare:
     name: prepare triage
     runs-on: ubuntu-latest
+    outputs:
+      concurrency-group: ${{ steps.concurrency.outputs.group }}
     permissions:
       contents: read
       issues: write
@@ -37,6 +39,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Allocate triage capacity
+        id: concurrency
+        env:
+          CONCURRENCY_KEY: ${{ inputs.issue-number }}
+        run: node scripts/agent-concurrency-slot.mjs --lane triage --key "$CONCURRENCY_KEY" --json
       - name: Capture trusted issue snapshot and mark pending
         env:
           GH_TOKEN: ${{ github.token }}
@@ -59,6 +66,10 @@ jobs:
     name: generate triage
     needs: prepare
     runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ needs.prepare.outputs.concurrency-group }}
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
     steps:

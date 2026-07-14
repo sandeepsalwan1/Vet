@@ -411,7 +411,13 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun, expectedHe
         statusSha = gitOutput(["rev-parse", "HEAD"]);
         runCommand("gh", ["auth", "setup-git", "--hostname", "github.com"]);
         runCommand("git", ["push", "origin", `HEAD:${pull.head.ref}`]);
-        ciDispatch = dispatchWorkflow(config, "ci.yml", {}, false, pull.head.ref);
+        ciDispatch = dispatchWorkflow(
+          config,
+          "ci.yml",
+          { "pr-number": prNumber, "expected-head-sha": statusSha },
+          false,
+          config.repo.defaultBranch
+        );
         codeqlDispatch = dispatchWorkflow(
           config,
           "codeql.yml",
@@ -443,7 +449,13 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun, expectedHe
   };
   const proofDispatch =
     policy.add.includes(config.labels.proof) && !dryRun
-      ? dispatchWorkflow(config, "agent-proof.yml", { "target-kind": "pr", "target-number": prNumber }, false)
+      ? dispatchWorkflow(
+          config,
+          "agent-proof.yml",
+          { "target-kind": "pr", "target-number": prNumber, "expected-head-sha": statusSha },
+          false,
+          config.repo.defaultBranch
+        )
       : null;
   const status = setCommitStatus({
     config,

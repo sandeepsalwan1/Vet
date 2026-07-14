@@ -9,6 +9,7 @@ import {
   gateLabelChanges,
   gateCommentBody,
   isRetryableReviewEnvironmentBlock,
+  isRetryableTestEnvironmentBlock,
   isRetryableTechnicalFailure,
   noMistakesCommentMarker,
   normalizeGateArtifact,
@@ -16,6 +17,7 @@ import {
   runNoMistakesGate,
   sanitizedGateArtifact,
   selectTrustedManagedTriageComment,
+  terminalHeadBinding,
   validatedHeadMatches,
 } from "./agent-no-mistakes-gate.mjs";
 
@@ -51,6 +53,9 @@ test("authenticated reviewer is read-only and all source changes fail closed", (
   assert.match(workflow, /gh workflow run agent-automerge\.yml/);
   assert.match(workflow, /--repo "\$GITHUB_REPOSITORY"/);
   assert.match(workflow, /-f pr-number="\$\{\{ inputs\.pr-number \}\}"/);
+  assert.match(workflow, /-f expected-head-sha="\$\{\{ needs\.prepare\.outputs\.head_sha \}\}"/);
+  assert.match(workflow, /dispatch-automerge:\n[\s\S]*?needs:\n\s+- prepare\n\s+- finalize/);
+  assert.match(workflow, /--expected-head "\$\{\{ inputs\.expected-head-sha \}\}"/);
   assert.doesNotMatch(automergeWorkflow, /- Agent no-mistakes/);
   assert.equal([...repoConfig.matchAll(/tar --no-same-owner -xf/g)].length, 2);
   assert.match(gate, /"--untracked-files=all"/);
@@ -77,6 +82,15 @@ test("application fonts are self-hosted for offline gates", () => {
     assert.equal(css.includes(`url("./fonts/${font}")`), true, font);
     assert.equal(existsSync(new URL(`../apps/internal/app/fonts/${font}`, import.meta.url)), true, font);
   }
+});
+
+test("scenario runner avoids tsx IPC inside strict agent sandboxes", () => {
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+
+  assert.equal(
+    packageJson.scripts["test:scenarios"],
+    "node --import tsx packages/agents/src/scenarioRunner.ts",
+  );
 });
 
 function trustedPull(overrides = {}) {
@@ -117,6 +131,18 @@ help[1]:
     validatedHeadMatches({ run: { head: "ABCDEF12" } }, HEAD),
     false,
   );
+});
+
+test("stale finalizers bind status to the validated head without mutating the newer PR", () => {
+  assert.deepEqual(terminalHeadBinding(HEAD, HEAD), {
+    mutatePull: true,
+    statusSha: HEAD,
+  });
+  assert.deepEqual(terminalHeadBinding(HEAD, "1".repeat(40)), {
+    mutatePull: false,
+    statusSha: HEAD,
+  });
+  assert.throws(() => terminalHeadBinding("bad", HEAD), /terminal status head is invalid/);
 });
 
 test("effective intent includes caller policy, full source issue, and managed triage", () => {
@@ -355,6 +381,29 @@ test("isolated review environment blocker receives one fresh daemon retry", () =
     ["no-mistakes", ["init"]],
   ]);
   assert.equal(parseAxiResult(result.stdout, result.status).status, "passed");
+});
+
+test("isolated test environment blocker receives one fresh daemon retry", () => {
+  const gate = {
+    status: "blocked",
+    outcome: "ask-user",
+    step: "test",
+    findings: [
+      {
+        id: "test-environment-blocked",
+        severity: "warning",
+        file: "",
+        action: "ask-user",
+      },
+    ],
+  };
+
+  assert.equal(isRetryableTestEnvironmentBlock(gate), true);
+  assert.equal(isRetryableTestEnvironmentBlock({ ...gate, step: "review" }), false);
+  assert.equal(
+    sanitizedGateArtifact(gate, HEAD).findings[0].summary,
+    "The isolated test evidence agent could not complete in its current environment.",
+  );
 });
 
 test("review environment retry stays bounded and excludes product blockers", () => {

@@ -9,7 +9,7 @@ import {
   assertImplementationSource,
   assertIssueMatchesTriageSnapshot,
   chooseAgentBranch,
-  dispatchWorkflowAtRef,
+  dispatchCandidateCi,
   finalizePatchValidation,
   implementationPullLabels,
   preparePatchValidation,
@@ -118,9 +118,10 @@ test("existing open PR and orphan branch names survive issue title changes", () 
   assert.equal(chooseAgentBranch(preferred, null, ["agent/issue-42-orphan"]), "agent/issue-42-orphan");
 });
 
-test("dispatchWorkflowAtRef runs CI on the exact agent branch", () => {
+test("dispatchCandidateCi runs trusted CI for an immutable PR head", () => {
   let invocation;
-  const result = dispatchWorkflowAtRef(config, "ci.yml", "agent/issue-42-fix-duplicate-intake", {
+  const headSha = "a".repeat(40);
+  const result = dispatchCandidateCi(config, 9, headSha, {
     runCommand(command, args) {
       invocation = { command, args };
       return { status: 0 };
@@ -136,13 +137,18 @@ test("dispatchWorkflowAtRef runs CI on the exact agent branch", () => {
       "--repo",
       "owner/repo",
       "--ref",
-      "agent/issue-42-fix-duplicate-intake"
+      "main",
+      "-f",
+      "pr-number=9",
+      "-f",
+      `expected-head-sha=${headSha}`
     ]
   });
   assert.deepEqual(result, {
     ok: true,
     workflow: "ci.yml",
-    ref: "agent/issue-42-fix-duplicate-intake"
+    prNumber: 9,
+    headSha
   });
 });
 
@@ -348,10 +354,25 @@ test("isolated validation command environment removes credentials and workflow c
 
 test("implementation workflow isolates candidate checks from credentials, artifacts, and command channels", () => {
   const workflow = readFileSync(join(process.cwd(), ".github/workflows/agent-implement.yml"), "utf8");
+  const prepare = workflow.slice(workflow.indexOf("  prepare-prompt:"), workflow.indexOf("  generate-patch-remote:"));
+  const remote = workflow.slice(workflow.indexOf("  generate-patch-remote:"), workflow.indexOf("  generate-patch:"));
+  const fallback = workflow.slice(workflow.indexOf("  generate-patch:"), workflow.indexOf("  validate-patch:"));
   const validation = workflow.slice(workflow.indexOf("  validate-patch:"), workflow.indexOf("  open-pr:"));
   const openPr = workflow.slice(workflow.indexOf("  open-pr:"), workflow.indexOf("  report-failure:"));
 
   assert.match(workflow, /codex-version: "0\.144\.1"/);
+  assert.match(prepare, /concurrency-group: \$\{\{ steps\.concurrency\.outputs\.group \}\}/);
+  assert.match(prepare, /agent-concurrency-slot\.mjs --lane implement --key "\$CONCURRENCY_KEY" --json/);
+  assert.match(prepare, /id: backend\n\s+run: node scripts\/agent-worker\.mjs --validate-backend --json/);
+  for (const generator of [remote, fallback]) {
+    assert.match(generator, /concurrency:\n      group: \$\{\{ needs\.prepare-prompt\.outputs\.concurrency-group \}\}/);
+    assert.match(generator, /cancel-in-progress: false/);
+    assert.match(generator, /queue: max/);
+  }
+  assert.match(fallback, /sandbox: \$\{\{ needs\.prepare-prompt\.outputs\.backend-sandbox \}\}/);
+  assert.match(fallback, /model: \$\{\{ needs\.prepare-prompt\.outputs\.backend-model \}\}/);
+  assert.match(fallback, /effort: \$\{\{ needs\.prepare-prompt\.outputs\.backend-effort \}\}/);
+  assert.doesNotMatch(fallback, /^    env:\n(?:      .+\n)*      (?:OPENAI|CODEX)_API_KEY:/m);
   assert.match(validation, /node:22-bookworm@sha256:[a-f0-9]{64}/);
   assert.match(validation, /npm ci --ignore-scripts/);
   assert.match(validation, /npm rebuild --offline/);

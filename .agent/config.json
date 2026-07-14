@@ -48,15 +48,22 @@
     "gate": "<!-- agent-gate:v1 -->"
   },
   "concurrency": {
-    "maxGlobal": 15,
-    "proposer": 1,
-    "triage": 2,
-    "implement": 2,
-    "review": 2,
-    "proof": 1
+    "hardMaxGlobal": 15,
+    "maxGlobal": 8,
+    "groupPrefix": "agent-work-v1",
+    "lanes": {
+      "proposer": 1,
+      "triage": 2,
+      "implement": 2,
+      "review": 2,
+      "proof": 1
+    }
   },
   "backend": {
     "default": "codex",
+    "allowed": [
+      "codex"
+    ],
     "codexAction": "openai/codex-action@v1",
     "model": "",
     "effort": "medium",
@@ -119,7 +126,9 @@
     "requiredChecks": [
       "quality",
       "build",
-      "scenarios"
+      "scenarios",
+      "audit",
+      "dependency-review"
     ],
     "requiredStatuses": [
       "agent-review",

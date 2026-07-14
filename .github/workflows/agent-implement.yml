@@ -36,6 +36,11 @@ jobs:
   prepare-prompt:
     name: prepare-prompt
     runs-on: ubuntu-latest
+    outputs:
+      backend-effort: ${{ steps.backend.outputs.effort }}
+      backend-model: ${{ steps.backend.outputs.model }}
+      backend-sandbox: ${{ steps.backend.outputs.sandbox }}
+      concurrency-group: ${{ steps.concurrency.outputs.group }}
     permissions:
       contents: read
       issues: read
@@ -47,6 +52,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Select bounded implementation slot
+        id: concurrency
+        env:
+          CONCURRENCY_KEY: ${{ inputs.issue-number }}
+        run: node scripts/agent-concurrency-slot.mjs --lane implement --key "$CONCURRENCY_KEY" --json
+      - name: Validate configured implementation backend
+        id: backend
+        run: node scripts/agent-worker.mjs --validate-backend --json
       - name: Build trusted implementation prompt
         env:
           GH_TOKEN: ${{ github.token }}
@@ -69,6 +82,10 @@ jobs:
     needs: prepare-prompt
     if: vars.CRABBOX_VERCEL_READY == 'true' || vars.CRABBOX_HETZNER_READY == 'true'
     runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ needs.prepare-prompt.outputs.concurrency-group }}
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
     steps:
@@ -147,6 +164,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    concurrency:
+      group: ${{ needs.prepare-prompt.outputs.concurrency-group }}
+      cancel-in-progress: false
+      queue: max
     steps:
       - uses: actions/checkout@v5
         with:
@@ -168,8 +189,9 @@ jobs:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           codex-version: "0.144.1"
           prompt-file: .agent-output/implement-prompt.md
-          sandbox: workspace-write
-          effort: medium
+          sandbox: ${{ needs.prepare-prompt.outputs.backend-sandbox }}
+          model: ${{ needs.prepare-prompt.outputs.backend-model }}
+          effort: ${{ needs.prepare-prompt.outputs.backend-effort }}
           allow-users: ${{ github.repository_owner }}
           allow-bots: true
           output-file: .agent-output/implementation.md

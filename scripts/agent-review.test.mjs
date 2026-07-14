@@ -354,7 +354,8 @@ test("review generation is read-only and bound to the prepared head", () => {
   assert.match(noMistakes, /gh workflow run agent-no-mistakes\.yml/);
   assert.match(noMistakes, /--repo "\$GITHUB_REPOSITORY"/);
   assert.match(noMistakes, /--ref main/);
-  assert.match(noMistakes, /-f pr-number="\$\{\{ inputs\.pr-number \}\}"/);
+  assert.match(noMistakes, /-f pr-number="\$PR_NUMBER"/);
+  assert.match(noMistakes, /-f expected-head-sha="\$head_sha"/);
   assert.doesNotMatch(noMistakes, /uses: \.\/\.github\/workflows\/agent-no-mistakes\.yml/);
   assert.match(failure, /REVIEWED_HEAD_SHA: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
   assert.match(failure, /statuses\/\$REVIEWED_HEAD_SHA/);

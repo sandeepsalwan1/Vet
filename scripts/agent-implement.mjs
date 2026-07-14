@@ -217,19 +217,26 @@ export function upsertPullRequest({ config, issue, branch, codexOutput, metadata
   };
 }
 
-export function dispatchWorkflowAtRef(config, workflow, ref, dependencies = {}) {
+export function dispatchCandidateCi(config, prNumber, headSha, dependencies = {}) {
   const run = dependencies.runCommand ?? runCommand;
+  if (!Number.isInteger(Number(prNumber)) || !/^[a-f0-9]{40}$/.test(String(headSha ?? ""))) {
+    throw new AgentError("candidate CI dispatch requires a PR number and exact head SHA", 1);
+  }
   const args = [
     "workflow",
     "run",
-    workflow,
+    "ci.yml",
     "--repo",
     `${config.repo.owner}/${config.repo.name}`,
     "--ref",
-    ref
+    config.repo.defaultBranch,
+    "-f",
+    `pr-number=${prNumber}`,
+    "-f",
+    `expected-head-sha=${headSha}`
   ];
   run("gh", args);
-  return { ok: true, workflow, ref };
+  return { ok: true, workflow: "ci.yml", prNumber: Number(prNumber), headSha };
 }
 
 function checkEnvironment() {
@@ -664,12 +671,19 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
   if (committed || !remoteExists) {
     runCommand("git", ["push", "origin", `HEAD:refs/heads/${branch}`]);
   }
+  const candidateSha = gitOutput(["rev-parse", "HEAD"]);
   const pull = upsertPullRequest({ config, issue, branch, codexOutput, metadata, existingPull });
   const prLabels = implementationPullLabels(config, labels);
   addLabels(config, pull.number, prLabels, false);
   const dispatch = {
-    ci: dispatchWorkflowAtRef(config, "ci.yml", branch),
-    review: dispatchWorkflow(config, "agent-review.yml", { "pr-number": pull.number }, false)
+    ci: dispatchCandidateCi(config, pull.number, candidateSha),
+    review: dispatchWorkflow(
+      config,
+      "agent-review.yml",
+      { "pr-number": pull.number, "expected-head-sha": candidateSha },
+      false,
+      config.repo.defaultBranch
+    )
   };
   removeLabels(config, issueNumber, [config.labels.implement], false);
   upsertManagedComment({
