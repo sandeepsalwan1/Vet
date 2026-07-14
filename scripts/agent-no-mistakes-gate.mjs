@@ -37,6 +37,16 @@ const ALLOWED_OUTCOMES = new Set([
   "unpublished-changes",
   "setup-failed",
 ]);
+const PUBLIC_FINDING_SUMMARIES = new Map([
+  [
+    "review-environment-blocked",
+    "The isolated reviewer could not complete in its current environment.",
+  ],
+  [
+    "validation-environment-blocked",
+    "The isolated evidence agent could not demonstrate the requested behavior.",
+  ],
+]);
 
 export function noMistakesCommentMarker(config) {
   return `${config.comments.gate}\n${NO_MISTAKES_COMMENT_MARKER}`;
@@ -142,7 +152,6 @@ export function parseGateFindings(output) {
       severity: row.severity,
       file: row.file,
       action: row.action,
-      description: row.description,
     });
   }
   return findings;
@@ -250,12 +259,13 @@ function safePublicText(value, maxLength) {
 }
 
 function safeFinding(finding) {
+  const id = safePublicText(finding?.id, 80);
   return {
-    id: safePublicText(finding?.id, 80),
+    id,
     severity: safePublicText(finding?.severity, 32),
     file: safePublicText(finding?.file, 240),
     action: safePublicText(finding?.action, 32),
-    description: safePublicText(finding?.description, 1000),
+    summary: PUBLIC_FINDING_SUMMARIES.get(id) ?? "",
   };
 }
 
@@ -425,7 +435,7 @@ Status: ${artifact.status}
 Branch: ${branch}
 Head: ${sha}
 ${runUrl ? `Actions run: ${runUrl}\n` : ""}
-Finding descriptions are sanitized. Source intent and process output are omitted.
+Arbitrary finding descriptions, source intent, and process output are omitted. Known infrastructure summaries use an exact allowlist.
 
 Structured gate:
 ${markdownJsonBlock({

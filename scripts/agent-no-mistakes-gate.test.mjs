@@ -256,12 +256,45 @@ gate:
       severity: "error",
       file: "src/auth.ts",
       action: "ask-user",
-      description: "Leaked [redacted], requires a decision"
+      summary: ""
     },
   ]);
   assert.doesNotMatch(comment, new RegExp(secret));
-  assert.match(comment, /Finding descriptions are sanitized/);
-  assert.match(comment, /Leaked \[redacted\], requires a decision/);
+  assert.match(comment, /Arbitrary finding descriptions/);
+  assert.doesNotMatch(comment, /requires a decision/);
+});
+
+test("known infrastructure findings expose only allowlisted summaries", () => {
+  const secret = "sk-another-secret-value";
+  const artifact = sanitizedGateArtifact(
+    {
+      status: "blocked",
+      outcome: "ask-user",
+      run: { id: "run-environment", head: "abcdef12" },
+      findings: [
+        {
+          id: "validation-environment-blocked",
+          severity: "warning",
+          file: "",
+          action: "ask-user",
+          description: `Private detail ${secret}`
+        }
+      ]
+    },
+    HEAD,
+  );
+  const comment = gateCommentBody({
+    artifact,
+    branch: "agent/issue-42",
+    sha: HEAD,
+  });
+
+  assert.equal(
+    artifact.findings[0].summary,
+    "The isolated evidence agent could not demonstrate the requested behavior.",
+  );
+  assert.doesNotMatch(comment, new RegExp(secret));
+  assert.doesNotMatch(comment, /Private detail/);
 });
 
 test("unknown decision gate fails closed", () => {
