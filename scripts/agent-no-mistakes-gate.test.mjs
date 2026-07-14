@@ -412,16 +412,20 @@ test("identified technical failure receives one bounded fresh retry", () => {
 outcome: failed`;
   const parsed = parseAxiResult(technicalFailure, 1);
 
-  assert.equal(isRetryableTechnicalFailure(parsed), true);
+  assert.equal(isRetryableTechnicalFailure(parsed, HEAD), true);
   assert.equal(
-    isRetryableTechnicalFailure({ ...parsed, run: {} }),
+    isRetryableTechnicalFailure({ ...parsed, run: {} }, HEAD),
     false,
   );
   assert.equal(
     isRetryableTechnicalFailure({
       ...parsed,
       findings: [{ id: "test-failure" }],
-    }),
+    }, HEAD),
+    false,
+  );
+  assert.equal(
+    isRetryableTechnicalFailure(parsed, "b".repeat(40)),
     false,
   );
 
@@ -440,6 +444,7 @@ outcome: failed`;
       };
     },
     onRetry: () => {},
+    expectedHead: HEAD,
   });
 
   assert.equal(calls, 2);

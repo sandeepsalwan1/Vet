@@ -238,12 +238,12 @@ export function isRetryableReviewEnvironmentBlock(gate) {
   );
 }
 
-export function isRetryableTechnicalFailure(gate) {
+export function isRetryableTechnicalFailure(gate, expectedHead) {
   return (
     gate?.status === "failed" &&
     gate?.outcome === "failed" &&
     /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(gate?.run?.id ?? "") &&
-    /^[0-9a-f]{8,40}$/.test(gate?.run?.head ?? "") &&
+    validatedHeadMatches(gate, expectedHead) &&
     gate?.findings?.length === 0
   );
 }
@@ -560,7 +560,7 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
     if (
       attempt === 1 &&
       (isRetryableReviewEnvironmentBlock(parsed) ||
-        isRetryableTechnicalFailure(parsed))
+        isRetryableTechnicalFailure(parsed, dependencies.expectedHead))
     ) {
       execute("no-mistakes", ["daemon", "stop", "--force"], {
         cwd: repoDir,
@@ -685,7 +685,7 @@ async function main() {
     }
     const intent = readFileSync(resolve(args["intent-file"]), "utf8").trim();
     if (!intent) throw new AgentError("trusted gate intent file is empty", 1);
-    const run = runNoMistakesGate(intent, repoDir);
+    const run = runNoMistakesGate(intent, repoDir, { expectedHead });
     const postRunHead = runCommand("git", ["rev-parse", "HEAD"], {
       cwd: repoDir,
     }).stdout.trim();
