@@ -54,6 +54,12 @@ jobs:
           TARGET_KIND: ${{ steps.route.outputs.target_kind }}
           TARGET_NUMBER: ${{ steps.route.outputs.target_number }}
         run: |
+          set -euo pipefail
+          head_sha=""
+          if [ -n "$PR_NUMBER" ]; then
+            head_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)"
+            [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
+          fi
           case "$LANE" in
             triage)
               gh workflow run agent-triage.yml --repo "$GITHUB_REPOSITORY" -f issue-number="$ISSUE_NUMBER"
@@ -62,13 +68,17 @@ jobs:
               gh workflow run agent-implement.yml --repo "$GITHUB_REPOSITORY" -f issue-number="$ISSUE_NUMBER"
               ;;
             review)
-              gh workflow run agent-review.yml --repo "$GITHUB_REPOSITORY" -f pr-number="$PR_NUMBER"
+              gh workflow run agent-review.yml --repo "$GITHUB_REPOSITORY" --ref main -f pr-number="$PR_NUMBER" -f expected-head-sha="$head_sha"
               ;;
             proof)
-              gh workflow run agent-proof.yml --repo "$GITHUB_REPOSITORY" -f target-kind="$TARGET_KIND" -f target-number="$TARGET_NUMBER"
+              if [ "$TARGET_KIND" = pr ]; then
+                gh workflow run agent-proof.yml --repo "$GITHUB_REPOSITORY" --ref main -f target-kind=pr -f target-number="$TARGET_NUMBER" -f expected-head-sha="$head_sha"
+              else
+                gh workflow run agent-proof.yml --repo "$GITHUB_REPOSITORY" --ref main -f target-kind=issue -f target-number="$TARGET_NUMBER"
+              fi
               ;;
             automerge)
-              gh workflow run agent-automerge.yml --repo "$GITHUB_REPOSITORY" -f pr-number="$PR_NUMBER"
+              gh workflow run agent-automerge.yml --repo "$GITHUB_REPOSITORY" --ref main -f pr-number="$PR_NUMBER" -f expected-head-sha="$head_sha"
               ;;
             *)
               echo "No dispatch for lane $LANE"

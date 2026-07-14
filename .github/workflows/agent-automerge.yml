@@ -6,11 +6,20 @@ on:
       pr-number:
         required: true
         type: number
+      expected-head-sha:
+        required: false
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       pr-number:
         required: true
         type: number
+      expected-head-sha:
+        description: Exact current pull request head SHA
+        required: false
+        type: string
+        default: ""
   workflow_run:
     workflows:
       - CI
@@ -20,6 +29,7 @@ on:
       - completed
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
   issues: write
@@ -49,6 +59,7 @@ jobs:
           REQUESTED_PR: ${{ inputs.pr-number }}
           EVENT_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
           WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
+          EXPECTED_HEAD_SHA: ${{ inputs.expected-head-sha }}
         run: |
           set -euo pipefail
           pr_number="${REQUESTED_PR:-${EVENT_PR:-}}"
@@ -58,14 +69,23 @@ jobs:
                 --jq '[.[] | select(.state == "open")] | if length == 1 then .[0].number else empty end'
             )"
           fi
+          if [ -n "$EXPECTED_HEAD_SHA" ]; then
+            [[ "$EXPECTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+            test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr_number" --jq .head.sha)" = "$EXPECTED_HEAD_SHA"
+          fi
           echo "pr-number=$pr_number" >> "$GITHUB_OUTPUT"
       - name: Evaluate automerge
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.resolve.outputs.pr-number }}
+          EXPECTED_HEAD_SHA: ${{ inputs.expected-head-sha }}
         run: |
           if [ -z "$PR_NUMBER" ]; then
             echo "No pull request associated with this workflow run; skipping automerge."
             exit 0
           fi
-          node scripts/agent-automerge.mjs --pr-number "$PR_NUMBER" --json
+          args=(--pr-number "$PR_NUMBER" --json)
+          if [ -n "$EXPECTED_HEAD_SHA" ]; then
+            args+=(--expected-head "$EXPECTED_HEAD_SHA")
+          fi
+          node scripts/agent-automerge.mjs "${args[@]}"

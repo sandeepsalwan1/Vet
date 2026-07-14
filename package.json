@@ -22,7 +22,7 @@
     "scenarios:local": "node scripts/with-root-env.mjs node scripts/vetagent-scenarios.mjs",
     "scenarios:e2b": "node scripts/with-root-env.mjs node scripts/vetagent-scenarios.mjs --e2b",
     "smoke:e2b": "node scripts/with-root-env.mjs node scripts/e2b-smoke.mjs",
-    "test:scenarios": "tsx packages/agents/src/scenarioRunner.ts",
+    "test:scenarios": "node --import tsx packages/agents/src/scenarioRunner.ts",
     "verify:agents": "node scripts/with-root-env.mjs node scripts/verify-agents.mjs --allow-fallback",
     "verify:agents:google": "node scripts/with-root-env.mjs node scripts/verify-agents.mjs"
   },

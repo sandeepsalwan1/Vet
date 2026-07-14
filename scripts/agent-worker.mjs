@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import {
   AgentError,
   commandExists,
@@ -8,42 +11,149 @@ import {
   parseArgs,
   readText,
   runCommand,
+  setGitHubOutput,
   secretState
 } from "./agent-lib.mjs";
+
+const CODEX_SANDBOXES = new Set(["read-only", "workspace-write", "danger-full-access"]);
+const CODEX_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);
+const CODEX_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
+
+function nonemptyString(value, label) {
+  if (typeof value !== "string" || !value.trim()) throw new AgentError(`invalid ${label}`, 2);
+  return value;
+}
 
 function codexArgs(args, config) {
   const promptFile = args["prompt-file"];
   if (!promptFile) throw new AgentError("missing --prompt-file", 2);
   const outputFile = args["output-file"];
   const sandbox = args.sandbox ?? config.backend.sandbox;
+  if (!CODEX_SANDBOXES.has(sandbox)) throw new AgentError(`unsupported Codex sandbox: ${sandbox}`, 2);
   const command = ["exec", "--sandbox", sandbox];
+  const model = args.model ?? config.backend.model;
+  const effort = args.effort ?? config.backend.effort;
+  if (model) {
+    const value = nonemptyString(model, "Codex model");
+    if (!CODEX_MODEL.test(value)) throw new AgentError(`unsupported Codex model: ${value}`, 2);
+    command.push("--model", value);
+  }
+  if (effort) {
+    const value = nonemptyString(effort, "Codex effort");
+    if (!CODEX_EFFORTS.has(value)) throw new AgentError(`unsupported Codex effort: ${value}`, 2);
+    command.push("--config", `model_reasoning_effort=${JSON.stringify(value)}`);
+  }
   if (args.schema) command.push("--output-schema", args.schema);
   if (outputFile) command.push("--output-last-message", outputFile);
   command.push("-");
   return command;
 }
 
-async function main() {
-  const args = parseArgs();
+function codexAuthNames(config) {
+  const configured = nonemptyString(config.secrets?.agentAuth, "agent auth secret name");
+  return [...new Set([configured, "CODEX_API_KEY"])];
+}
+
+function codexEnvironment(config, source) {
+  const configured = nonemptyString(config.secrets?.agentAuth, "agent auth secret name");
+  const env = { ...source };
+  const key = env.CODEX_API_KEY || env[configured];
+  if (configured !== "CODEX_API_KEY") delete env[configured];
+  if (key) env.CODEX_API_KEY = key;
+  return env;
+}
+
+export const WORKER_BACKEND_ADAPTERS = Object.freeze({
+  codex: Object.freeze({
+    executable: "codex",
+    args: codexArgs,
+    authNames: codexAuthNames,
+    environment: codexEnvironment
+  })
+});
+
+export function resolveWorkerBackend(config, requestedBackend) {
+  const backend = config?.backend;
+  if (!backend || typeof backend !== "object" || Array.isArray(backend)) {
+    throw new AgentError("invalid backend configuration", 2);
+  }
+  if (
+    !Array.isArray(backend.allowed) ||
+    backend.allowed.length === 0 ||
+    backend.allowed.some((name) => typeof name !== "string" || !name.trim()) ||
+    new Set(backend.allowed).size !== backend.allowed.length
+  ) {
+    throw new AgentError("backend.allowed must contain unique backend names", 2);
+  }
+
+  const defaultBackend = nonemptyString(backend.default, "default worker backend");
+  if (!backend.allowed.includes(defaultBackend)) {
+    throw new AgentError(`default worker backend is not allowed: ${defaultBackend}`, 2);
+  }
+  const unsupported = backend.allowed.find((name) => !WORKER_BACKEND_ADAPTERS[name]);
+  if (unsupported) throw new AgentError(`allowed worker backend has no implemented adapter: ${unsupported}`, 2);
+  const name = requestedBackend === undefined ? defaultBackend : nonemptyString(requestedBackend, "worker backend");
+  if (!backend.allowed.includes(name)) throw new AgentError(`worker backend is not allowed: ${name}`, 2);
+
+  const adapter = WORKER_BACKEND_ADAPTERS[name];
+  return { name, adapter };
+}
+
+export function createWorkerInvocation(args, config, source = process.env) {
+  const backend = resolveWorkerBackend(config, args.backend);
+  const authNames = backend.adapter.authNames(config);
+  return {
+    backend: backend.name,
+    executable: backend.adapter.executable,
+    args: backend.adapter.args(args, config),
+    auth: secretState(authNames, source),
+    env: backend.adapter.environment(config, source)
+  };
+}
+
+export async function main(argv = process.argv.slice(2)) {
+  const args = parseArgs(argv);
   const config = loadConfig();
   const dryRun = Boolean(args["dry-run"]);
-  const mode = args.mode ?? "codex";
-  if (mode !== "codex") throw new AgentError(`unsupported worker mode: ${mode}`, 2);
-
-  const auth = secretState([config.secrets.agentAuth, "CODEX_API_KEY"]);
-  const hasAuth = auth.some((item) => item.present);
-  if (!hasAuth && !dryRun) throw new AgentError("missing agent auth secret", 2, auth);
-  if (!commandExists("codex") && !dryRun) throw new AgentError("codex CLI not found", 2);
-
-  const command = codexArgs(args, config);
-  if (dryRun) {
-    finish({ ok: true, message: "would run codex worker", command: ["codex", ...command], auth }, Boolean(args.json));
+  const backend = resolveWorkerBackend(config, args.backend);
+  if (args["validate-backend"]) {
+    createWorkerInvocation(
+      { ...args, "prompt-file": ".agent/prompts/implement.md" },
+      config,
+      {}
+    );
+    setGitHubOutput({
+      backend: backend.name,
+      effort: config.backend.effort ?? "",
+      model: config.backend.model ?? "",
+      sandbox: config.backend.sandbox ?? ""
+    });
+    finish({ ok: true, message: `configured worker backend: ${backend.name}`, backend: backend.name }, Boolean(args.json));
     return;
   }
-  const env = { ...process.env };
-  if (!env.CODEX_API_KEY && env[config.secrets.agentAuth]) env.CODEX_API_KEY = env[config.secrets.agentAuth];
-  const result = runCommand("codex", command, {
-    env,
+
+  const invocation = createWorkerInvocation(args, config);
+  const hasAuth = invocation.auth.some((item) => item.present);
+  if (!hasAuth && !dryRun) throw new AgentError("missing agent auth secret", 2, invocation.auth);
+  if (!commandExists(invocation.executable) && !dryRun) {
+    throw new AgentError(`${invocation.backend} worker CLI not found: ${invocation.executable}`, 2);
+  }
+
+  if (dryRun) {
+    finish(
+      {
+        ok: true,
+        message: `would run ${invocation.backend} worker`,
+        backend: invocation.backend,
+        command: [invocation.executable, ...invocation.args],
+        auth: invocation.auth
+      },
+      Boolean(args.json)
+    );
+    return;
+  }
+  const result = runCommand(invocation.executable, invocation.args, {
+    env: invocation.env,
     input: readText(args["prompt-file"]),
     stdio: ["pipe", "pipe", "pipe"],
     check: false
@@ -53,4 +163,6 @@ async function main() {
   process.exitCode = result.status;
 }
 
-main().catch((error) => fail(error, Boolean(parseArgs().json)));
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => fail(error, Boolean(parseArgs().json)));
+}

@@ -6,21 +6,70 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      pr-number:
+        description: Pull request whose exact head is being validated
+        required: true
+        type: number
+      expected-head-sha:
+        description: Exact current pull request head SHA
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ inputs.expected-head-sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  resolve:
+    name: resolve exact candidate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      base_sha: ${{ steps.resolve.outputs.base_sha }}
+      candidate_sha: ${{ steps.resolve.outputs.candidate_sha }}
+    steps:
+      - name: Resolve immutable candidate
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_PR: ${{ inputs.pr-number }}
+          REQUESTED_SHA: ${{ inputs.expected-head-sha }}
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            [[ "$REQUESTED_PR" =~ ^[0-9]+$ && "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+            pull_file="$RUNNER_TEMP/ci-pull.json"
+            gh api "repos/$GITHUB_REPOSITORY/pulls/$REQUESTED_PR" > "$pull_file"
+            test "$(jq -r '.state' "$pull_file")" = open
+            test "$(jq -r '.head.repo.full_name' "$pull_file")" = "$GITHUB_REPOSITORY"
+            test "$(jq -r '.base.repo.full_name' "$pull_file")" = "$GITHUB_REPOSITORY"
+            test "$(jq -r '.base.ref' "$pull_file")" = "${{ github.event.repository.default_branch }}"
+            test "$(jq -r '.head.sha' "$pull_file")" = "$REQUESTED_SHA"
+            candidate_sha="$REQUESTED_SHA"
+            base_sha="$(jq -r '.base.sha' "$pull_file")"
+          else
+            candidate_sha="$EVENT_HEAD_SHA"
+            base_sha="$EVENT_BASE_SHA"
+          fi
+          [[ "$candidate_sha" =~ ^[0-9a-f]{40}$ && "$base_sha" =~ ^[0-9a-f]{40}$ ]]
+          printf 'candidate_sha=%s\nbase_sha=%s\n' "$candidate_sha" "$base_sha" >> "$GITHUB_OUTPUT"
+
   quality:
     name: quality
+    needs: resolve
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ needs.resolve.outputs.candidate_sha }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -29,8 +78,8 @@ jobs:
       - run: npm ci
       - name: Check changed lines
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ needs.resolve.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.resolve.outputs.candidate_sha }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
         run: |
           if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
@@ -46,12 +95,18 @@ jobs:
       - run: node --test scripts/agent-*.test.mjs
       - name: actionlint
         uses: raven-actions/actionlint@v2
+        with:
+          # actionlint v1.7.12 predates GitHub's supported concurrency queue key.
+          flags: '-ignore ^unexpected\s+key\s+\x22queue\x22\s+for\s+\x22concurrency\x22\s+section\.'
 
   build:
     name: build
+    needs: resolve
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.resolve.outputs.candidate_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -61,9 +116,12 @@ jobs:
 
   scenarios:
     name: scenarios
+    needs: resolve
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.resolve.outputs.candidate_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -73,9 +131,12 @@ jobs:
 
   audit:
     name: audit
+    needs: resolve
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.resolve.outputs.candidate_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -85,6 +146,7 @@ jobs:
 
   dependency-review:
     name: dependency-review
+    needs: resolve
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     permissions:
@@ -92,15 +154,18 @@ jobs:
       pull-requests: read
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.resolve.outputs.candidate_sha }}
       - uses: actions/dependency-review-action@v4
         with:
-          base-ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.repository.default_branch }}
-          head-ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          base-ref: ${{ needs.resolve.outputs.base_sha }}
+          head-ref: ${{ needs.resolve.outputs.candidate_sha }}
 
   octocov:
     name: octocov
     runs-on: ubuntu-latest
     needs:
+      - resolve
       - scenarios
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     permissions:
@@ -108,5 +173,85 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.resolve.outputs.candidate_sha }}
       - uses: k1LoW/octocov-action@v1
         continue-on-error: true
+
+  publish-candidate-checks:
+    name: publish exact candidate checks
+    needs:
+      - resolve
+      - quality
+      - build
+      - scenarios
+      - audit
+      - dependency-review
+    if: always() && github.event_name == 'workflow_dispatch' && needs.resolve.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      contents: read
+    steps:
+      - name: Bind trusted CI results to the candidate head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.resolve.outputs.candidate_sha }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          SCENARIOS_RESULT: ${{ needs.scenarios.result }}
+          AUDIT_RESULT: ${{ needs.audit.result }}
+          DEPENDENCY_REVIEW_RESULT: ${{ needs.dependency-review.result }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          publish_check() {
+            name="$1"
+            result="$2"
+            conclusion=failure
+            if [ "$result" = success ]; then
+              conclusion=success
+            elif [ "$result" = cancelled ]; then
+              conclusion=cancelled
+            fi
+            payload="$RUNNER_TEMP/check-${name}.json"
+            jq -n \
+              --arg name "$name" \
+              --arg head_sha "$CANDIDATE_SHA" \
+              --arg conclusion "$conclusion" \
+              --arg details_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+              '{name: $name, head_sha: $head_sha, status: "completed", conclusion: $conclusion, details_url: $details_url}' \
+              > "$payload"
+            gh api --method POST "repos/$GITHUB_REPOSITORY/check-runs" --input "$payload" >/dev/null
+          }
+          publish_check quality "$QUALITY_RESULT"
+          publish_check build "$BUILD_RESULT"
+          publish_check scenarios "$SCENARIOS_RESULT"
+          publish_check audit "$AUDIT_RESULT"
+          publish_check dependency-review "$DEPENDENCY_REVIEW_RESULT"
+
+  dispatch-automerge:
+    name: dispatch automerge
+    needs:
+      - resolve
+      - quality
+      - build
+      - scenarios
+      - audit
+      - dependency-review
+      - publish-candidate-checks
+    if: always() && github.event_name == 'workflow_dispatch' && needs.resolve.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Re-evaluate the exact candidate after CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh workflow run agent-automerge.yml
+          --repo "$GITHUB_REPOSITORY"
+          --ref main
+          -f pr-number="${{ inputs.pr-number }}"
+          -f expected-head-sha="${{ needs.resolve.outputs.candidate_sha }}"

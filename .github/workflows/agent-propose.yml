@@ -11,10 +11,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  generate:
-    name: generate proposals
+  allocate-concurrency:
+    name: prepare proposer
     runs-on: ubuntu-latest
+    outputs:
+      group: ${{ steps.concurrency.outputs.group }}
+      head-sha: ${{ steps.context.outputs.head_sha }}
     permissions:
+      actions: read
+      checks: read
       contents: read
     steps:
       - uses: actions/checkout@v5
@@ -24,9 +29,60 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Allocate proposer capacity
+        id: concurrency
+        run: node scripts/agent-concurrency-slot.mjs --lane proposer --key proposer --json
+      - name: Capture bounded public main health
+        id: context
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/agent-proposer-context.mjs
+          --output .agent-output/proposer-context.json
+          --json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-proposer-context
+          path: .agent-output/proposer-context.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  generate:
+    name: generate proposals
+    needs: allocate-concurrency
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ needs.allocate-concurrency.outputs.group }}
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.allocate-concurrency.outputs.head-sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-proposer-context
+          path: .agent-output
       - run: mkdir -p .agent-output
+      # codex-action uses github.token only in its own preflight access check.
+      # The model process inherits these empty credential channels.
       - name: Run Codex proposer
         uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
+        env:
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RESULTS_URL: ""
+          AGENT_PAT: ""
+          GH_TOKEN: ""
+          GITHUB_TOKEN: ""
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           codex-version: "0.144.1"

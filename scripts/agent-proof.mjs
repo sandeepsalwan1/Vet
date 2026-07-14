@@ -305,6 +305,10 @@ export function isProofHeadFresh(expectedSha, currentSha) {
   return Boolean(expectedSha && currentSha && expectedSha === currentSha);
 }
 
+export function mayMutateProofTarget(requestSha, currentSha, statusSha) {
+  return isProofHeadFresh(requestSha, currentSha) && isProofHeadFresh(statusSha, requestSha);
+}
+
 async function legacyMain(args = parseArgs(), config = loadConfig()) {
   const kind = args["target-kind"] ?? args.kind;
   const number = Number(args["target-number"] ?? args.number);
@@ -454,7 +458,13 @@ async function legacyMain(args = parseArgs(), config = loadConfig()) {
       : null;
   const dispatch =
     kind === "pr" && result.status === "passed"
-      ? dispatchWorkflow(config, "agent-automerge.yml", { "pr-number": number }, dryRun)
+      ? dispatchWorkflow(
+          config,
+          "agent-automerge.yml",
+          { "pr-number": number, "expected-head-sha": details.sha },
+          dryRun,
+          config.repo.defaultBranch
+        )
       : null;
   const ok = result.status === "passed" || result.status === "skipped";
   finish(
@@ -843,10 +853,12 @@ async function finalizeMain(args, config) {
     localJobResult: String(args["local-job-result"] ?? "skipped")
   });
   let timingRecord = remoteOutcome?.timing ?? null;
+  let mayMutateTarget = true;
 
   if (request.kind === "pr" && request.requested) {
     const current = targetDetails(config, "pr", request.number);
-    if (!isProofHeadFresh(request.sha, current.sha) || !isProofHeadFresh(args["status-sha"], request.sha)) {
+    mayMutateTarget = mayMutateProofTarget(request.sha, current.sha, args["status-sha"]);
+    if (!mayMutateTarget) {
       result = failedWorkflowResult(request, "PR head changed while proof was running; proof must rerun on the current head.");
       result.blocker = `Proof prepared ${request.sha}; current head is ${current.sha}.`;
       timingRecord = null;
@@ -855,8 +867,7 @@ async function finalizeMain(args, config) {
 
   let comment = null;
   let labels = { added: [], removed: [] };
-  let dispatch = null;
-  if (request.requested) {
+  if (request.requested && mayMutateTarget) {
     comment = upsertManagedComment({
       config,
       number: request.number,
@@ -868,9 +879,6 @@ async function finalizeMain(args, config) {
       added: addLabels(config, request.number, changes.add),
       removed: removeLabels(config, request.number, changes.remove)
     };
-    if (request.kind === "pr" && result.status === "passed") {
-      dispatch = dispatchWorkflow(config, "agent-automerge.yml", { "pr-number": request.number });
-    }
   }
 
   writeTerminalMarker(args["terminal-marker"], result, request.sha || args["status-sha"] || "");
@@ -883,7 +891,7 @@ async function finalizeMain(args, config) {
       comment,
       labels,
       status: { pendingFinalizer: true },
-      dispatch
+      dispatch: null
     },
     Boolean(args.json),
     ok ? 0 : 1

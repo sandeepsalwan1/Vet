@@ -6,6 +6,10 @@ on:
       pr-number:
         required: true
         type: number
+      expected-head-sha:
+        required: false
+        type: string
+        default: ""
     secrets:
       OPENAI_API_KEY:
         required: true
@@ -14,6 +18,11 @@ on:
       pr-number:
         required: true
         type: number
+      expected-head-sha:
+        description: Exact current pull request head SHA
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -27,6 +36,7 @@ jobs:
     name: prepare-review
     runs-on: ubuntu-latest
     outputs:
+      concurrency-group: ${{ steps.concurrency.outputs.group }}
       reviewed-head-sha: ${{ steps.mark-pending.outputs.head-sha }}
     permissions:
       actions: write
@@ -40,10 +50,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pr-number }}
+          REQUESTED_HEAD_SHA: ${{ inputs.expected-head-sha }}
         run: |
           set -euo pipefail
           sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)"
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          if [ -n "$REQUESTED_HEAD_SHA" ]; then
+            [[ "$REQUESTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+            test "$sha" = "$REQUESTED_HEAD_SHA"
+          fi
           printf 'head-sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
           gh api "repos/$GITHUB_REPOSITORY/statuses/$sha" \
             --method POST \
@@ -58,6 +73,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Allocate review capacity
+        id: concurrency
+        env:
+          CONCURRENCY_KEY: ${{ inputs.pr-number }}
+        run: node scripts/agent-concurrency-slot.mjs --lane review --key "$CONCURRENCY_KEY" --json
       - name: Validate review target and build prompt
         env:
           GH_TOKEN: ${{ github.token }}
@@ -92,6 +112,10 @@ jobs:
     name: generate-review
     needs: prepare-review
     runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ needs.prepare-review.outputs.concurrency-group }}
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       pull-requests: read
@@ -164,16 +188,22 @@ jobs:
     permissions:
       actions: write
       contents: read
+      pull-requests: read
     steps:
       - name: Dispatch standalone no-mistakes gate
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh workflow run agent-no-mistakes.yml
-          --repo "$GITHUB_REPOSITORY"
-          --ref main
-          -f pr-number="${{ inputs.pr-number }}"
-          -f intent='Validate the agent-created PR after automated review. The PR must satisfy its linked issue, preserve repo architecture, pass CI, and remain blocked rather than auto-merged if no-mistakes finds ask-user or high-risk issues.'
+          PR_NUMBER: ${{ inputs.pr-number }}
+        run: |
+          set -euo pipefail
+          head_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)"
+          [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
+          gh workflow run agent-no-mistakes.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f pr-number="$PR_NUMBER" \
+            -f expected-head-sha="$head_sha" \
+            -f intent='Validate the agent-created PR after automated review. The PR must satisfy its linked issue, preserve repo architecture, pass CI, and remain blocked rather than auto-merged if no-mistakes finds ask-user or high-risk issues.'
 
   report-review-failure:
     name: report-review-failure

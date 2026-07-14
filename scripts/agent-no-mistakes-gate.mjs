@@ -22,7 +22,7 @@ import {
   upsertManagedComment,
 } from "./agent-lib.mjs";
 
-const ARTIFACT_VERSION = 1;
+const ARTIFACT_VERSION = 3;
 const NO_MISTAKES_COMMENT_MARKER = "<!-- agent-gate-no-mistakes:v1 -->";
 const STATUS_CONTEXT = "no-mistakes";
 const PASSING_OUTCOMES = new Set(["checks-passed", "passed"]);
@@ -37,6 +37,36 @@ const ALLOWED_OUTCOMES = new Set([
   "unpublished-changes",
   "setup-failed",
 ]);
+const PUBLIC_FINDING_SUMMARIES = new Map([
+  [
+    "review-environment-blocked",
+    "The isolated reviewer could not complete in its current environment.",
+  ],
+  [
+    "validation-environment-blocked",
+    "The isolated evidence agent could not demonstrate the requested behavior.",
+  ],
+  [
+    "test-environment-blocked",
+    "The isolated test evidence agent could not complete in its current environment.",
+  ],
+]);
+const PUBLIC_FAILURE_STAGES = new Set([
+  "intent",
+  "rebase",
+  "review",
+  "test",
+  "document",
+  "lint",
+  "push",
+  "pr",
+  "ci",
+]);
+const GATE_EVIDENCE_BOUNDARY = `Evidence boundary:
+- Configured deterministic scenario, API, or CLI checks count as direct product evidence when their output and assertions demonstrate the requested behavior.
+- Agent Proof owns browser, visual, and live-provider evidence. Require that evidence only when the trusted issue or managed triage explicitly requests it.
+- Do not block solely because UI or live-provider evidence is absent when the trusted request calls for CI or non-visual proof and a configured check directly exercises the behavior.
+- Still block when the requested behavior is not demonstrated by either direct checks or an applicable Agent Proof result.`;
 
 export function noMistakesCommentMarker(config) {
   return `${config.comments.gate}\n${NO_MISTAKES_COMMENT_MARKER}`;
@@ -80,6 +110,8 @@ export function composeEffectiveIntent({
   }
   const effective = `Gate policy:
 ${policy}
+
+${GATE_EVIDENCE_BOUNDARY}
 
 Authoritative source issue #${issueNumber}
 Title: ${issueTitle}
@@ -147,6 +179,28 @@ export function parseGateFindings(output) {
   return findings;
 }
 
+function parseFailureStage(output) {
+  const lines = String(output ?? "").split(/\r?\n/);
+  const headerIndex = lines.findIndex((line) =>
+    /^\s{2}steps\[\d+\]\{[^}]+\}:\s*$/.test(line),
+  );
+  if (headerIndex === -1) return "";
+  const columnsMatch = lines[headerIndex].match(/\{([^}]+)\}/);
+  const columns =
+    columnsMatch?.[1].split(",").map((column) => column.trim()) ?? [];
+  for (const line of lines.slice(headerIndex + 1)) {
+    if (!/^\s{4}\S/.test(line)) break;
+    const values = parseCsvRow(line.slice(4));
+    const row = Object.fromEntries(
+      columns.map((column, index) => [column, values[index] ?? ""]),
+    );
+    if (row.status === "failed" && PUBLIC_FAILURE_STAGES.has(row.step)) {
+      return row.step;
+    }
+  }
+  return "";
+}
+
 function parseRunFields(output) {
   const lines = String(output ?? "").split(/\r?\n/);
   const runIndex = lines.findIndex((line) => line === "run:");
@@ -172,6 +226,18 @@ function parseRunFields(output) {
   return fields;
 }
 
+function parseGateStep(output) {
+  const lines = String(output ?? "").split(/\r?\n/);
+  const gateIndex = lines.findIndex((line) => line === "gate:");
+  if (gateIndex === -1) return "";
+  for (const line of lines.slice(gateIndex + 1)) {
+    if (!line.startsWith("  ")) break;
+    const match = line.match(/^\s{2}step:\s*(\S+)\s*$/);
+    if (match) return match[1];
+  }
+  return "";
+}
+
 export function parseAxiResult(output, exitStatus) {
   const text = String(output ?? "");
   const outcomes = [
@@ -181,13 +247,15 @@ export function parseAxiResult(output, exitStatus) {
   ].map((match) => match[1]);
   const run = parseRunFields(text);
   const findings = parseGateFindings(text);
+  const step = parseGateStep(text);
+  const failureStage = parseFailureStage(text);
 
   if (outcomes.length === 1) {
     const outcome = outcomes[0];
     if (exitStatus === 0 && PASSING_OUTCOMES.has(outcome)) {
-      return { status: "passed", outcome, run, findings };
+      return { status: "passed", outcome, run, findings, failureStage };
     }
-    return { status: "failed", outcome, run, findings };
+    return { status: "failed", outcome, run, findings, failureStage };
   }
   if (/^gate:\s*$/m.test(text)) {
     return {
@@ -197,18 +265,50 @@ export function parseAxiResult(output, exitStatus) {
         : "decision-gate",
       run,
       findings,
+      step,
+      failureStage,
     };
   }
-  return { status: "failed", outcome: "invalid-output", run, findings };
+  return {
+    status: "failed",
+    outcome: "invalid-output",
+    run,
+    findings,
+    failureStage,
+  };
 }
 
 export function isRetryableReviewEnvironmentBlock(gate) {
   return (
     gate?.status === "blocked" &&
     gate?.outcome === "ask-user" &&
+    gate?.step === "review" &&
     gate?.findings?.length === 1 &&
     gate.findings[0]?.id === "review-environment-blocked" &&
+    !gate.findings[0]?.file &&
     gate.findings[0]?.action === "ask-user"
+  );
+}
+
+export function isRetryableTestEnvironmentBlock(gate) {
+  return (
+    gate?.status === "blocked" &&
+    gate?.outcome === "ask-user" &&
+    gate?.step === "test" &&
+    gate?.findings?.length === 1 &&
+    gate.findings[0]?.id === "test-environment-blocked" &&
+    !gate.findings[0]?.file &&
+    gate.findings[0]?.action === "ask-user"
+  );
+}
+
+export function isRetryableTechnicalFailure(gate, expectedHead) {
+  return (
+    gate?.status === "failed" &&
+    gate?.outcome === "failed" &&
+    /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(gate?.run?.id ?? "") &&
+    validatedHeadMatches(gate, expectedHead) &&
+    gate?.findings?.length === 0
   );
 }
 
@@ -233,11 +333,13 @@ function safePublicText(value, maxLength) {
 }
 
 function safeFinding(finding) {
+  const id = safePublicText(finding?.id, 80);
   return {
-    id: safePublicText(finding?.id, 80),
+    id,
     severity: safePublicText(finding?.severity, 32),
     file: safePublicText(finding?.file, 240),
     action: safePublicText(finding?.action, 32),
+    summary: PUBLIC_FINDING_SUMMARIES.get(id) ?? "",
   };
 }
 
@@ -270,6 +372,9 @@ export function sanitizedGateArtifact(
     expectedHead,
     validatedHead: headMatches ? expectedHead : "",
     runId: safePublicText(normalized?.run?.id, 80),
+    failureStage: PUBLIC_FAILURE_STAGES.has(normalized?.failureStage)
+      ? normalized.failureStage
+      : "",
     findings: (normalized?.findings ?? []).slice(0, 100).map(safeFinding),
   };
 }
@@ -290,6 +395,9 @@ export function normalizeGateArtifact(value, expectedHead) {
   if (!ALLOWED_OUTCOMES.has(value.outcome)) {
     throw new AgentError("sanitized gate artifact outcome is invalid", 1);
   }
+  if (value.failureStage && !PUBLIC_FAILURE_STAGES.has(value.failureStage)) {
+    throw new AgentError("sanitized gate artifact failure stage is invalid", 1);
+  }
   if (
     value.status === "passed" &&
     (!PASSING_OUTCOMES.has(value.outcome) ||
@@ -307,6 +415,9 @@ export function normalizeGateArtifact(value, expectedHead) {
     expectedHead,
     validatedHead: value.validatedHead === expectedHead ? expectedHead : "",
     runId: safePublicText(value.runId, 80),
+    failureStage: PUBLIC_FAILURE_STAGES.has(value.failureStage)
+      ? value.failureStage
+      : "",
     findings: value.findings.map(safeFinding),
   };
 }
@@ -407,14 +518,15 @@ Status: ${artifact.status}
 Branch: ${branch}
 Head: ${sha}
 ${runUrl ? `Actions run: ${runUrl}\n` : ""}
-Finding descriptions, source intent, and process output are intentionally omitted from this public comment.
+Arbitrary finding descriptions, source intent, and process output are omitted. Known infrastructure summaries use an exact allowlist.
 
 Structured gate:
 ${markdownJsonBlock({
   status: artifact.status,
   outcome: artifact.outcome,
   runId: artifact.runId || "",
-  checksRun: ["no-mistakes axi run --skip push,pr,ci"],
+  failureStage: artifact.failureStage || "",
+  checksRun: ["no-mistakes axi run --skip rebase,push,pr,ci"],
   findings: artifact.findings,
   blocker: artifactBlocker(artifact),
 })}`;
@@ -430,12 +542,22 @@ export function gateLabelChanges(config, artifact) {
   };
 }
 
-function recordTerminal({ config, pull, artifact, dryRun = false }) {
+export function terminalHeadBinding(expectedHead, currentHead) {
+  if (!/^[0-9a-f]{40}$/.test(String(expectedHead ?? ""))) {
+    throw new AgentError("terminal status head is invalid", 2);
+  }
+  return {
+    mutatePull: expectedHead === currentHead,
+    statusSha: expectedHead,
+  };
+}
+
+function recordTerminal({ config, pull, artifact, statusSha = pull.head.sha, mutatePull = true, dryRun = false }) {
   const failed = artifact.status !== "passed";
   const runUrl = actionsRunUrl();
   const commitStatus = setCommitStatus({
     config,
-    sha: pull.head.sha,
+    sha: statusSha,
     state: failed ? "failure" : "success",
     context: STATUS_CONTEXT,
     description: failed
@@ -444,6 +566,13 @@ function recordTerminal({ config, pull, artifact, dryRun = false }) {
     targetUrl: runUrl,
     dryRun,
   });
+  if (!mutatePull) {
+    return {
+      labels: { added: [], removed: [] },
+      comment: null,
+      status: commitStatus,
+    };
+  }
   const labelChanges = gateLabelChanges(config, artifact);
   const labels = {
     added: addLabels(config, pull.number, labelChanges.add, dryRun),
@@ -491,14 +620,21 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
     dependencies.onRetry ??
     (() =>
       process.stderr.write(
-        "retrying no-mistakes once after an isolated review environment blocker\n",
+        "retrying no-mistakes once after an isolated gate infrastructure failure\n",
       ));
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     execute("no-mistakes", ["init"], { cwd: repoDir, env });
     const result = spawn(
       "no-mistakes",
-      ["axi", "run", "--intent", intent, "--skip", "push,pr,ci"],
+      [
+        "axi",
+        "run",
+        "--intent",
+        intent,
+        "--skip",
+        "rebase,push,pr,ci",
+      ],
       {
         cwd: repoDir,
         env,
@@ -519,7 +655,12 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
       `${run.stdout}\n${run.stderr}`.trim(),
       run.status,
     );
-    if (attempt === 1 && isRetryableReviewEnvironmentBlock(parsed)) {
+    if (
+      attempt === 1 &&
+      (isRetryableReviewEnvironmentBlock(parsed) ||
+        isRetryableTestEnvironmentBlock(parsed) ||
+        isRetryableTechnicalFailure(parsed, dependencies.expectedHead))
+    ) {
       execute("no-mistakes", ["daemon", "stop", "--force"], {
         cwd: repoDir,
         env,
@@ -555,6 +696,7 @@ function setupFailureArtifact(expectedHead) {
     expectedHead,
     validatedHead: "",
     runId: "",
+    failureStage: "",
     findings: [],
   };
 }
@@ -571,6 +713,10 @@ async function main() {
     }
     const snapshot = fetchTrustedPull(config, prNumber);
     const { pull, trust } = snapshot;
+    const expectedHead = readExpectedHead(args["expected-head"]);
+    if (pull.head.sha !== expectedHead) {
+      throw new AgentError("PR head changed before no-mistakes preparation", 1);
+    }
     const context = fetchIntentContext(config, trust.sourceIssue);
     assertTrustedIntentSource(config, snapshot, context);
     const status = markPending(config, pull, dryRun);
@@ -643,7 +789,7 @@ async function main() {
     }
     const intent = readFileSync(resolve(args["intent-file"]), "utf8").trim();
     if (!intent) throw new AgentError("trusted gate intent file is empty", 1);
-    const run = runNoMistakesGate(intent, repoDir);
+    const run = runNoMistakesGate(intent, repoDir, { expectedHead });
     const postRunHead = runCommand("git", ["rev-parse", "HEAD"], {
       cwd: repoDir,
     }).stdout.trim();
@@ -708,7 +854,8 @@ async function main() {
         artifact = setupFailureArtifact(expectedHead);
       }
     }
-    const result = recordTerminal({ config, pull, artifact, dryRun });
+    const binding = terminalHeadBinding(expectedHead, pull.head.sha);
+    const result = recordTerminal({ config, pull, artifact, ...binding, dryRun });
     const exitCode = artifact.status === "passed" ? 0 : 1;
     finish(
       {

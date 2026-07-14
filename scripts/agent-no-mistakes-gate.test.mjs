@@ -9,12 +9,15 @@ import {
   gateLabelChanges,
   gateCommentBody,
   isRetryableReviewEnvironmentBlock,
+  isRetryableTestEnvironmentBlock,
+  isRetryableTechnicalFailure,
   noMistakesCommentMarker,
   normalizeGateArtifact,
   parseAxiResult,
   runNoMistakesGate,
   sanitizedGateArtifact,
   selectTrustedManagedTriageComment,
+  terminalHeadBinding,
   validatedHeadMatches,
 } from "./agent-no-mistakes-gate.mjs";
 
@@ -37,6 +40,8 @@ test("authenticated reviewer is read-only and all source changes fail closed", (
   assert.match(workflow, /codex exec \\\n\s+--sandbox read-only/);
   assert.match(workflow, /NM_TEST_START_DAEMON: "1"/);
   assert.match(workflow, /session_reuse: false/);
+  assert.match(gate, /"--skip",\s+"rebase,push,pr,ci"/);
+  assert.doesNotMatch(workflow, /git config --global user\./);
   assert.match(workflow, /if: \$\{\{ always\(\) \}\}\n\s+continue-on-error: true\n[\s\S]*?run: no-mistakes daemon stop --force/);
   assert.doesNotMatch(workflow, /- workspace-write/);
   assert.doesNotMatch(workflow, /tar -C \/source/);
@@ -48,6 +53,9 @@ test("authenticated reviewer is read-only and all source changes fail closed", (
   assert.match(workflow, /gh workflow run agent-automerge\.yml/);
   assert.match(workflow, /--repo "\$GITHUB_REPOSITORY"/);
   assert.match(workflow, /-f pr-number="\$\{\{ inputs\.pr-number \}\}"/);
+  assert.match(workflow, /-f expected-head-sha="\$\{\{ needs\.prepare\.outputs\.head_sha \}\}"/);
+  assert.match(workflow, /dispatch-automerge:\n[\s\S]*?needs:\n\s+- prepare\n\s+- finalize/);
+  assert.match(workflow, /--expected-head "\$\{\{ inputs\.expected-head-sha \}\}"/);
   assert.doesNotMatch(automergeWorkflow, /- Agent no-mistakes/);
   assert.equal([...repoConfig.matchAll(/tar --no-same-owner -xf/g)].length, 2);
   assert.match(gate, /"--untracked-files=all"/);
@@ -74,6 +82,15 @@ test("application fonts are self-hosted for offline gates", () => {
     assert.equal(css.includes(`url("./fonts/${font}")`), true, font);
     assert.equal(existsSync(new URL(`../apps/internal/app/fonts/${font}`, import.meta.url)), true, font);
   }
+});
+
+test("scenario runner avoids tsx IPC inside strict agent sandboxes", () => {
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+
+  assert.equal(
+    packageJson.scripts["test:scenarios"],
+    "node --import tsx packages/agents/src/scenarioRunner.ts",
+  );
 });
 
 function trustedPull(overrides = {}) {
@@ -116,6 +133,18 @@ help[1]:
   );
 });
 
+test("stale finalizers bind status to the validated head without mutating the newer PR", () => {
+  assert.deepEqual(terminalHeadBinding(HEAD, HEAD), {
+    mutatePull: true,
+    statusSha: HEAD,
+  });
+  assert.deepEqual(terminalHeadBinding(HEAD, "1".repeat(40)), {
+    mutatePull: false,
+    statusSha: HEAD,
+  });
+  assert.throws(() => terminalHeadBinding("bad", HEAD), /terminal status head is invalid/);
+});
+
 test("effective intent includes caller policy, full source issue, and managed triage", () => {
   const intent = composeEffectiveIntent({
     callerIntent: "Require every automated gate to pass.",
@@ -130,6 +159,8 @@ test("effective intent includes caller policy, full source issue, and managed tr
   });
 
   assert.match(intent, /Require every automated gate to pass/);
+  assert.match(intent, /deterministic scenario, API, or CLI checks count as direct product evidence/);
+  assert.match(intent, /Agent Proof owns browser, visual, and live-provider evidence/);
   assert.match(intent, /Authoritative source issue #42/);
   assert.match(
     intent,
@@ -251,13 +282,50 @@ gate:
   assert.equal(artifact.status, "blocked");
   assert.equal(artifact.outcome, "ask-user");
   assert.deepEqual(artifact.findings, [
-    { id: "r1", severity: "error", file: "src/auth.ts", action: "ask-user" },
+    {
+      id: "r1",
+      severity: "error",
+      file: "src/auth.ts",
+      action: "ask-user",
+      summary: ""
+    },
   ]);
   assert.doesNotMatch(comment, new RegExp(secret));
-  assert.match(
-    comment,
-    /source intent, and process output are intentionally omitted/,
+  assert.match(comment, /Arbitrary finding descriptions/);
+  assert.doesNotMatch(comment, /requires a decision/);
+});
+
+test("known infrastructure findings expose only allowlisted summaries", () => {
+  const secret = "sk-another-secret-value";
+  const artifact = sanitizedGateArtifact(
+    {
+      status: "blocked",
+      outcome: "ask-user",
+      run: { id: "run-environment", head: "abcdef12" },
+      findings: [
+        {
+          id: "validation-environment-blocked",
+          severity: "warning",
+          file: "",
+          action: "ask-user",
+          description: `Private detail ${secret}`
+        }
+      ]
+    },
+    HEAD,
   );
+  const comment = gateCommentBody({
+    artifact,
+    branch: "agent/issue-42",
+    sha: HEAD,
+  });
+
+  assert.equal(
+    artifact.findings[0].summary,
+    "The isolated evidence agent could not demonstrate the requested behavior.",
+  );
+  assert.doesNotMatch(comment, new RegExp(secret));
+  assert.doesNotMatch(comment, /Private detail/);
 });
 
 test("unknown decision gate fails closed", () => {
@@ -315,8 +383,49 @@ test("isolated review environment blocker receives one fresh daemon retry", () =
   assert.equal(parseAxiResult(result.stdout, result.status).status, "passed");
 });
 
+test("isolated test environment blocker receives one fresh daemon retry", () => {
+  const gate = {
+    status: "blocked",
+    outcome: "ask-user",
+    step: "test",
+    findings: [
+      {
+        id: "test-environment-blocked",
+        severity: "warning",
+        file: "",
+        action: "ask-user",
+      },
+    ],
+  };
+
+  assert.equal(isRetryableTestEnvironmentBlock(gate), true);
+  assert.equal(isRetryableTestEnvironmentBlock({ ...gate, step: "review" }), false);
+  assert.equal(
+    sanitizedGateArtifact(gate, HEAD).findings[0].summary,
+    "The isolated test evidence agent could not complete in its current environment.",
+  );
+});
+
 test("review environment retry stays bounded and excludes product blockers", () => {
   const soleEnvironmentBlock = parseAxiResult(environmentBlockOutput(), 0);
+  const validationEnvironmentBlock = parseAxiResult(
+    environmentBlockOutput().replace(
+      "review-environment-blocked",
+      "validation-environment-blocked",
+    ),
+    0,
+  );
+  const wrongStep = parseAxiResult(
+    environmentBlockOutput().replace("step: review", "step: test"),
+    0,
+  );
+  const fileFinding = parseAxiResult(
+    environmentBlockOutput().replace(
+      "review-environment-blocked,error,,ask-user",
+      "review-environment-blocked,error,src/test.ts,ask-user",
+    ),
+    0,
+  );
   const mixedBlock = parseAxiResult(
     environmentBlockOutput().replace(
       "findings[1]{id,severity,file,action}:\n    review-environment-blocked,error,,ask-user",
@@ -325,6 +434,9 @@ test("review environment retry stays bounded and excludes product blockers", () 
     0,
   );
   assert.equal(isRetryableReviewEnvironmentBlock(soleEnvironmentBlock), true);
+  assert.equal(isRetryableReviewEnvironmentBlock(validationEnvironmentBlock), false);
+  assert.equal(isRetryableReviewEnvironmentBlock(wrongStep), false);
+  assert.equal(isRetryableReviewEnvironmentBlock(fileFinding), false);
   assert.equal(isRetryableReviewEnvironmentBlock(mixedBlock), false);
 
   let calls = 0;
@@ -343,6 +455,82 @@ test("review environment retry stays bounded and excludes product blockers", () 
       parseAxiResult(repeated.stdout, repeated.status),
     ),
     true,
+  );
+});
+
+test("identified technical failure receives one bounded fresh retry", () => {
+  const technicalFailure = `run:
+  id: run-technical
+  head: abcdef12
+  steps[2]{step,status,findings,duration_ms}:
+    intent,completed,0,0
+    rebase,failed,0,125
+outcome: failed`;
+  const parsed = parseAxiResult(technicalFailure, 1);
+
+  assert.equal(isRetryableTechnicalFailure(parsed, HEAD), true);
+  assert.equal(parsed.failureStage, "rebase");
+  assert.equal(sanitizedGateArtifact(parsed, HEAD).failureStage, "rebase");
+  assert.equal(
+    isRetryableTechnicalFailure({ ...parsed, run: {} }, HEAD),
+    false,
+  );
+  assert.equal(
+    isRetryableTechnicalFailure({
+      ...parsed,
+      findings: [{ id: "test-failure" }],
+    }, HEAD),
+    false,
+  );
+  assert.equal(
+    isRetryableTechnicalFailure(parsed, "b".repeat(40)),
+    false,
+  );
+
+  let calls = 0;
+  const result = runNoMistakesGate("Validate the PR", "/repo", {
+    runCommand: () => ({ status: 0 }),
+    spawnSync: () => {
+      calls += 1;
+      if (calls === 1) {
+        return { stdout: technicalFailure, stderr: "", status: 1 };
+      }
+      return {
+        stdout: "run:\n  id: run-passed\n  head: abcdef12\noutcome: passed\n",
+        stderr: "",
+        status: 0,
+      };
+    },
+    onRetry: () => {},
+    expectedHead: HEAD,
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.attempts, 2);
+  assert.equal(parseAxiResult(result.stdout, result.status).status, "passed");
+});
+
+test("failure stage diagnostics accept only fixed pipeline stage names", () => {
+  const unknown = parseAxiResult(
+    `run:
+  id: run-unknown
+  head: abcdef12
+  steps[1]{step,status,findings,duration_ms}:
+    private-stage,failed,0,1
+outcome: failed`,
+    1,
+  );
+  const artifact = sanitizedGateArtifact(unknown, HEAD);
+
+  assert.equal(unknown.failureStage, "");
+  assert.equal(artifact.failureStage, "");
+  assert.throws(
+    () =>
+      normalizeGateArtifact(
+        { ...artifact, failureStage: "private-stage" },
+        HEAD,
+      ),
+    /failure stage is invalid/,
   );
 });
 

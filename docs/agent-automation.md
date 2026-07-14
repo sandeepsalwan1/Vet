@@ -24,11 +24,16 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 ## Flow
 
 1. `agent-router.yml` maps label events to reusable workflows.
-2. Triage uses a schema-constrained Codex result, then applies managed labels/comments.
-3. Implementation runs Codex without write credentials, uploads a patch, then applies it in a separate write-token job and opens a draft PR.
-4. Review repeats the read/patch separation, publishes `agent-review`, and invokes no-mistakes.
-5. Proof runs configured commands and records provider/artifact evidence when remote visual proof is required.
-6. Automerge marks an eligible draft ready and enables GitHub automerge only after configured checks and statuses pass.
+2. Proposal generation receives a bounded public snapshot of current `main` workflow health and treats that snapshot as evidence, never as instructions.
+3. Triage uses a schema-constrained Codex result, then applies managed labels/comments.
+4. Expensive proposer, triage, implementation, review, no-mistakes, and proof jobs share deterministic slot groups from `.agent/config.json`.
+5. Implementation selects its allowed backend from `.agent/config.json`, runs without write credentials, uploads a patch, then applies it in a separate write-token job and opens a draft PR.
+6. The current installed worker adapter is Codex; unsupported or unimplemented backend selections fail before model execution.
+7. Review repeats the read/patch separation, publishes `agent-review`, and invokes no-mistakes.
+8. Proof runs configured commands and records provider/artifact evidence when remote visual proof is required.
+9. Automerge updates an eligible stale branch, reruns head-bound CI and review, and merges only after every gate passes on the new head.
+10. A successful merge removes agent workflow labels and closes the linked source issue while preserving priority labels.
+Trusted recovery dispatches main-defined workflows with an expected head SHA, and CI publishes required check runs on that exact candidate.
 
 ## Trust Boundaries
 
@@ -39,10 +44,15 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 - High-risk or high-priority work requires human review.
 - A missing provider, artifact, or lease blocks required visual proof; it does not fake success.
 - no-mistakes and proof statuses must reflect real execution.
+- The credentialless no-mistakes gate never rebases or publishes changes; deterministic scenario, API, and CLI checks may provide direct non-visual evidence when the trusted request calls for it.
+- Browser, visual, and live-provider evidence remains the Agent Proof workflow's responsibility and is required only by trusted issue or triage policy.
 
 ## Gates
 
-Normal automerge requires CI checks `quality`, `build`, and `scenarios`, plus `agent-review` and `no-mistakes` statuses. `agent-proof` is also required while the PR carries `agent:proof`. `.agent/config.json` is the machine-readable source for configured names; `.agent/agent-policy.md` owns risk and approval meaning.
+Normal automerge requires CI checks `quality`, `build`, `scenarios`, `audit`, and `dependency-review`, plus `agent-review` and `no-mistakes` statuses.
+`agent-proof` is also required when trusted labels or managed triage request visual proof.
+The active agent-job cap is eight, the hard configurable ceiling is fifteen, and each lane has its own lower cap.
+`.agent/config.json` is the machine-readable source for gate names, backend selection, and capacity; `.agent/agent-policy.md` owns risk and approval meaning.
 
 ## Commands
 
@@ -50,5 +60,7 @@ Mutating automation CLIs support `--dry-run`; structured workflow calls use `--j
 
     node scripts/agent-labels.mjs --dry-run --json
     node scripts/agent-router.mjs --event-file event.json --json
+    node scripts/agent-worker.mjs --validate-backend --json
+    node scripts/agent-concurrency-slot.mjs --lane implement --key 42 --json
 
 GitHub comments use managed markers and temporary body files. Never interpolate untrusted issue text into a shell command.

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -6,6 +7,7 @@ import {
   exactRemoteProofCommand,
   isProofRequested,
   isProofHeadFresh,
+  mayMutateProofTarget,
   proofLabelChanges,
   resolveTerminalResult,
   terminalMarker,
@@ -187,6 +189,9 @@ test("successful proof never clears a shared blocked label", () => {
 test("proof result cannot authorize a newer PR head", () => {
   assert.equal(isProofHeadFresh("abc123", "abc123"), true);
   assert.equal(isProofHeadFresh("abc123", "def456"), false);
+  assert.equal(mayMutateProofTarget("abc123", "abc123", "abc123"), true);
+  assert.equal(mayMutateProofTarget("abc123", "def456", "abc123"), false);
+  assert.equal(mayMutateProofTarget("abc123", "abc123", "def456"), false);
 });
 
 test("untrusted proof commands receive no GitHub, OpenAI, Crabbox, or provider credentials", () => {
@@ -305,4 +310,14 @@ test("terminal marker preserves terminal failure detail for status finalization"
   assert.equal(marker.state, "failure");
   assert.match(marker.description, /npm run build failed/);
   assert.equal(marker.sha, "b".repeat(40));
+});
+
+test("proof workflow dispatches automerge only after terminal success is published", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/agent-proof.yml", import.meta.url), "utf8");
+  const statusIndex = workflow.indexOf("gh api \"repos/$GITHUB_REPOSITORY/statuses/$STATUS_SHA\"");
+  const dispatchIndex = workflow.indexOf("gh workflow run agent-automerge.yml");
+
+  assert.ok(statusIndex >= 0);
+  assert.ok(dispatchIndex > statusIndex);
+  assert.match(workflow, /steps\.terminal\.outputs\.state == 'success'/);
 });

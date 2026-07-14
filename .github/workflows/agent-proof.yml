@@ -9,6 +9,10 @@ on:
       target-number:
         required: true
         type: number
+      expected-head-sha:
+        required: false
+        type: string
+        default: ""
       proof-kind:
         required: false
         type: string
@@ -41,6 +45,11 @@ on:
       target-number:
         required: true
         type: number
+      expected-head-sha:
+        description: Required exact head SHA when target-kind is pr
+        required: false
+        type: string
+        default: ""
       proof-kind:
         required: false
         type: choice
@@ -71,6 +80,7 @@ jobs:
       pull-requests: read
       statuses: write
     outputs:
+      concurrency_group: ${{ steps.concurrency.outputs.group }}
       request_b64: ${{ steps.prepare.outputs.request_b64 }}
       requested: ${{ steps.prepare.outputs.requested }}
       proof_kind: ${{ steps.prepare.outputs.proof_kind }}
@@ -83,9 +93,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TARGET_KIND: ${{ inputs.target-kind }}
           TARGET_NUMBER: ${{ inputs.target-number }}
+          REQUESTED_HEAD_SHA: ${{ inputs.expected-head-sha }}
         run: |
+          set -euo pipefail
           if [ "$TARGET_KIND" = pr ]; then
             sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$TARGET_NUMBER" --jq .head.sha)"
+            [[ "$REQUESTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+            test "$sha" = "$REQUESTED_HEAD_SHA"
             gh api "repos/$GITHUB_REPOSITORY/statuses/$sha" -X POST \
               -f state=pending \
               -f context=agent-proof \
@@ -103,6 +117,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Allocate proof capacity
+        id: concurrency
+        env:
+          CONCURRENCY_KEY: ${{ inputs.target-kind }}-${{ inputs.target-number }}
+        run: node trusted/scripts/agent-concurrency-slot.mjs --lane proof --key "$CONCURRENCY_KEY" --json
       - name: Prepare trusted proof request
         id: prepare
         env:
@@ -135,6 +154,10 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.requested == 'true'
     runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ needs.prepare.outputs.concurrency_group }}
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
     outputs:
@@ -223,6 +246,10 @@ jobs:
       needs.prepare.outputs.proof_kind == 'CI' &&
       (needs.remote.result != 'success' || needs.remote.outputs.needs_local == 'true')
     runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ needs.prepare.outputs.concurrency_group }}
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
     outputs:
@@ -311,6 +338,7 @@ jobs:
           fi
           node trusted/scripts/agent-proof.mjs "${args[@]}"
       - name: Enforce terminal proof status
+        id: terminal
         if: always() && needs.prepare.outputs.sha != ''
         env:
           GH_TOKEN: ${{ github.token }}
@@ -335,3 +363,15 @@ jobs:
             -f context=agent-proof \
             -f description="$description" \
             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+      - name: Re-evaluate automerge after proof success
+        if: inputs.target-kind == 'pr' && steps.terminal.outputs.state == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS_SHA: ${{ needs.prepare.outputs.sha }}
+        run: >-
+          gh workflow run agent-automerge.yml
+          --repo "$GITHUB_REPOSITORY"
+          --ref main
+          -f pr-number="${{ inputs.target-number }}"
+          -f expected-head-sha="$STATUS_SHA"
