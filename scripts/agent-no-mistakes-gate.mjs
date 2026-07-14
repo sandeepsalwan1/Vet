@@ -22,7 +22,7 @@ import {
   upsertManagedComment,
 } from "./agent-lib.mjs";
 
-const ARTIFACT_VERSION = 3;
+const ARTIFACT_VERSION = 4;
 const NO_MISTAKES_COMMENT_MARKER = "<!-- agent-gate-no-mistakes:v1 -->";
 const STATUS_CONTEXT = "no-mistakes";
 const PASSING_OUTCOMES = new Set(["checks-passed", "passed"]);
@@ -355,7 +355,7 @@ function safeFinding(finding) {
 export function sanitizedGateArtifact(
   gate,
   expectedHead,
-  { unpublishedChanges = false } = {},
+  { unpublishedChanges = false, userApproved = false } = {},
 ) {
   let normalized = gate;
   const headMatches = validatedHeadMatches(gate, expectedHead);
@@ -381,6 +381,7 @@ export function sanitizedGateArtifact(
     expectedHead,
     validatedHead: headMatches ? expectedHead : "",
     runId: safePublicText(normalized?.run?.id, 80),
+    userApproved: Boolean(userApproved),
     failureStage: PUBLIC_FAILURE_STAGES.has(normalized?.failureStage)
       ? normalized.failureStage
       : "",
@@ -404,6 +405,9 @@ export function normalizeGateArtifact(value, expectedHead) {
   if (!ALLOWED_OUTCOMES.has(value.outcome)) {
     throw new AgentError("sanitized gate artifact outcome is invalid", 1);
   }
+  if (typeof value.userApproved !== "boolean") {
+    throw new AgentError("sanitized gate artifact approval is invalid", 1);
+  }
   if (value.failureStage && !PUBLIC_FAILURE_STAGES.has(value.failureStage)) {
     throw new AgentError("sanitized gate artifact failure stage is invalid", 1);
   }
@@ -424,6 +428,7 @@ export function normalizeGateArtifact(value, expectedHead) {
     expectedHead,
     validatedHead: value.validatedHead === expectedHead ? expectedHead : "",
     runId: safePublicText(value.runId, 80),
+    userApproved: value.userApproved,
     failureStage: PUBLIC_FAILURE_STAGES.has(value.failureStage)
       ? value.failureStage
       : "",
@@ -526,6 +531,7 @@ export function gateCommentBody({ artifact, branch, sha, runUrl }) {
 Status: ${artifact.status}
 Branch: ${branch}
 Head: ${sha}
+Gate mode: ${artifact.userApproved ? "user-approved unattended run for this exact head" : "interactive; ask-user decisions block"}
 ${runUrl ? `Actions run: ${runUrl}\n` : ""}
 Arbitrary finding descriptions, source intent, and process output are omitted. Known infrastructure summaries use an exact allowlist.
 
@@ -534,10 +540,11 @@ ${markdownJsonBlock({
   status: artifact.status,
   outcome: artifact.outcome,
   runId: artifact.runId || "",
+  userApproved: artifact.userApproved,
   failureStage: artifact.failureStage || "",
   checksRun: [
     "trusted offline typecheck, build, and scenarios baseline",
-    "no-mistakes axi run --skip rebase,test,push,pr,ci",
+    `no-mistakes axi run${artifact.userApproved ? " --yes" : ""} --skip rebase,test,push,pr,ci`,
   ],
   findings: artifact.findings,
   blocker: artifactBlocker(artifact),
@@ -545,6 +552,12 @@ ${markdownJsonBlock({
 }
 
 export function gateLabelChanges(config, artifact) {
+  if (artifact?.status === "passed" && artifact?.userApproved) {
+    return {
+      add: [config.labels.automerge],
+      remove: [config.labels.blocked],
+    };
+  }
   if (artifact?.outcome !== "ask-user") {
     return { add: [], remove: [] };
   }
@@ -637,16 +650,18 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     execute("no-mistakes", ["init"], { cwd: repoDir, env });
+    const axiArgs = [
+      "axi",
+      "run",
+      ...(dependencies.userApproved ? ["--yes"] : []),
+      "--intent",
+      intent,
+      "--skip",
+      "rebase,test,push,pr,ci",
+    ];
     const result = spawn(
       "no-mistakes",
-      [
-        "axi",
-        "run",
-        "--intent",
-        intent,
-        "--skip",
-        "rebase,test,push,pr,ci",
-      ],
+      axiArgs,
       {
         cwd: repoDir,
         env,
@@ -709,6 +724,7 @@ function setupFailureArtifact(expectedHead) {
     expectedHead,
     validatedHead: "",
     runId: "",
+    userApproved: false,
     failureStage: "",
     findings: [],
   };
@@ -802,7 +818,11 @@ async function main() {
     }
     const intent = readFileSync(resolve(args["intent-file"]), "utf8").trim();
     if (!intent) throw new AgentError("trusted gate intent file is empty", 1);
-    const run = runNoMistakesGate(intent, repoDir, { expectedHead });
+    const userApproved = Boolean(args["user-approved"]);
+    const run = runNoMistakesGate(intent, repoDir, {
+      expectedHead,
+      userApproved,
+    });
     const postRunHead = runCommand("git", ["rev-parse", "HEAD"], {
       cwd: repoDir,
     }).stdout.trim();
@@ -819,6 +839,7 @@ async function main() {
       run.status,
     );
     const artifact = sanitizedGateArtifact(parsed, expectedHead, {
+      userApproved,
       unpublishedChanges:
         postRunHead !== expectedHead ||
         postRunRef !== expectedRef ||

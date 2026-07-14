@@ -51,6 +51,18 @@ test("authenticated reviewer is read-only while trusted checks and source seals 
   assert.doesNotMatch(workflow, /- --ask-for-approval/);
   assert.match(workflow, /codex exec \\\n\s+--sandbox read-only/);
   assert.match(workflow, /NM_TEST_START_DAEMON: "1"/);
+  assert.match(
+    workflow,
+    /approval:\n\s+description: User approved unattended gate decisions for this exact head/,
+  );
+  assert.match(
+    workflow,
+    /if \[ "\$USER_APPROVED" = "true" \]; then\n\s+args\+=\(--user-approved\)/,
+  );
+  assert.match(
+    workflow,
+    /name: Validate approval authority\n\s+if: \$\{\{ inputs\.approval \}\}[\s\S]*?test "\$\{APPROVAL_ACTOR,,\}" = "\$\{REPOSITORY_OWNER,,\}"/,
+  );
   assert.match(workflow, /session_reuse: false/);
   assert.match(
     workflow,
@@ -158,6 +170,34 @@ help[1]:
   assert.equal(
     validatedHeadMatches({ run: { head: "ABCDEF12" } }, HEAD),
     false,
+  );
+});
+
+test("explicit exact-head approval enables unattended gates without changing the default", () => {
+  const invocations = [];
+  const passed = {
+    stdout: "run:\n  id: approved-run\n  head: abcdef12\noutcome: passed\n",
+    stderr: "",
+    status: 0,
+  };
+  const run = (userApproved) =>
+    runNoMistakesGate("Complete the approved change", "/repo", {
+      userApproved,
+      runCommand: () => ({ status: 0 }),
+      spawnSync: (command, args) => {
+        invocations.push([command, args]);
+        return passed;
+      },
+    });
+
+  run(false);
+  run(true);
+
+  assert.equal(invocations[0][1].includes("--yes"), false);
+  assert.equal(invocations[1][1].includes("--yes"), true);
+  assert.ok(
+    invocations[1][1].indexOf("--yes") <
+      invocations[1][1].indexOf("--intent"),
   );
 });
 
@@ -309,6 +349,7 @@ gate:
 
   assert.equal(artifact.status, "blocked");
   assert.equal(artifact.outcome, "ask-user");
+  assert.equal(artifact.userApproved, false);
   assert.deepEqual(artifact.findings, [
     {
       id: "r1",
@@ -354,6 +395,30 @@ test("known infrastructure findings expose only allowlisted summaries", () => {
   );
   assert.doesNotMatch(comment, new RegExp(secret));
   assert.doesNotMatch(comment, /Private detail/);
+});
+
+test("sanitized output records exact-head user approval", () => {
+  const artifact = sanitizedGateArtifact(
+    parseAxiResult(
+      "run:\n  id: approved-run\n  head: abcdef12\noutcome: passed\n",
+      0,
+    ),
+    HEAD,
+    { userApproved: true },
+  );
+  const normalized = normalizeGateArtifact(artifact, HEAD);
+  const comment = gateCommentBody({
+    artifact: normalized,
+    branch: "agent/issue-42",
+    sha: HEAD,
+  });
+
+  assert.equal(normalized.userApproved, true);
+  assert.match(
+    comment,
+    /Gate mode: user-approved unattended run for this exact head/,
+  );
+  assert.match(comment, /no-mistakes axi run --yes --skip/);
 });
 
 test("unknown decision gate fails closed", () => {
@@ -595,7 +660,7 @@ outcome: failed`,
   );
 });
 
-test("only ask-user outcomes change no-mistakes policy labels", () => {
+test("only ask-user outcomes or passing approved reruns change policy labels", () => {
   const labelConfig = {
     labels: { blocked: "agent:blocked", automerge: "agent:automerge" },
   };
@@ -603,8 +668,16 @@ test("only ask-user outcomes change no-mistakes policy labels", () => {
     gateLabelChanges(labelConfig, { status: "blocked", outcome: "ask-user" }),
     { add: ["agent:blocked"], remove: ["agent:automerge"] },
   );
+  assert.deepEqual(
+    gateLabelChanges(labelConfig, {
+      status: "passed",
+      outcome: "passed",
+      userApproved: true,
+    }),
+    { add: ["agent:automerge"], remove: ["agent:blocked"] },
+  );
   for (const artifact of [
-    { status: "passed", outcome: "passed" },
+    { status: "passed", outcome: "passed", userApproved: false },
     { status: "failed", outcome: "failed" },
     { status: "failed", outcome: "cancelled" },
     { status: "failed", outcome: "setup-failed" },
