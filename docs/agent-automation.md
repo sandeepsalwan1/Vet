@@ -45,6 +45,7 @@ Trusted recovery dispatches main-defined workflows with an expected head SHA, an
 - A missing provider, artifact, or lease blocks required visual proof; it does not fake success.
 - no-mistakes and proof statuses must reflect real execution.
 - The credentialless no-mistakes gate never rebases or publishes changes; deterministic scenario, API, and CLI checks may provide direct non-visual evidence when the trusted request calls for it.
+- A credential-free step runs the trusted typecheck, build, and scenario baseline inside a pinned networkless container before no-mistakes model auth; its Codex process stays read-only and unpublished source changes fail closed.
 - Browser, visual, and live-provider evidence remains the Agent Proof workflow's responsibility and is required only by trusted issue or triage policy.
 
 ## Gates

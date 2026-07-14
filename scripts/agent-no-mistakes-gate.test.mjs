@@ -28,7 +28,7 @@ const config = {
 };
 const safeFiles = [{ filename: "apps/internal/src/app/page.tsx" }];
 
-test("authenticated reviewer is read-only and all source changes fail closed", () => {
+test("authenticated reviewer is read-only while trusted checks and source seals remain enforced", () => {
   const workflow = readFileSync(new URL("../.github/workflows/agent-no-mistakes.yml", import.meta.url), "utf8");
   const automergeWorkflow = readFileSync(new URL("../.github/workflows/agent-automerge.yml", import.meta.url), "utf8");
   const repoConfig = readFileSync(new URL("../.no-mistakes.yaml", import.meta.url), "utf8");
@@ -40,11 +40,15 @@ test("authenticated reviewer is read-only and all source changes fail closed", (
   assert.match(workflow, /codex exec \\\n\s+--sandbox read-only/);
   assert.match(workflow, /NM_TEST_START_DAEMON: "1"/);
   assert.match(workflow, /session_reuse: false/);
-  assert.match(gate, /"--skip",\s+"rebase,push,pr,ci"/);
+  assert.match(gate, /"--skip",\s+"rebase,test,push,pr,ci"/);
   assert.doesNotMatch(workflow, /git config --global user\./);
   assert.match(workflow, /if: \$\{\{ always\(\) \}\}\n\s+continue-on-error: true\n[\s\S]*?run: no-mistakes daemon stop --force/);
   assert.doesNotMatch(workflow, /- workspace-write/);
-  assert.doesNotMatch(workflow, /tar -C \/source/);
+  const baseline = workflow.indexOf("- name: Run trusted offline test baseline before agent auth");
+  const modelAuth = workflow.indexOf("CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}");
+  assert.ok(baseline > 0 && modelAuth > baseline);
+  assert.match(workflow, /npm run typecheck && npm run build && npm run test:scenarios/);
+  assert.match(workflow, /tar -C \/source --exclude=\.\/node_modules --exclude=\.\/\.git/);
   assert.match(workflow, /npm rebuild --offline/);
   assert.match(workflow, /npm_config_nodedir=\/usr\/local/);
   assert.match(workflow, /--user "\$\(id -u\):\$\(id -g\)"/);

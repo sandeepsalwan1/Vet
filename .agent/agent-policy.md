@@ -51,6 +51,7 @@ Automerge is forbidden for high-priority or high-risk work even if all checks pa
 
 - Hosted no-mistakes runs only for same-repository `agent/issue-*` branches with trusted implementation metadata and managed triage.
 - Hosted no-mistakes validates an immutable exact head and skips its private rebase, push, PR, and CI mutation stages.
+- A separate credential-free step runs the trusted offline test baseline before model auth; no-mistakes Codex stays read-only, and unpublished source changes fail the gate.
 - Configured deterministic scenario, API, and CLI checks count as direct non-visual evidence when they exercise the trusted request.
 - Repository commands run without normal credential inheritance, but the shared runner identity is defense in depth rather than hostile-code isolation.
 - `ask-user`, malformed output, setup failure, or a stale validated head blocks automerge.

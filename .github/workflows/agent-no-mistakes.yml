@@ -228,9 +228,29 @@ jobs:
               - -c
               - 'shell_environment_policy.ignore_default_excludes=false'
           EOF
-      # This step has the model credential but no GitHub token. Repository
-      # commands run in the offline containers configured by trusted main.
-      - name: Run no-mistakes without mutation or provider steps
+      - name: Run trusted offline test baseline before agent auth
+        working-directory: candidate
+        run: |
+          docker run --rm --pull never \
+            --network none \
+            --read-only \
+            --cap-drop ALL \
+            --pids-limit 512 \
+            --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,nosuid,nodev,size=1073741824 \
+            --mount "type=bind,src=$PWD,dst=/source,readonly" \
+            --mount "type=bind,src=$PWD/node_modules,dst=/workspace/node_modules,readonly" \
+            --mount type=volume,dst=/workspace \
+            --workdir /workspace \
+            --env HOME=/tmp/home \
+            --env npm_config_cache=/tmp/npm-cache \
+            "$DOCKER_IMAGE" sh -lc \
+            'mkdir -p "$HOME" && tar -C /source --exclude=./node_modules --exclude=./.git -cf - . | tar --no-same-owner -xf - -C /workspace && npm run typecheck && npm run build && npm run test:scenarios'
+          git diff --exit-code
+          git diff --cached --exit-code
+      # Codex remains read-only and receives no GitHub token. Trusted baseline
+      # and lint commands run separately in pinned offline containers.
+      - name: Run isolated no-mistakes without publish credentials
         id: gate
         working-directory: candidate
         env:
