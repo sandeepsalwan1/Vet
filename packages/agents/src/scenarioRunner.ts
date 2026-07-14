@@ -165,7 +165,7 @@ const scenarios: Scenario[] = [
       petName: "Buddy",
       message: "Buddy is vomiting blood and very lethargic."
     }),
-    expect: all(expectIntent("sick_pet"), expectNoTask, expectResult("medicalAdviceGiven", false))
+    expect: all(expectIntent("sick_pet"), expectNoTask, expectResult("medicalAdviceGiven", false), expectResult("escalated", true))
   },
   {
     name: "records transfer",
