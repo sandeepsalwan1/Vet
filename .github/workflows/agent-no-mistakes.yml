@@ -12,6 +12,11 @@ on:
       intent:
         required: true
         type: string
+      approval:
+        description: User approved unattended gate decisions for this exact head
+        required: false
+        type: boolean
+        default: false
     secrets:
       OPENAI_API_KEY:
         required: true
@@ -27,6 +32,11 @@ on:
       intent:
         required: true
         type: string
+      approval:
+        description: User approved unattended gate decisions for this exact head
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -51,6 +61,14 @@ jobs:
       head_ref: ${{ steps.prepare.outputs.head_ref }}
       head_sha: ${{ steps.prepare.outputs.head_sha }}
     steps:
+      - name: Validate approval authority
+        if: ${{ inputs.approval }}
+        env:
+          APPROVAL_ACTOR: ${{ github.actor }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          test "${APPROVAL_ACTOR,,}" = "${REPOSITORY_OWNER,,}"
       - name: Mark requested PR head pending
         id: pending
         env:
@@ -271,20 +289,26 @@ jobs:
           NM_HOME: ${{ runner.temp }}/no-mistakes
           NM_TEST_START_DAEMON: "1"
           NO_MISTAKES_TELEMETRY: "0"
+          USER_APPROVED: ${{ inputs.approval }}
           VET_GATE_DEPS: ${{ github.workspace }}/candidate
-        run: >-
-          env -u GH_TOKEN -u GITHUB_TOKEN -u AGENT_PAT -u OPENAI_API_KEY
-          -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN
-          -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_CACHE_URL
-          -u ACTIONS_RESULTS_URL
-          node ../trusted/scripts/agent-no-mistakes-gate.mjs
-          --run-gate
-          --expected-head "$HEAD_SHA"
-          --expected-ref "$HEAD_REF"
-          --intent-file "$RUNNER_TEMP/no-mistakes-intent"
-          --result-file "$RUNNER_TEMP/no-mistakes-result/result.json"
-          --repo-dir "$PWD"
-          --json
+        run: |
+          args=(
+            --run-gate
+            --expected-head "$HEAD_SHA"
+            --expected-ref "$HEAD_REF"
+            --intent-file "$RUNNER_TEMP/no-mistakes-intent"
+            --result-file "$RUNNER_TEMP/no-mistakes-result/result.json"
+            --repo-dir "$PWD"
+            --json
+          )
+          if [ "$USER_APPROVED" = "true" ]; then
+            args+=(--user-approved)
+          fi
+          env -u GH_TOKEN -u GITHUB_TOKEN -u AGENT_PAT -u OPENAI_API_KEY \
+            -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_CACHE_URL \
+            -u ACTIONS_RESULTS_URL \
+            node ../trusted/scripts/agent-no-mistakes-gate.mjs "${args[@]}"
       - name: Upload sanitized gate result
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
