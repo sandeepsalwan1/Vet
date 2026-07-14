@@ -312,6 +312,15 @@ export function isRetryableTechnicalFailure(gate, expectedHead) {
   );
 }
 
+export function isRetryableInvalidOutput(gate) {
+  return (
+    gate?.status === "failed" &&
+    gate?.outcome === "invalid-output" &&
+    Object.keys(gate?.run ?? {}).length === 0 &&
+    gate?.findings?.length === 0
+  );
+}
+
 export function validatedHeadMatches(result, sha) {
   const expected = String(sha ?? "");
   const validated = String(result?.run?.head ?? "");
@@ -662,6 +671,7 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
       attempt === 1 &&
       (isRetryableReviewEnvironmentBlock(parsed) ||
         isRetryableTestEnvironmentBlock(parsed) ||
+        isRetryableInvalidOutput(parsed) ||
         isRetryableTechnicalFailure(parsed, dependencies.expectedHead))
     ) {
       execute("no-mistakes", ["daemon", "stop", "--force"], {
