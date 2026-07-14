@@ -41,6 +41,7 @@ jobs:
         with:
           name: agent-proposals
           path: .agent-output/proposals.json
+          include-hidden-files: true
           if-no-files-found: error
 
   apply:

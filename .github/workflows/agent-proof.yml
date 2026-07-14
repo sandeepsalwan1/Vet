@@ -209,6 +209,7 @@ jobs:
         with:
           name: agent-proof-${{ inputs.target-kind }}-${{ inputs.target-number }}
           path: trusted/.agent-output/*
+          include-hidden-files: true
           if-no-files-found: ignore
 
   local:

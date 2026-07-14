@@ -52,6 +52,7 @@ jobs:
         with:
           name: agent-triage-context-${{ inputs.issue-number }}
           path: .agent-output/*
+          include-hidden-files: true
           if-no-files-found: error
 
   generate:
@@ -85,6 +86,7 @@ jobs:
         with:
           name: agent-triage-result-${{ inputs.issue-number }}
           path: .agent-output/triage.json
+          include-hidden-files: true
           if-no-files-found: error
 
   apply:

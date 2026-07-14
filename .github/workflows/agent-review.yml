@@ -74,6 +74,7 @@ jobs:
           path: |
             .agent-output/review-prompt.md
             .agent-output/review.schema.json
+          include-hidden-files: true
           if-no-files-found: error
 
   generate-review:
@@ -110,6 +111,7 @@ jobs:
         with:
           name: agent-review-result-${{ inputs.pr-number }}
           path: .agent-output/review.json
+          include-hidden-files: true
           if-no-files-found: error
 
   apply-review:
