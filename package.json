@@ -10,8 +10,6 @@
     "dev": "npm run dev:internal",
     "dev:internal": "node scripts/with-root-env.mjs npm --workspace @central-vet/internal run dev -- --port 3000",
     "build": "npm run build --workspace @central-vet/internal",
-    "docs:list": "node scripts/docs-list.mjs",
-    "docs:check": "node scripts/docs-list.mjs --check",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "lint:dead": "npx -y knip --treat-config-hints-as-errors",
@@ -34,7 +32,6 @@
   "dependencies": {
     "@next/env": "^16.0.0",
     "e2b": "^2.27.0",
-    "guardrail": "^0.0.1",
     "postgres": "^3.4.7"
   },
   "devDependencies": {
