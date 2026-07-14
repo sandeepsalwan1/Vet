@@ -27,6 +27,8 @@ jobs:
     name: prepare triage
     runs-on: ubuntu-latest
     outputs:
+      backend-effort: ${{ steps.backend.outputs.effort }}
+      backend-model: ${{ steps.backend.outputs.model }}
       concurrency-group: ${{ steps.concurrency.outputs.group }}
     permissions:
       contents: read
@@ -39,6 +41,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Select triage model
+        id: backend
+        run: node scripts/agent-worker.mjs --validate-backend --lane triage --json
       - name: Allocate triage capacity
         id: concurrency
         env:
@@ -87,7 +92,8 @@ jobs:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           prompt-file: .agent-output/triage-prompt.md
           sandbox: read-only
-          effort: low
+          model: ${{ needs.prepare.outputs.backend-model }}
+          effort: ${{ needs.prepare.outputs.backend-effort }}
           allow-users: ${{ github.repository_owner }}
           allow-bots: true
           codex-version: "0.144.1"

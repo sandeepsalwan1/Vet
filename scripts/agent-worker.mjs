@@ -18,21 +18,41 @@ import {
 const CODEX_SANDBOXES = new Set(["read-only", "workspace-write", "danger-full-access"]);
 const CODEX_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);
 const CODEX_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
+const CODEX_LANES = Object.freeze({
+  implement: Object.freeze({ model: "model", effort: "effort" }),
+  "no-mistakes": Object.freeze({ model: "noMistakesModel", effort: "noMistakesEffort" }),
+  proposer: Object.freeze({ model: "proposerModel", effort: "proposerEffort" }),
+  review: Object.freeze({ model: "reviewModel", effort: "reviewEffort" }),
+  triage: Object.freeze({ model: "triageModel", effort: "triageEffort" })
+});
 
 function nonemptyString(value, label) {
   if (typeof value !== "string" || !value.trim()) throw new AgentError(`invalid ${label}`, 2);
   return value;
 }
 
+export function resolveCodexSettings(config, requestedLane) {
+  const lane = requestedLane === undefined ? "implement" : nonemptyString(requestedLane, "Codex lane");
+  const keys = CODEX_LANES[lane];
+  if (!keys) throw new AgentError(`unsupported Codex lane: ${lane}`, 2);
+  return {
+    lane,
+    model: config.backend[keys.model] ?? config.backend.model ?? "",
+    effort: config.backend[keys.effort] ?? config.backend.effort ?? "",
+    sandbox: config.backend.sandbox ?? ""
+  };
+}
+
 function codexArgs(args, config) {
   const promptFile = args["prompt-file"];
   if (!promptFile) throw new AgentError("missing --prompt-file", 2);
   const outputFile = args["output-file"];
-  const sandbox = args.sandbox ?? config.backend.sandbox;
+  const settings = resolveCodexSettings(config, args.lane);
+  const sandbox = args.sandbox ?? settings.sandbox;
   if (!CODEX_SANDBOXES.has(sandbox)) throw new AgentError(`unsupported Codex sandbox: ${sandbox}`, 2);
   const command = ["exec", "--sandbox", sandbox];
-  const model = args.model ?? config.backend.model;
-  const effort = args.effort ?? config.backend.effort;
+  const model = args.model ?? settings.model;
+  const effort = args.effort ?? settings.effort;
   if (model) {
     const value = nonemptyString(model, "Codex model");
     if (!CODEX_MODEL.test(value)) throw new AgentError(`unsupported Codex model: ${value}`, 2);
@@ -117,6 +137,7 @@ export async function main(argv = process.argv.slice(2)) {
   const dryRun = Boolean(args["dry-run"]);
   const backend = resolveWorkerBackend(config, args.backend);
   if (args["validate-backend"]) {
+    const settings = resolveCodexSettings(config, args.lane);
     createWorkerInvocation(
       { ...args, "prompt-file": ".agent/prompts/implement.md" },
       config,
@@ -124,11 +145,20 @@ export async function main(argv = process.argv.slice(2)) {
     );
     setGitHubOutput({
       backend: backend.name,
-      effort: config.backend.effort ?? "",
-      model: config.backend.model ?? "",
-      sandbox: config.backend.sandbox ?? ""
+      effort: settings.effort,
+      lane: settings.lane,
+      model: settings.model,
+      sandbox: settings.sandbox
     });
-    finish({ ok: true, message: `configured worker backend: ${backend.name}`, backend: backend.name }, Boolean(args.json));
+    finish(
+      {
+        ok: true,
+        message: `configured ${settings.lane} worker backend: ${backend.name}`,
+        backend: backend.name,
+        ...settings
+      },
+      Boolean(args.json)
+    );
     return;
   }
 

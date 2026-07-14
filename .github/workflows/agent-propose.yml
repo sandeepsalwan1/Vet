@@ -15,6 +15,8 @@ jobs:
     name: prepare proposer
     runs-on: ubuntu-latest
     outputs:
+      backend-effort: ${{ steps.backend.outputs.effort }}
+      backend-model: ${{ steps.backend.outputs.model }}
       group: ${{ steps.concurrency.outputs.group }}
       head-sha: ${{ steps.context.outputs.head_sha }}
     permissions:
@@ -29,6 +31,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Select proposer model
+        id: backend
+        run: node scripts/agent-worker.mjs --validate-backend --lane proposer --json
       - name: Allocate proposer capacity
         id: concurrency
         run: node scripts/agent-concurrency-slot.mjs --lane proposer --key proposer --json
@@ -88,7 +93,8 @@ jobs:
           codex-version: "0.144.1"
           prompt-file: .agent/prompts/propose.md
           sandbox: read-only
-          effort: low
+          model: ${{ needs.allocate-concurrency.outputs.backend-model }}
+          effort: ${{ needs.allocate-concurrency.outputs.backend-effort }}
           allow-users: ${{ github.repository_owner }}
           allow-bots: true
           codex-args: '["--output-schema",".agent/schemas/proposals.schema.json"]'

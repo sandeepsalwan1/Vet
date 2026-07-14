@@ -72,6 +72,7 @@ test("proposer captures bounded health before model auth and pins that main head
 
   assert.match(prepare, /permissions:\n      actions: read\n      checks: read\n      contents: read/);
   assert.match(prepare, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(prepare, /--validate-backend --lane proposer --json/);
   assert.match(prepare, /agent-proposer-context\.mjs/);
   assert.doesNotMatch(prepare, /OPENAI_API_KEY|CODEX_API_KEY|openai\/codex-action/);
   assert.match(generate, /ref: \$\{\{ needs\.allocate-concurrency\.outputs\.head-sha \}\}/);
@@ -80,6 +81,8 @@ test("proposer captures bounded health before model auth and pins that main head
   assert.match(generate, /GH_TOKEN: ""/);
   assert.match(generate, /GITHUB_TOKEN: ""/);
   assert.match(generate, /openai-api-key: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
+  assert.match(generate, /model: \$\{\{ needs\.allocate-concurrency\.outputs\.backend-model \}\}/);
+  assert.match(generate, /effort: \$\{\{ needs\.allocate-concurrency\.outputs\.backend-effort \}\}/);
 });
 
 test("proposer prompt treats bounded health context as untrusted data", () => {

@@ -363,7 +363,7 @@ test("implementation workflow isolates candidate checks from credentials, artifa
   assert.match(workflow, /codex-version: "0\.144\.1"/);
   assert.match(prepare, /concurrency-group: \$\{\{ steps\.concurrency\.outputs\.group \}\}/);
   assert.match(prepare, /agent-concurrency-slot\.mjs --lane implement --key "\$CONCURRENCY_KEY" --json/);
-  assert.match(prepare, /id: backend\n\s+run: node scripts\/agent-worker\.mjs --validate-backend --json/);
+  assert.match(prepare, /id: backend\n\s+run: node scripts\/agent-worker\.mjs --validate-backend --lane implement --json/);
   for (const generator of [remote, fallback]) {
     assert.match(generator, /concurrency:\n      group: \$\{\{ needs\.prepare-prompt\.outputs\.concurrency-group \}\}/);
     assert.match(generator, /cancel-in-progress: false/);

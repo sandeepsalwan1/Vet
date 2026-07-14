@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { loadConfig } from "./agent-lib.mjs";
-import { createWorkerInvocation, resolveWorkerBackend } from "./agent-worker.mjs";
+import { createWorkerInvocation, resolveCodexSettings, resolveWorkerBackend } from "./agent-worker.mjs";
 
 function config(overrides = {}) {
   return {
@@ -32,6 +32,45 @@ test("repository config enables only implemented worker backends", () => {
 
   assert.deepEqual(repositoryConfig.backend.allowed, ["codex"]);
   assert.equal(resolveWorkerBackend(repositoryConfig).name, "codex");
+  assert.deepEqual(
+    [
+      resolveCodexSettings(repositoryConfig, "proposer"),
+      resolveCodexSettings(repositoryConfig, "triage"),
+      resolveCodexSettings(repositoryConfig, "implement"),
+      resolveCodexSettings(repositoryConfig, "review"),
+      resolveCodexSettings(repositoryConfig, "no-mistakes")
+    ].map(({ lane, model, effort }) => ({ lane, model, effort })),
+    [
+      { lane: "proposer", model: "gpt-5.4-nano", effort: "low" },
+      { lane: "triage", model: "gpt-5.4-nano", effort: "low" },
+      { lane: "implement", model: "gpt-5.4-mini", effort: "low" },
+      { lane: "review", model: "gpt-5.4-mini", effort: "low" },
+      { lane: "no-mistakes", model: "gpt-5.4-mini", effort: "low" }
+    ]
+  );
+});
+
+test("Codex lanes select configured overrides and otherwise inherit implementation defaults", () => {
+  const laneConfig = config({ proposerModel: "gpt-nano", proposerEffort: "low" });
+  const invocation = createWorkerInvocation({ "prompt-file": "prompt.md", lane: "proposer" }, laneConfig, {});
+
+  assert.deepEqual(resolveCodexSettings(laneConfig, "review"), {
+    lane: "review",
+    model: "gpt-test",
+    effort: "medium",
+    sandbox: "workspace-write"
+  });
+  assert.deepEqual(invocation.args.slice(0, 8), [
+    "exec",
+    "--sandbox",
+    "workspace-write",
+    "--model",
+    "gpt-nano",
+    "--config",
+    'model_reasoning_effort="low"',
+    "-"
+  ]);
+  assert.throws(() => resolveCodexSettings(laneConfig, "unknown"), /unsupported Codex lane: unknown/);
 });
 
 test("worker rejects defaults and overrides outside the backend allowlist", () => {

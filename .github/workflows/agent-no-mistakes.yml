@@ -45,6 +45,8 @@ jobs:
       issues: read
       statuses: write
     outputs:
+      backend_effort: ${{ steps.backend.outputs.effort }}
+      backend_model: ${{ steps.backend.outputs.model }}
       concurrency_group: ${{ steps.concurrency.outputs.group }}
       head_ref: ${{ steps.prepare.outputs.head_ref }}
       head_sha: ${{ steps.prepare.outputs.head_sha }}
@@ -81,6 +83,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Select no-mistakes model
+        id: backend
+        run: node scripts/agent-worker.mjs --validate-backend --lane no-mistakes --json
       - name: Allocate review capacity
         id: concurrency
         env:
@@ -219,6 +224,10 @@ jobs:
             review: 0
           agent_args_override:
             codex:
+              - --model
+              - ${{ needs.prepare.outputs.backend_model }}
+              - -c
+              - 'model_reasoning_effort="${{ needs.prepare.outputs.backend_effort }}"'
               - --sandbox
               - read-only
               - -c

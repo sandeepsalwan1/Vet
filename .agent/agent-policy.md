@@ -45,6 +45,7 @@ Automerge is forbidden for high-priority or high-risk work even if all checks pa
 - GitHub-hosted Actions is the fallback for non-visual work when provider auth is missing.
 - The raw `crabbox` binary is not the issue brain; the worker script plus configured backend is.
 - Codex/OpenAI is one backend choice, not the control plane.
+- Default each lane to the cheapest model and reasoning level that reliably satisfies its contract; raise either only after measured failure.
 - Sandcastle is optional inside a worker when TypeScript orchestration would simplify planner/reviewer flows.
 
 ## Gate Trust
