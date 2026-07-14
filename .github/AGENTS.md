@@ -9,3 +9,4 @@ GitHub Actions workflows.
 - Do not expose OpenAI keys as job-level env vars. Pass them only to `openai/codex-action`.
 - Keep write-token jobs separate from Codex/API-key jobs.
 - Do not fake no-mistakes success; automerge must require a real status.
+- After a trusted agent merge, explicitly dispatch baseline CI and CodeQL against the immutable merge commit.

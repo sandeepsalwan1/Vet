@@ -1,4 +1,5 @@
 name: CodeQL
+run-name: CodeQL ${{ inputs.candidate-sha || github.sha }}
 
 on:
   pull_request:

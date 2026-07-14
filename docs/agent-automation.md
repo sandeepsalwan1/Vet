@@ -74,7 +74,7 @@ Triage reads `VISION.md`, repository policy, current issue state, and architectu
 An aligned low-risk result adds `agent:implement` and `agent:automerge`, then dispatches implementation automatically.
 Implementation creates `agent/issue-<number>-<slug>`, validates the patch, opens or updates a draft PR, starts exact-head CI, and starts review.
 Review can apply a safe patch, requests proof when needed, publishes `agent-review`, then starts no-mistakes.
-Automerge waits for every configured gate, updates a stale branch from `main`, reruns head-bound gates, merges, closes the source issue, and removes workflow labels.
+Automerge waits for every configured gate, updates a stale branch from `main`, reruns head-bound gates, merges, dispatches baseline CI and CodeQL for the exact merge commit, closes the source issue, and removes workflow labels.
 
 For an existing issue, start the same path with:
 
@@ -199,6 +199,7 @@ This explicit dispatch is required because GitHub suppresses recursive workflow 
 Merge-commit CI does not redispatch automerge.
 If either dispatch is rejected, the automerge run fails visibly even though the already-completed merge cannot be rolled back.
 Label cleanup and linked-issue closure still run after a dispatch failure.
+Rerunning automerge for the merged PR identifies exact-SHA workflow runs and dispatches only missing checks.
 The active agent-job cap is eight, the hard configurable ceiling is fifteen, and each lane has its own lower cap.
 `.agent/config.json` is the machine-readable source for gate names, lane-specific model settings, backend selection, and capacity; `.agent/agent-policy.md` owns risk and approval meaning.
 
@@ -211,12 +212,15 @@ Mutating automation CLIs support `--dry-run`; structured workflow calls use `--j
     node scripts/agent-worker.mjs --validate-backend --lane implement --json
     node scripts/agent-concurrency-slot.mjs --lane implement --key 42 --json
 
-Backfill missing post-merge checks for a merged PR:
+Inspect and reconcile post-merge checks for a merged PR:
 
     REPO=sandeepsalwan1/Vet
     PR=123 # merged PR number
     MERGE_SHA="$(gh api "repos/$REPO/pulls/$PR" --jq .merge_commit_sha)"
-    gh workflow run ci.yml --repo "$REPO" --ref main -f main-sha="$MERGE_SHA"
-    gh workflow run codeql.yml --repo "$REPO" --ref main -f candidate-sha="$MERGE_SHA" -f candidate-ref=refs/heads/main
+    gh run list --repo "$REPO" --workflow ci.yml --event workflow_dispatch --json displayTitle,url --jq ".[] | select(.displayTitle == \"CI $MERGE_SHA\")"
+    gh run list --repo "$REPO" --workflow codeql.yml --event workflow_dispatch --json displayTitle,url --jq ".[] | select(.displayTitle == \"CodeQL $MERGE_SHA\")"
+    gh workflow run agent-automerge.yml --repo "$REPO" --ref main -f pr-number="$PR"
+
+The automerge recovery run revalidates the merged pull request identity, dispatches only missing exact-SHA checks, and retries label and issue cleanup.
 
 GitHub comments use managed markers and temporary body files. Never interpolate untrusted issue text into a shell command.

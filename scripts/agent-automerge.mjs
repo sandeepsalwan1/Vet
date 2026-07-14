@@ -174,6 +174,15 @@ export function postMergeDispatchArgs(config, mergeSha) {
   ];
 }
 
+export function postMergeRunName(workflow, mergeSha) {
+  if (!/^[a-f0-9]{40}$/.test(String(mergeSha ?? ""))) {
+    throw new AgentError("post-merge commit SHA is invalid", 1);
+  }
+  if (workflow === "ci.yml") return `CI ${mergeSha}`;
+  if (workflow === "codeql.yml") return `CodeQL ${mergeSha}`;
+  throw new AgentError(`unsupported post-merge workflow ${workflow}`, 1);
+}
+
 export function dispatchPostMergeChecks({ config, mergeSha }, dependencies = {}) {
   const execute = dependencies.runCommand ?? runCommand;
   const dispatches = postMergeDispatchArgs(config, mergeSha);
@@ -189,6 +198,63 @@ export function dispatchPostMergeChecks({ config, mergeSha }, dependencies = {})
     ok: dispatchErrors.length === 0,
     mergeSha,
     dispatches,
+    dispatchErrors
+  };
+}
+
+export function reconcilePostMergeChecks(
+  { config, mergeSha, dryRun = false },
+  dependencies = {}
+) {
+  const execute = dependencies.runCommand ?? runCommand;
+  const getWorkflowRuns =
+    dependencies.getWorkflowRuns ??
+    ((workflow) => {
+      const pages = ghApiJson(
+        `repos/${repoSlug(config)}/actions/workflows/${workflow}/runs?event=workflow_dispatch&branch=${encodeURIComponent(config.repo.defaultBranch)}&per_page=100`,
+        { paginate: true }
+      );
+      return (Array.isArray(pages) ? pages : [pages]).flatMap((page) => page?.workflow_runs ?? []);
+    });
+  const dispatches = postMergeDispatchArgs(config, mergeSha);
+  const missing = [];
+  const existing = [];
+  const dispatchErrors = [];
+
+  for (const args of dispatches) {
+    const workflow = args[2];
+    const runName = postMergeRunName(workflow, mergeSha);
+    try {
+      const runs = getWorkflowRuns(workflow);
+      if (
+        Array.isArray(runs) &&
+        runs.some((run) => run?.event === "workflow_dispatch" && run?.display_title === runName)
+      ) {
+        existing.push(workflow);
+      } else {
+        missing.push(args);
+      }
+    } catch (error) {
+      dispatchErrors.push(`${workflow}: ${error?.message ?? String(error)}`);
+    }
+  }
+
+  if (!dryRun && dispatchErrors.length === 0) {
+    for (const args of missing) {
+      try {
+        execute("gh", args);
+      } catch (error) {
+        dispatchErrors.push(error?.message ?? String(error));
+      }
+    }
+  }
+  return {
+    ok: dispatchErrors.length === 0,
+    dryRun,
+    mergeSha,
+    existing,
+    dispatches: dryRun ? [] : missing,
+    missing,
     dispatchErrors
   };
 }
@@ -544,6 +610,7 @@ export function assertTrustedMergedAgentPull(pull, config, { files, sourceIssue,
     String(pull?.user?.login ?? "").toLowerCase() !== "github-actions[bot]" ||
     String(pull?.merged_by?.login ?? "").toLowerCase() !== "github-actions[bot]" ||
     !/^[a-f0-9]{40}$/.test(String(pull?.head?.sha ?? "")) ||
+    !/^[a-f0-9]{40}$/.test(String(pull?.merge_commit_sha ?? "")) ||
     !branchMatch ||
     Number(branchMatch[1]) !== metadata.sourceIssue ||
     metadata.automergeEligible !== true ||
@@ -828,6 +895,37 @@ export function settleAutomerge(
   };
 }
 
+export function reconcileMergedAgentPull(
+  { config, prNumber, pull, files, sourceIssue, closingReferences, dryRun = false },
+  dependencies = {}
+) {
+  const metadata = assertTrustedMergedAgentPull(pull, config, {
+    files,
+    sourceIssue,
+    closingReferences
+  });
+  const postMerge = reconcilePostMergeChecks(
+    { config, mergeSha: pull.merge_commit_sha, dryRun },
+    dependencies
+  );
+  const cleanup = closeAgentLoop(
+    { config, prNumber, decision: { metadata }, dryRun },
+    { runCommand: dependencies.runCommand, getIssue: dependencies.getIssue }
+  );
+  const ok = postMerge.ok && cleanup.ok;
+  return {
+    code: ok ? 0 : 1,
+    result: {
+      ok,
+      message: ok
+        ? `${dryRun ? "would reconcile" : "reconciled"} merged PR #${prNumber}`
+        : `merged PR #${prNumber} still has reconciliation failures`,
+      postMerge,
+      cleanup
+    }
+  };
+}
+
 async function main() {
   const args = parseArgs();
   const config = loadConfig();
@@ -859,19 +957,16 @@ async function main() {
     const sourceIssue = ghApiJson(
       `repos/${config.repo.owner}/${config.repo.name}/issues/${metadata.sourceIssue}`
     );
-    assertTrustedMergedAgentPull(pull, config, { files, sourceIssue, closingReferences });
-    const cleanup = closeAgentLoop({ config, prNumber, decision: { metadata }, dryRun });
-    finish(
-      {
-        ok: cleanup.ok,
-        message: cleanup.ok
-          ? `closed agent loop for merged PR #${prNumber}`
-          : `merged PR #${prNumber} still has cleanup failures`,
-        cleanup
-      },
-      Boolean(args.json),
-      cleanup.ok ? 0 : 1
-    );
+    const outcome = reconcileMergedAgentPull({
+      config,
+      prNumber,
+      pull,
+      files,
+      sourceIssue,
+      closingReferences,
+      dryRun
+    });
+    finish(outcome.result, Boolean(args.json), outcome.code);
     return;
   }
   const pullIssue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${prNumber}`);

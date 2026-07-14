@@ -15,7 +15,10 @@ import {
   isStaleBase,
   nativeMergeArgs,
   postMergeDispatchArgs,
+  postMergeRunName,
   recoverStaleBase,
+  reconcileMergedAgentPull,
+  reconcilePostMergeChecks,
   recoveryDispatchArgs,
   removeLabelArgs,
   resolveBaseState,
@@ -274,6 +277,72 @@ test("post-merge checks are dispatched against the exact merge commit", () => {
   assert.throws(() => postMergeDispatchArgs(config, "not-a-sha"), /commit SHA is invalid/);
 });
 
+test("merged pull recovery dispatches only missing exact-SHA checks", () => {
+  const commands = [];
+  const result = reconcilePostMergeChecks(
+    { config, mergeSha },
+    {
+      getWorkflowRuns: (workflow) =>
+        workflow === "ci.yml"
+          ? [{ event: "workflow_dispatch", display_title: postMergeRunName(workflow, mergeSha) }]
+          : [],
+      runCommand: (command, args) => commands.push([command, args])
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.existing, ["ci.yml"]);
+  assert.deepEqual(commands, [["gh", postMergeDispatchArgs(config, mergeSha)[1]]]);
+});
+
+test("merged pull reconciliation validates identity and backfills checks before cleanup", () => {
+  const value = fixture();
+  const mergedPull = {
+    ...value.pull,
+    state: "closed",
+    merged: true,
+    merged_at: "2026-07-13T01:00:00Z",
+    merged_by: { login: "github-actions[bot]" },
+    merge_commit_sha: mergeSha
+  };
+  const decision = evaluate(value);
+  const harness = cleanupHarness(decision);
+  harness.getWorkflowRuns = () => [];
+
+  const outcome = reconcileMergedAgentPull(
+    {
+      config,
+      prNumber: 18,
+      pull: mergedPull,
+      files: value.files,
+      sourceIssue: value.sourceIssue,
+      closingReferences: value.closingReferences
+    },
+    harness
+  );
+
+  assert.equal(outcome.code, 0);
+  assert.deepEqual(harness.commands, [
+    ...postMergeDispatchArgs(config, mergeSha).map((args) => ["gh", args]),
+    ...expectedCleanupCommands()
+  ]);
+  assert.throws(
+    () =>
+      reconcileMergedAgentPull(
+        {
+          config,
+          prNumber: 18,
+          pull: { ...mergedPull, merge_commit_sha: null },
+          files: value.files,
+          sourceIssue: value.sourceIssue,
+          closingReferences: value.closingReferences
+        },
+        harness
+      ),
+    /not a trusted agent PR/
+  );
+});
+
 test("post-merge dispatch failure is visible after merge and cleanup still completes", () => {
   const value = fixture();
   const decision = evaluate(value);
@@ -480,7 +549,8 @@ test("merged cleanup accepts only the original trusted agent identity and snapsh
     state: "closed",
     merged: true,
     merged_at: "2026-07-13T01:00:00Z",
-    merged_by: { login: "github-actions[bot]" }
+    merged_by: { login: "github-actions[bot]" },
+    merge_commit_sha: mergeSha
   };
   const files = [{ filename: "packages/agents/src/scenarioRunner.ts" }];
 

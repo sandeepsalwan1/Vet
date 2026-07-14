@@ -1,4 +1,5 @@
 name: CI
+run-name: CI ${{ inputs.main-sha || inputs.expected-head-sha || github.sha }}
 
 on:
   pull_request:
