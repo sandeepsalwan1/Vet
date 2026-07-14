@@ -250,9 +250,12 @@ export function dispatchPullSecurity(
   return dispatch(
     config,
     "codeql.yml",
-    {},
+    {
+      "candidate-ref": `refs/heads/${snapshot.pull.head.ref}`,
+      "candidate-sha": expectedHeadSha,
+    },
     false,
-    snapshot.pull.head.ref,
+    config.repo.defaultBranch,
   );
 }
 
@@ -412,9 +415,12 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun, expectedHe
         codeqlDispatch = dispatchWorkflow(
           config,
           "codeql.yml",
-          {},
+          {
+            "candidate-ref": `refs/heads/${pull.head.ref}`,
+            "candidate-sha": statusSha,
+          },
           false,
-          pull.head.ref,
+          config.repo.defaultBranch,
         );
       }
     }

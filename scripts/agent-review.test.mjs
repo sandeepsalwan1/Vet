@@ -198,7 +198,7 @@ function trustedSecurityDispatchFixture() {
   };
 }
 
-test("trusted security dispatch is bound to the validated PR branch", () => {
+test("trusted security dispatch uses the main workflow for the validated SHA", () => {
   const fixture = trustedSecurityDispatchFixture();
   const calls = [];
   const result = dispatchPullSecurity(config, 8, fixture.pull.head.sha, {
@@ -212,7 +212,16 @@ test("trusted security dispatch is bound to the validated PR branch", () => {
 
   assert.deepEqual(result, { ok: true });
   assert.deepEqual(calls, [
-    [config, "codeql.yml", {}, false, fixture.pull.head.ref]
+    [
+      config,
+      "codeql.yml",
+      {
+        "candidate-ref": `refs/heads/${fixture.pull.head.ref}`,
+        "candidate-sha": fixture.pull.head.sha
+      },
+      false,
+      config.repo.defaultBranch
+    ]
   ]);
 });
 
@@ -323,6 +332,10 @@ test("review generation is read-only and bound to the prepared head", () => {
   assert.match(prepare, /--dispatch-pr-security/);
   assert.match(reviewScript, /dispatchPullSecurity/);
   assert.match(codeqlWorkflow, /workflow_dispatch:/);
+  assert.match(codeqlWorkflow, /candidate-sha:/);
+  assert.match(codeqlWorkflow, /candidate-ref:/);
+  assert.match(codeqlWorkflow, /ref: \$\{\{ inputs\.candidate-sha \|\| github\.sha \}\}/);
+  assert.match(codeqlWorkflow, /sha: \$\{\{ inputs\.candidate-sha \}\}/);
   assert.match(ciWorkflow, /github\.event_name == 'pull_request' \|\| github\.event_name == 'workflow_dispatch'/);
   assert.match(ciWorkflow, /base-ref:/);
   assert.match(ciWorkflow, /head-ref:/);

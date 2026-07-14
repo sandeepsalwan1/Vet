@@ -3,6 +3,15 @@ name: CodeQL
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      candidate-sha:
+        description: Exact trusted PR head to analyze
+        required: false
+        type: string
+      candidate-ref:
+        description: Trusted PR branch for uploaded results
+        required: false
+        type: string
   push:
     branches:
       - main
@@ -14,7 +23,7 @@ permissions:
   security-events: write
 
 concurrency:
-  group: codeql-${{ github.ref }}
+  group: codeql-${{ inputs.candidate-sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -23,7 +32,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.candidate-sha || github.sha }}
       - uses: github/codeql-action/init@v4
         with:
           languages: javascript-typescript
       - uses: github/codeql-action/analyze@v4
+        with:
+          ref: ${{ inputs.candidate-ref }}
+          sha: ${{ inputs.candidate-sha }}
