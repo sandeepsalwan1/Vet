@@ -41,6 +41,7 @@ test("authenticated reviewer is read-only and all source changes fail closed", (
   assert.match(workflow, /src=\$PWD,dst=\/workspace,readonly/);
   assert.match(workflow, /--read-only/);
   assert.match(workflow, /gh workflow run agent-automerge\.yml/);
+  assert.match(workflow, /--repo "\$GITHUB_REPOSITORY"/);
   assert.match(workflow, /-f pr-number="\$\{\{ inputs\.pr-number \}\}"/);
   assert.doesNotMatch(automergeWorkflow, /- Agent no-mistakes/);
   assert.match(gate, /"--untracked-files=all"/);

@@ -159,6 +159,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh workflow run agent-no-mistakes.yml
+          --repo "$GITHUB_REPOSITORY"
           --ref main
           -f pr-number="${{ inputs.pr-number }}"
           -f intent='Validate the agent-created PR after automated review. The PR must satisfy its linked issue, preserve repo architecture, pass CI, and remain blocked rather than auto-merged if no-mistakes finds ask-user or high-risk issues.'

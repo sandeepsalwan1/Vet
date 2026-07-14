@@ -228,6 +228,7 @@ test("review generation is read-only and bound to the prepared head", () => {
   assert.match(apply, /ref: main\n          fetch-depth: 0\n          persist-credentials: false/);
   assert.match(noMistakes, /actions: write/);
   assert.match(noMistakes, /gh workflow run agent-no-mistakes\.yml/);
+  assert.match(noMistakes, /--repo "\$GITHUB_REPOSITORY"/);
   assert.match(noMistakes, /--ref main/);
   assert.match(noMistakes, /-f pr-number="\$\{\{ inputs\.pr-number \}\}"/);
   assert.doesNotMatch(noMistakes, /uses: \.\/\.github\/workflows\/agent-no-mistakes\.yml/);

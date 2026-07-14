@@ -300,5 +300,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh workflow run agent-automerge.yml
+          --repo "$GITHUB_REPOSITORY"
           --ref main
           -f pr-number="${{ inputs.pr-number }}"
