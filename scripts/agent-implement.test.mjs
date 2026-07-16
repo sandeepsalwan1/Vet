@@ -189,7 +189,7 @@ test("pull discovery uses paginated GraphQL and normalizes REST-shaped fields", 
 });
 
 test("pull discovery falls back to REST after a transient GraphQL outage", () => {
-  const rest = [{ number: 7 }];
+  const rest = [{ number: 7, node_id: "PR_rest_7" }];
   const pulls = listPulls(config, {
     ghReadJson: () => {
       throw new AgentError("gh: HTTP 503", 1);
@@ -202,6 +202,7 @@ test("pull discovery falls back to REST after a transient GraphQL outage", () =>
   });
 
   assert.equal(pulls, rest);
+  assert.equal(pulls[0].node_id, "PR_rest_7");
 });
 
 test("repository node id uses GraphQL with REST fallback", () => {

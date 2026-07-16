@@ -203,6 +203,7 @@ export function listPulls(config, dependencies = {}) {
     if (!isTransientGitHubReadError(error)) throw error;
   }
   const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  // GitHub's REST pull schema includes node_id, which the GraphQL update mutation reuses.
   return apiJson(endpoint, { paginate: true }) ?? [];
 }
 
