@@ -37,7 +37,7 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 Trusted recovery dispatches main-defined workflows with an expected head SHA, and CI publishes required check runs on that exact candidate.
 
 Cost-sensitive routing lives in `.agent/config.json`.
-Proposal and triage use GPT-5.4 nano; implementation, review, and no-mistakes use GPT-5.4 mini; all lanes currently use low reasoning.
+All model lanes use GPT-5.4 mini with low reasoning because GPT-5.4 nano does not support the Codex action's required tool transport.
 Increase a lane's model or reasoning only after measured contract failures.
 
 Model upgrades require config changes only:
@@ -189,7 +189,7 @@ Fix technical failures, answer real product questions, or use the exact-head app
 ## Plan Acceptance Map
 
 - Issue control plane: GitHub issue labels plus `agent-router.yml`.
-- Cheap proposal and triage: GPT-5.4 nano with low reasoning.
+- Cheap proposal and triage: GPT-5.4 mini with low reasoning, the cheapest configured model compatible with the Codex action.
 - Remote implementation: Crabbox first after provider readiness; isolated GitHub Actions fallback for non-visual work.
 - Optional orchestration reference: Sandcastle demonstrates label-driven AFK orchestration patterns and remains an optional worker adapter.
 - OpenClaw execution reference: Crabbox is the execution and computer-use proof host pattern; credential-free visual fallback runs in a Crabbox local container on GitHub Actions.

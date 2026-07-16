@@ -41,8 +41,8 @@ test("repository config enables only implemented worker backends", () => {
       resolveCodexSettings(repositoryConfig, "no-mistakes")
     ].map(({ lane, model, effort }) => ({ lane, model, effort })),
     [
-      { lane: "proposer", model: "gpt-5.4-nano", effort: "low" },
-      { lane: "triage", model: "gpt-5.4-nano", effort: "low" },
+      { lane: "proposer", model: "gpt-5.4-mini", effort: "low" },
+      { lane: "triage", model: "gpt-5.4-mini", effort: "low" },
       { lane: "implement", model: "gpt-5.4-mini", effort: "low" },
       { lane: "review", model: "gpt-5.4-mini", effort: "low" },
       { lane: "no-mistakes", model: "gpt-5.4-mini", effort: "low" }
