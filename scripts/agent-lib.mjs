@@ -131,10 +131,24 @@ export function gh(args, options = {}) {
   return runCommand("gh", args, options);
 }
 
+function parseGitHubJson(stdout) {
+  const text = String(stdout ?? "").trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    if (/^\s*(?:<!doctype\s+html|<html\b)/i.test(text)) {
+      throw new AgentError("GitHub returned a transient HTML response instead of JSON", 1, {
+        stderr: "transient GitHub HTML response"
+      });
+    }
+    throw error;
+  }
+}
+
 export function ghJson(args, options = {}) {
   const result = gh(args, options);
-  const text = result.stdout.trim();
-  return text ? JSON.parse(text) : null;
+  return parseGitHubJson(result.stdout);
 }
 
 function sleepSync(milliseconds) {
@@ -147,7 +161,7 @@ export function isTransientGitHubReadError(error) {
     .join("\n");
   return (
     /\b(?:HTTP\s*)?(?:429|500|502|503|504)\b/i.test(text) ||
-    /(?:bad gateway|connection reset|connection refused|connection timed out|temporary failure|tls handshake timeout|unexpected eof)/i.test(
+    /(?:bad gateway|connection reset|connection refused|connection timed out|temporary failure|tls handshake timeout|transient github html response|unexpected eof)/i.test(
       text
     )
   );
@@ -185,9 +199,8 @@ export function ghRead(args, options = {}, dependencies = {}) {
 }
 
 export function ghReadJson(args, options = {}, dependencies = {}) {
-  const result = ghRead(args, options, dependencies);
-  const text = result.stdout.trim();
-  return text ? JSON.parse(text) : null;
+  const execute = dependencies.gh ?? gh;
+  return retryGitHubRead(() => parseGitHubJson(execute(args, options).stdout), dependencies);
 }
 
 export function ghApiJson(path, options = {}, dependencies = {}) {

@@ -157,6 +157,43 @@ test("read-only GitHub CLI JSON retries use the same bounded policy", () => {
   assert.equal(calls, 2);
 });
 
+test("GitHub JSON reads retry HTML-shaped outage responses but not malformed JSON", () => {
+  let htmlCalls = 0;
+  const recovered = ghReadJson(
+    ["api", "repos/repo-owner/repo/issues/9"],
+    {},
+    {
+      delays: [1],
+      sleep: () => {},
+      onRetry: () => {},
+      gh: () => {
+        htmlCalls += 1;
+        return htmlCalls === 1
+          ? { stdout: "<!DOCTYPE html><title>Service unavailable</title>" }
+          : { stdout: '{"number":9}' };
+      }
+    }
+  );
+  assert.deepEqual(recovered, { number: 9 });
+  assert.equal(htmlCalls, 2);
+
+  let malformedCalls = 0;
+  assert.throws(
+    () =>
+      ghReadJson(["api", "repos/repo-owner/repo/issues/9"], {}, {
+        delays: [1],
+        sleep: () => assert.fail("malformed JSON must not sleep"),
+        onRetry: () => assert.fail("malformed JSON must not retry"),
+        gh: () => {
+          malformedCalls += 1;
+          return { stdout: "not-json" };
+        }
+      }),
+    SyntaxError
+  );
+  assert.equal(malformedCalls, 1);
+});
+
 test("GitHub API reads do not retry permanent failures", () => {
   let calls = 0;
   assert.throws(
