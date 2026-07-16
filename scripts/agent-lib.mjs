@@ -600,6 +600,24 @@ function comparedPullFiles(config, pull, dependencies = {}) {
   return files;
 }
 
+function restPullFiles(config, pull, dependencies = {}) {
+  const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  const root = `repos/${config.repo.owner}/${config.repo.name}/pulls/${pull.number}`;
+  const files = apiJson(`${root}/files?per_page=100`, { paginate: true }) ?? [];
+  const current = apiJson(root);
+  if (
+    !Array.isArray(files) ||
+    files.length !== Number(pull.changed_files) ||
+    current?.number !== pull.number ||
+    current?.changed_files !== pull.changed_files ||
+    current?.base?.sha !== pull.base.sha ||
+    current?.head?.sha !== pull.head.sha
+  ) {
+    throw new AgentError("could not bind the REST PR file inventory to the expected head", 1);
+  }
+  return files;
+}
+
 function immutableTreePaths(config, sha, dependencies = {}) {
   const apiJson = dependencies.ghApiJson ?? ghApiJson;
   const response = apiJson(
@@ -676,8 +694,10 @@ export function getPullFiles(config, pull, dependencies = {}) {
   try {
     pages = readJson(args, {}, { delays: [1000, 2000, 4000] });
   } catch (error) {
-    if (!isTransientGitHubReadError(error) || changedFiles > 300) throw error;
-    return comparedPullFiles(config, pull, dependencies);
+    if (!isTransientGitHubReadError(error)) throw error;
+    return changedFiles <= 300
+      ? comparedPullFiles(config, pull, dependencies)
+      : restPullFiles(config, pull, dependencies);
   }
 
   if (!Array.isArray(pages) || pages.length === 0) {

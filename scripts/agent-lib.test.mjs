@@ -460,6 +460,35 @@ test("small pull file reads fall back to the immutable comparison after a transi
   );
 });
 
+test("large pull file reads fall back to complete REST pagination with an exact-head recheck", () => {
+  const pull = {
+    number: 9,
+    changed_files: 301,
+    base: { sha: "a".repeat(40) },
+    head: { sha: "b".repeat(40) }
+  };
+  const files = Array.from({ length: 301 }, (_, index) => ({
+    filename: `docs/file-${index}.md`,
+    status: "modified"
+  }));
+  assert.equal(
+    getPullFiles(config, pull, {
+      ghReadJson: () => {
+        throw new AgentError("gh: HTTP 503", 1);
+      },
+      ghApiJson: (path, options) => {
+        if (path.endsWith("/files?per_page=100")) {
+          assert.equal(options.paginate, true);
+          return files;
+        }
+        assert.equal(path, "repos/repo-owner/repo/pulls/9");
+        return pull;
+      }
+    }),
+    files
+  );
+});
+
 test("pull diff and snapshot stay bound to exact commits", () => {
   const pull = {
     number: 9,
