@@ -194,6 +194,32 @@ test("GitHub JSON reads retry HTML-shaped outage responses but not malformed JSO
   assert.equal(malformedCalls, 1);
 });
 
+test("GitHub reads retry nonzero HTML outages without an HTTP status string", () => {
+  let calls = 0;
+  const recovered = ghReadJson(
+    ["api", "repos/repo-owner/repo/issues/9/comments"],
+    {},
+    {
+      delays: [1],
+      sleep: () => {},
+      onRetry: () => {},
+      gh: () => {
+        calls += 1;
+        if (calls === 1) {
+          throw new AgentError("gh api exited 1", 1, {
+            stdout: "<!DOCTYPE html><title>Service unavailable</title>",
+            stderr: ""
+          });
+        }
+        return { stdout: "[]" };
+      }
+    }
+  );
+
+  assert.deepEqual(recovered, []);
+  assert.equal(calls, 2);
+});
+
 test("GitHub API reads do not retry permanent failures", () => {
   let calls = 0;
   assert.throws(

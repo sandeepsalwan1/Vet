@@ -161,6 +161,7 @@ export function isTransientGitHubReadError(error) {
     .join("\n");
   return (
     /\b(?:HTTP\s*)?(?:429|500|502|503|504)\b/i.test(text) ||
+    /(?:^|\n)\s*(?:<!doctype\s+html|<html\b)/i.test(text) ||
     /(?:bad gateway|connection reset|connection refused|connection timed out|temporary failure|tls handshake timeout|transient github html response|unexpected eof)/i.test(
       text
     )
