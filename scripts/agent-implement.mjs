@@ -13,9 +13,11 @@ import {
   getIssueComments,
   ghApiJson,
   ghJson,
+  ghReadJson,
   gitOutput,
   issueLabels,
   issueSnapshotSha256,
+  isTransientGitHubReadError,
   loadConfig,
   markdownJsonBlock,
   newestManagedComment,
@@ -135,9 +137,96 @@ export function selectExistingPull(pulls, config, issueNumber, preferredBranch) 
   );
 }
 
-function listPulls(config) {
+const PULLS_QUERY = `
+  query($owner:String!,$name:String!,$base:String!,$endCursor:String) {
+    repository(owner:$owner,name:$name) {
+      pullRequests(first:100,after:$endCursor,baseRefName:$base,states:[OPEN,CLOSED,MERGED]) {
+        nodes {
+          number
+          id
+          state
+          mergedAt
+          url
+          baseRefName
+          headRefName
+          headRepository { nameWithOwner }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+`;
+
+function normalizeGraphQLPull(pull) {
+  return {
+    number: pull?.number,
+    node_id: pull?.id,
+    state: pull?.state === "OPEN" ? "open" : "closed",
+    merged_at: pull?.mergedAt ?? null,
+    html_url: pull?.url,
+    base: { ref: pull?.baseRefName ?? "" },
+    head: {
+      ref: pull?.headRefName ?? "",
+      repo: { full_name: pull?.headRepository?.nameWithOwner ?? "" }
+    }
+  };
+}
+
+export function listPulls(config, dependencies = {}) {
   const endpoint = `repos/${config.repo.owner}/${config.repo.name}/pulls?state=all&base=${encodeURIComponent(config.repo.defaultBranch)}&per_page=100`;
-  return ghApiJson(endpoint, { paginate: true }) ?? [];
+  const args = [
+    "api",
+    "graphql",
+    "--paginate",
+    "--slurp",
+    "-f",
+    `owner=${config.repo.owner}`,
+    "-f",
+    `name=${config.repo.name}`,
+    "-f",
+    `base=${config.repo.defaultBranch}`,
+    "-f",
+    `query=${PULLS_QUERY}`
+  ];
+  const readJson = dependencies.ghReadJson ?? ghReadJson;
+  try {
+    const pages = readJson(args, {}, { delays: [1000, 2000, 4000] });
+    if (!Array.isArray(pages) || pages.length === 0) {
+      throw new AgentError("GraphQL pull list response is invalid", 1);
+    }
+    return pages.flatMap((page) => {
+      const nodes = page?.data?.repository?.pullRequests?.nodes;
+      if (!Array.isArray(nodes)) throw new AgentError("GraphQL pull list response is invalid", 1);
+      return nodes.map(normalizeGraphQLPull);
+    });
+  } catch (error) {
+    if (!isTransientGitHubReadError(error)) throw error;
+  }
+  const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  return apiJson(endpoint, { paginate: true }) ?? [];
+}
+
+export function getRepositoryNodeId(config, dependencies = {}) {
+  const readJson = dependencies.ghReadJson ?? ghReadJson;
+  try {
+    const repository = readJson([
+      "repo",
+      "view",
+      `${config.repo.owner}/${config.repo.name}`,
+      "--json",
+      "id"
+    ]);
+    if (typeof repository?.id === "string" && repository.id) return repository.id;
+    throw new AgentError("GraphQL repository node id response is invalid", 1);
+  } catch (error) {
+    if (!isTransientGitHubReadError(error)) throw error;
+  }
+  const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  const repository = apiJson(`repos/${config.repo.owner}/${config.repo.name}`);
+  if (typeof repository?.node_id !== "string" || !repository.node_id) {
+    throw new AgentError("repository has no GraphQL node id", 1);
+  }
+  return repository.node_id;
 }
 
 function remoteAgentBranches(issueNumber, cwd = repoRoot()) {
@@ -193,26 +282,40 @@ export function applyPatchIdempotently(patchPath, cwd = repoRoot()) {
 export function upsertPullRequest({ config, issue, branch, codexOutput, metadata, existingPull }, dependencies = {}) {
   const apiJson = dependencies.ghJson ?? ghJson;
   const tempJson = dependencies.withTempJson ?? withTempJson;
+  const repositoryNodeId = dependencies.getRepositoryNodeId ?? getRepositoryNodeId;
   const body = prBody(issue, codexOutput, metadata);
-  const payload = {
-    title: `Agent: ${issue.title}`,
-    body,
-    base: config.repo.defaultBranch
-  };
-  const endpoint = existingPull
-    ? `repos/${config.repo.owner}/${config.repo.name}/pulls/${existingPull.number}`
-    : `repos/${config.repo.owner}/${config.repo.name}/pulls`;
-  if (!existingPull) {
-    payload.head = branch;
-    payload.draft = true;
+  const title = `Agent: ${issue.title}`;
+  if (existingPull && (typeof existingPull.node_id !== "string" || !existingPull.node_id)) {
+    throw new AgentError(`existing agent PR #${existingPull.number} has no GraphQL node id`, 1);
   }
+  const payload = existingPull
+    ? {
+        query: "mutation($id:ID!,$title:String!,$body:String!){updatePullRequest(input:{pullRequestId:$id,title:$title,body:$body}){pullRequest{number url}}}",
+        variables: { id: existingPull.node_id, title, body }
+      }
+    : {
+        query: "mutation($repositoryId:ID!,$baseRefName:String!,$headRefName:String!,$title:String!,$body:String!){createPullRequest(input:{repositoryId:$repositoryId,baseRefName:$baseRefName,headRefName:$headRefName,title:$title,body:$body,draft:true}){pullRequest{number url}}}",
+        variables: {
+          repositoryId: repositoryNodeId(config),
+          baseRefName: config.repo.defaultBranch,
+          headRefName: branch,
+          title,
+          body
+        }
+      };
   const pull = tempJson(payload, (bodyPath) =>
-    apiJson(["api", endpoint, "-X", existingPull ? "PATCH" : "POST", "--input", bodyPath])
+    apiJson(["api", "graphql", "--input", bodyPath])
   );
+  const result = existingPull
+    ? pull?.data?.updatePullRequest?.pullRequest
+    : pull?.data?.createPullRequest?.pullRequest;
+  if (!Number.isInteger(result?.number) || typeof result?.url !== "string" || !result.url) {
+    throw new AgentError("GraphQL pull-request mutation returned invalid metadata", 1);
+  }
   return {
     action: existingPull ? "updated" : "created",
-    number: pull.number,
-    url: pull.html_url ?? pull.url
+    number: result.number,
+    url: result.url
   };
 }
 

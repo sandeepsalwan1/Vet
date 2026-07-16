@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { AgentError } from "./agent-lib.mjs";
 import {
   applyPatchIdempotently,
   assertImplementationSource,
@@ -11,7 +12,9 @@ import {
   chooseAgentBranch,
   dispatchCandidateCi,
   finalizePatchValidation,
+  getRepositoryNodeId,
   implementationPullLabels,
+  listPulls,
   preparePatchValidation,
   preferredBranchName,
   privilegedPatchPaths,
@@ -30,7 +33,7 @@ const config = {
 const issue = { number: 42, title: "Fix duplicate intake" };
 const metadata = { sourceIssue: 42, automergeEligible: true };
 
-test("upsertPullRequest creates a draft PR through the REST API", () => {
+test("upsertPullRequest creates a draft PR through GraphQL", () => {
   let payload;
   let apiArgs;
   const result = upsertPullRequest(
@@ -47,19 +50,20 @@ test("upsertPullRequest creates a draft PR through the REST API", () => {
         payload = value;
         return callback("/tmp/pr.json");
       },
+      getRepositoryNodeId: () => "R_repo",
       ghJson(args) {
         apiArgs = args;
-        return { number: 9, html_url: "https://example.test/pull/9" };
+        return { data: { createPullRequest: { pullRequest: { number: 9, url: "https://example.test/pull/9" } } } };
       }
     }
   );
 
-  assert.deepEqual(apiArgs, ["api", "repos/owner/repo/pulls", "-X", "POST", "--input", "/tmp/pr.json"]);
-  assert.equal(apiArgs.includes("--json"), false);
-  assert.equal(payload.head, "agent/issue-42-fix-duplicate-intake");
-  assert.equal(payload.base, "main");
-  assert.equal(payload.draft, true);
-  assert.match(payload.body, /Closes #42/);
+  assert.deepEqual(apiArgs, ["api", "graphql", "--input", "/tmp/pr.json"]);
+  assert.match(payload.query, /createPullRequest/);
+  assert.equal(payload.variables.repositoryId, "R_repo");
+  assert.equal(payload.variables.headRefName, "agent/issue-42-fix-duplicate-intake");
+  assert.equal(payload.variables.baseRefName, "main");
+  assert.match(payload.variables.body, /Closes #42/);
   assert.deepEqual(result, { action: "created", number: 9, url: "https://example.test/pull/9" });
 });
 
@@ -73,7 +77,7 @@ test("upsertPullRequest updates an existing PR instead of creating a duplicate",
       branch: "agent/issue-42-old-title",
       codexOutput: "Retry output.",
       metadata,
-      existingPull: { number: 9 }
+      existingPull: { number: 9, node_id: "PR_9" }
     },
     {
       withTempJson(value, callback) {
@@ -82,14 +86,14 @@ test("upsertPullRequest updates an existing PR instead of creating a duplicate",
       },
       ghJson(args) {
         apiArgs = args;
-        return { number: 9, html_url: "https://example.test/pull/9" };
+        return { data: { updatePullRequest: { pullRequest: { number: 9, url: "https://example.test/pull/9" } } } };
       }
     }
   );
 
-  assert.deepEqual(apiArgs, ["api", "repos/owner/repo/pulls/9", "-X", "PATCH", "--input", "/tmp/pr.json"]);
-  assert.equal("head" in payload, false);
-  assert.equal("draft" in payload, false);
+  assert.deepEqual(apiArgs, ["api", "graphql", "--input", "/tmp/pr.json"]);
+  assert.match(payload.query, /updatePullRequest/);
+  assert.deepEqual(payload.variables.id, "PR_9");
   assert.deepEqual(result, { action: "updated", number: 9, url: "https://example.test/pull/9" });
 });
 
@@ -116,6 +120,114 @@ test("existing open PR and orphan branch names survive issue title changes", () 
   assert.equal(existing.number, 9);
   assert.equal(chooseAgentBranch(preferred, existing, []), "agent/issue-42-old-title");
   assert.equal(chooseAgentBranch(preferred, null, ["agent/issue-42-orphan"]), "agent/issue-42-orphan");
+});
+
+test("pull discovery uses paginated GraphQL and normalizes REST-shaped fields", () => {
+  let graphqlArgs;
+  const pulls = listPulls(config, {
+    ghApiJson: () => assert.fail("healthy GraphQL pull discovery needs no REST request"),
+    ghReadJson: (args) => {
+      graphqlArgs = args;
+      return [
+        {
+          data: {
+            repository: {
+              pullRequests: {
+                nodes: [
+                  {
+                    number: 7,
+                    id: "PR_7",
+                    state: "OPEN",
+                    mergedAt: null,
+                    url: "https://github.com/repo-owner/repo/pull/7",
+                    baseRefName: "main",
+                    headRefName: "agent/issue-42-fix",
+                    headRepository: { nameWithOwner: "repo-owner/repo" }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          data: {
+            repository: {
+              pullRequests: {
+                nodes: [
+                  {
+                    number: 6,
+                    id: "PR_6",
+                    state: "MERGED",
+                    mergedAt: "2026-07-13T00:00:00Z",
+                    url: "https://github.com/repo-owner/repo/pull/6",
+                    baseRefName: "main",
+                    headRefName: "agent/issue-41-fix",
+                    headRepository: { nameWithOwner: "repo-owner/repo" }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ];
+    }
+  });
+
+  assert.deepEqual(graphqlArgs.slice(0, 4), ["api", "graphql", "--paginate", "--slurp"]);
+  assert.match(graphqlArgs.at(-1), /pullRequests\(first:100,after:\$endCursor/);
+  assert.deepEqual(pulls[0], {
+    number: 7,
+    node_id: "PR_7",
+    state: "open",
+    merged_at: null,
+    html_url: "https://github.com/repo-owner/repo/pull/7",
+    base: { ref: "main" },
+    head: { ref: "agent/issue-42-fix", repo: { full_name: "repo-owner/repo" } }
+  });
+  assert.equal(pulls[1].state, "closed");
+  assert.equal(pulls[1].merged_at, "2026-07-13T00:00:00Z");
+});
+
+test("pull discovery falls back to REST after a transient GraphQL outage", () => {
+  const rest = [{ number: 7 }];
+  const pulls = listPulls(config, {
+    ghReadJson: () => {
+      throw new AgentError("gh: HTTP 503", 1);
+    },
+    ghApiJson: (path, options) => {
+      assert.equal(path, "repos/owner/repo/pulls?state=all&base=main&per_page=100");
+      assert.deepEqual(options, { paginate: true });
+      return rest;
+    }
+  });
+
+  assert.equal(pulls, rest);
+});
+
+test("repository node id uses GraphQL with REST fallback", () => {
+  assert.equal(
+    getRepositoryNodeId(config, {
+      ghApiJson: () => assert.fail("healthy GraphQL needs no REST request"),
+      ghReadJson: (args) => {
+        assert.deepEqual(args, ["repo", "view", "owner/repo", "--json", "id"]);
+        return { id: "R_repo" };
+      }
+    }),
+    "R_repo"
+  );
+
+  assert.equal(
+    getRepositoryNodeId(config, {
+      ghReadJson: () => {
+        throw new AgentError("gh: HTTP 503", 1);
+      },
+      ghApiJson: (path) => {
+        assert.equal(path, "repos/owner/repo");
+        return { node_id: "R_rest" };
+      }
+    }),
+    "R_rest"
+  );
 });
 
 test("dispatchCandidateCi runs trusted CI for an immutable PR head", () => {
