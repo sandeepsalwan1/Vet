@@ -9,6 +9,8 @@ import {
   fail,
   finish,
   getIssueComments,
+  getPullRequest,
+  getPullSnapshot,
   ghApiJson,
   ghReadJson,
   issueSnapshotSha256,
@@ -300,7 +302,7 @@ export async function recoverStaleBase(
     };
   }
 
-  const getPull = dependencies.getPull ?? (() => ghApiJson(`repos/${expectedRepo}/pulls/${prNumber}`));
+  const getPull = dependencies.getPull ?? (() => getPullRequest(config, prNumber));
   const hasAncestor =
     dependencies.hasAncestor ??
     ((ancestor, descendant) =>
@@ -776,7 +778,7 @@ export function settleAutomerge(
   const upsert = dependencies.upsertManagedComment ?? upsertManagedComment;
   const getPull =
     dependencies.getPull ??
-    (() => ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/pulls/${prNumber}`));
+    (() => getPullRequest(config, prNumber));
 
   if (!decision.trustedPull) {
     return {
@@ -933,15 +935,11 @@ async function main() {
   const prNumber = Number(args["pr-number"]);
   if (!Number.isInteger(prNumber) || prNumber <= 0) throw new AgentError("missing --pr-number", 2);
   const dryRun = Boolean(args["dry-run"]);
-  const pull = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/pulls/${prNumber}`);
+  const { pull, files } = getPullSnapshot(config, prNumber);
   const expectedHead = String(args["expected-head"] ?? "");
   if (expectedHead && (!/^[a-f0-9]{40}$/.test(expectedHead) || pull?.head?.sha !== expectedHead)) {
     throw new AgentError("automerge target does not match the expected pull request head", 1);
   }
-  const files = ghApiJson(
-    `repos/${config.repo.owner}/${config.repo.name}/pulls/${prNumber}/files?per_page=100`,
-    { paginate: true }
-  ) ?? [];
   const closing = ghReadJson([
     "pr",
     "view",

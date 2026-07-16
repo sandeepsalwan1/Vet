@@ -69,14 +69,16 @@ jobs:
             else
               [[ "$REQUESTED_PR" =~ ^[0-9]+$ && "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
               pull_file="$RUNNER_TEMP/ci-pull.json"
-              gh api "repos/$GITHUB_REPOSITORY/pulls/$REQUESTED_PR" > "$pull_file"
-              test "$(jq -r '.state' "$pull_file")" = open
-              test "$(jq -r '.head.repo.full_name' "$pull_file")" = "$GITHUB_REPOSITORY"
-              test "$(jq -r '.base.repo.full_name' "$pull_file")" = "$GITHUB_REPOSITORY"
-              test "$(jq -r '.base.ref' "$pull_file")" = "$DEFAULT_BRANCH"
-              test "$(jq -r '.head.sha' "$pull_file")" = "$REQUESTED_SHA"
+              gh pr view "$REQUESTED_PR" --repo "$GITHUB_REPOSITORY" \
+                --json state,headRepository,isCrossRepository,baseRefName,headRefOid,baseRefOid \
+                > "$pull_file"
+              test "$(jq -r '.state | ascii_downcase' "$pull_file")" = open
+              test "$(jq -r '.headRepository.nameWithOwner' "$pull_file")" = "$GITHUB_REPOSITORY"
+              test "$(jq -r '.isCrossRepository' "$pull_file")" = false
+              test "$(jq -r '.baseRefName' "$pull_file")" = "$DEFAULT_BRANCH"
+              test "$(jq -r '.headRefOid' "$pull_file")" = "$REQUESTED_SHA"
               candidate_sha="$REQUESTED_SHA"
-              base_sha="$(jq -r '.base.sha' "$pull_file")"
+              base_sha="$(jq -r '.baseRefOid' "$pull_file")"
             fi
           else
             candidate_sha="$EVENT_HEAD_SHA"

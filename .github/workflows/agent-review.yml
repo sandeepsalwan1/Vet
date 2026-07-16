@@ -55,7 +55,7 @@ jobs:
           REQUESTED_HEAD_SHA: ${{ inputs.expected-head-sha }}
         run: |
           set -euo pipefail
-          sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)"
+          sha="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)"
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
           if [ -n "$REQUESTED_HEAD_SHA" ]; then
             [[ "$REQUESTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
@@ -202,7 +202,7 @@ jobs:
           PR_NUMBER: ${{ inputs.pr-number }}
         run: |
           set -euo pipefail
-          head_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)"
+          head_sha="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)"
           [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
           gh workflow run agent-no-mistakes.yml \
             --repo "$GITHUB_REPOSITORY" \

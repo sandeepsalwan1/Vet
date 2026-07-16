@@ -12,6 +12,10 @@ import {
   ghReadJson,
   getIssueComments,
   getIssueNodeId,
+  getPullDiff,
+  getPullFiles,
+  getPullRequest,
+  getPullSnapshot,
   issueSnapshotSha256,
   isTransientGitHubReadError,
   newestManagedComment,
@@ -260,6 +264,93 @@ test("issue node id fails closed on malformed GraphQL metadata", () => {
       ghApiJson: () => assert.fail("malformed GraphQL metadata must not fall back")
     }),
     /GraphQL node id response is invalid/
+  );
+});
+
+test("pull metadata uses GraphQL and normalizes the trusted REST shape", () => {
+  const pull = getPullRequest(config, 9, {
+    ghApiJson: () => assert.fail("healthy GraphQL pull metadata needs no REST request"),
+    ghReadJson: (args) => {
+      assert.deepEqual(args.slice(0, 6), ["pr", "view", "9", "--repo", "repo-owner/repo", "--json"]);
+      return {
+        number: 9,
+        id: "PR_9",
+        state: "OPEN",
+        mergedAt: null,
+        mergeCommit: null,
+        mergeable: "MERGEABLE",
+        mergeStateStatus: "CLEAN",
+        isDraft: true,
+        autoMergeRequest: null,
+        changedFiles: 1,
+        title: "Agent PR",
+        body: "body",
+        url: "https://example.test/pull/9",
+        author: { login: "github-actions" },
+        baseRefName: "main",
+        baseRefOid: "a".repeat(40),
+        headRefName: "agent/issue-9-fix",
+        headRefOid: "b".repeat(40),
+        headRepository: { nameWithOwner: "repo-owner/repo" }
+      };
+    }
+  });
+
+  assert.equal(pull.state, "open");
+  assert.equal(pull.user.login, "github-actions[bot]");
+  assert.equal(pull.head.repo.full_name, "repo-owner/repo");
+  assert.equal(pull.base.repo.full_name, "repo-owner/repo");
+  assert.equal(pull.mergeable_state, "clean");
+  assert.equal(pull.draft, true);
+});
+
+test("pull metadata falls back to REST after a transient GraphQL outage", () => {
+  const rest = { number: 9, head: { sha: "b".repeat(40) } };
+  assert.equal(
+    getPullRequest(config, 9, {
+      ghReadJson: () => {
+        throw new AgentError("gh: HTTP 503", 1);
+      },
+      ghApiJson: (path) => {
+        assert.equal(path, "repos/repo-owner/repo/pulls/9");
+        return rest;
+      }
+    }),
+    rest
+  );
+});
+
+test("pull files and diff use the exact immutable comparison", () => {
+  const pull = {
+    changed_files: 1,
+    base: { sha: "a".repeat(40) },
+    head: { sha: "b".repeat(40) }
+  };
+  const files = [{ filename: "docs/readme.md", status: "modified" }];
+  assert.equal(
+    getPullFiles(config, pull, {
+      ghApiJson: (path) => {
+        assert.equal(path, `repos/repo-owner/repo/compare/${"a".repeat(40)}...${"b".repeat(40)}`);
+        return { files };
+      }
+    }),
+    files
+  );
+  assert.equal(
+    getPullDiff(config, pull, {
+      ghRead: (args) => {
+        assert.deepEqual(args.slice(0, 4), ["api", "-H", "Accept: application/vnd.github.v3.diff", `repos/repo-owner/repo/compare/${"a".repeat(40)}...${"b".repeat(40)}`]);
+        return { stdout: "diff --git a/docs/readme.md b/docs/readme.md\n" };
+      }
+    }),
+    "diff --git a/docs/readme.md b/docs/readme.md\n"
+  );
+  assert.deepEqual(
+    getPullSnapshot(config, 9, {
+      getPullRequest: () => pull,
+      getPullFiles: () => files
+    }),
+    { pull, files }
   );
 });
 

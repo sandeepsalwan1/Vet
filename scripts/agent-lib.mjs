@@ -489,6 +489,127 @@ export function getIssueNodeId(config, number, dependencies = {}) {
   return issue.node_id;
 }
 
+function normalizeGraphQLPull(pull, config) {
+  const headRepo = pull?.headRepository?.nameWithOwner ?? "";
+  const author = String(pull?.author?.login ?? "");
+  return {
+    number: pull?.number,
+    node_id: pull?.id,
+    state: String(pull?.state ?? "").toLowerCase() === "open" ? "open" : "closed",
+    merged: Boolean(pull?.mergedAt),
+    merged_at: pull?.mergedAt ?? null,
+    merge_commit_sha: pull?.mergeCommit?.oid ?? null,
+    mergeable: pull?.mergeable === "MERGEABLE",
+    mergeable_state: String(pull?.mergeStateStatus ?? "unknown").toLowerCase(),
+    draft: Boolean(pull?.isDraft),
+    auto_merge: pull?.autoMergeRequest ?? null,
+    changed_files: pull?.changedFiles,
+    title: pull?.title ?? "",
+    body: pull?.body ?? "",
+    html_url: pull?.url,
+    user: { login: author === "github-actions" ? "github-actions[bot]" : author },
+    base: {
+      ref: pull?.baseRefName ?? "",
+      sha: pull?.baseRefOid ?? "",
+      repo: { full_name: repoSlug(config) }
+    },
+    head: {
+      ref: pull?.headRefName ?? "",
+      sha: pull?.headRefOid ?? "",
+      repo: { full_name: headRepo }
+    }
+  };
+}
+
+export function getPullRequest(config, number, dependencies = {}) {
+  const readJson = dependencies.ghReadJson ?? ghReadJson;
+  const fields = [
+    "autoMergeRequest",
+    "baseRefName",
+    "baseRefOid",
+    "body",
+    "changedFiles",
+    "headRefName",
+    "headRefOid",
+    "headRepository",
+    "id",
+    "isDraft",
+    "mergeCommit",
+    "mergeable",
+    "mergedAt",
+    "mergeStateStatus",
+    "number",
+    "state",
+    "title",
+    "url",
+    "author"
+  ].join(",");
+  try {
+    const pull = readJson([
+      "pr",
+      "view",
+      String(number),
+      "--repo",
+      repoSlug(config),
+      "--json",
+      fields
+    ], {}, { delays: [1000, 2000, 4000] });
+    if (
+      pull?.number !== Number(number) ||
+      typeof pull?.id !== "string" ||
+      !pull.id ||
+      !/^[a-f0-9]{40}$/.test(String(pull?.headRefOid ?? "")) ||
+      !/^[a-f0-9]{40}$/.test(String(pull?.baseRefOid ?? ""))
+    ) {
+      throw new AgentError(`PR #${number} GraphQL response is invalid`, 1);
+    }
+    return normalizeGraphQLPull(pull, config);
+  } catch (error) {
+    if (!isTransientGitHubReadError(error)) throw error;
+  }
+  const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  return apiJson(`repos/${config.repo.owner}/${config.repo.name}/pulls/${number}`);
+}
+
+export function getPullFiles(config, pull, dependencies = {}) {
+  const baseSha = String(pull?.base?.sha ?? "");
+  const headSha = String(pull?.head?.sha ?? "");
+  if (!/^[a-f0-9]{40}$/.test(baseSha) || !/^[a-f0-9]{40}$/.test(headSha)) {
+    throw new AgentError("pull comparison requires exact base and head SHAs", 1);
+  }
+  const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  const comparison = apiJson(
+    `repos/${config.repo.owner}/${config.repo.name}/compare/${baseSha}...${headSha}`
+  );
+  const files = comparison?.files;
+  if (!Array.isArray(files) || Number(pull?.changed_files) !== files.length) {
+    throw new AgentError("could not verify the complete PR file inventory", 1);
+  }
+  return files;
+}
+
+export function getPullSnapshot(config, number, dependencies = {}) {
+  const getPull = dependencies.getPullRequest ?? getPullRequest;
+  const getFiles = dependencies.getPullFiles ?? getPullFiles;
+  const pull = getPull(config, number, dependencies);
+  return { pull, files: getFiles(config, pull, dependencies) };
+}
+
+export function getPullDiff(config, pull, dependencies = {}) {
+  const baseSha = String(pull?.base?.sha ?? "");
+  const headSha = String(pull?.head?.sha ?? "");
+  if (!/^[a-f0-9]{40}$/.test(baseSha) || !/^[a-f0-9]{40}$/.test(headSha)) {
+    throw new AgentError("pull diff requires exact base and head SHAs", 1);
+  }
+  const read = dependencies.ghRead ?? ghRead;
+  return read([
+    "api",
+    "-H",
+    "Accept: application/vnd.github.v3.diff",
+    `repos/${config.repo.owner}/${config.repo.name}/compare/${baseSha}...${headSha}`
+  ]).stdout;
+}
+
 export function commentHasManagedMarker(body, marker) {
   const text = String(body ?? "");
   return text === marker || text.startsWith(`${marker}\n`);

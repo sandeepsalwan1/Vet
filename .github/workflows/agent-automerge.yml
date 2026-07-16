@@ -71,7 +71,7 @@ jobs:
           fi
           if [ -n "$EXPECTED_HEAD_SHA" ]; then
             [[ "$EXPECTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
-            test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr_number" --jq .head.sha)" = "$EXPECTED_HEAD_SHA"
+            test "$(gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)" = "$EXPECTED_HEAD_SHA"
           fi
           echo "pr-number=$pr_number" >> "$GITHUB_OUTPUT"
       - name: Evaluate automerge
