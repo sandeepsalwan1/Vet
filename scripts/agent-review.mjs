@@ -9,6 +9,7 @@ import {
   dispatchWorkflow,
   fail,
   finish,
+  getIssueComments,
   ghApiJson,
   ghRead,
   ghReadJson,
@@ -39,9 +40,7 @@ function fetchPull(config, prNumber) {
   ) ?? [];
   const trust = assertTrustedAgentPull(pull, config, { files, rejectPrivilegedPaths: true });
   const issue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${prNumber}`);
-  const comments = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${prNumber}/comments`, {
-    paginate: true
-  });
+  const comments = getIssueComments(config, prNumber);
   return { pull, issue, comments, files, trust };
 }
 
@@ -162,9 +161,7 @@ function writePrompt(config, prNumber, outputPath, expectedHeadSha) {
   const sourceIssueNumber = resolveSourceIssueNumber(pull, closing?.closingIssuesReferences, config);
   const sourceIssue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${sourceIssueNumber}`);
   assertTrustedAgentPull(pull, config, { files, sourceIssue, rejectPrivilegedPaths: true });
-  const sourceComments = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${sourceIssueNumber}/comments`, {
-    paginate: true
-  });
+  const sourceComments = getIssueComments(config, sourceIssueNumber);
   const triageComment = requireManagedTriageComment(
     sourceComments,
     config.comments.triage,

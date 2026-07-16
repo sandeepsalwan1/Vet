@@ -8,6 +8,7 @@ import {
   dispatchWorkflow,
   fail,
   finish,
+  getIssueComments,
   ghApiJson,
   issueLabels,
   issueSnapshotSha256,
@@ -35,9 +36,7 @@ const DECISION_FIELDS = [
 function fetchIssue(config, issueNumber) {
   const issue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${issueNumber}`);
   if (issue?.pull_request) throw new AgentError("refusing to triage a pull request as an issue", 1);
-  const comments = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${issueNumber}/comments`, {
-    paginate: true
-  });
+  const comments = getIssueComments(config, issueNumber);
   return { issue, comments };
 }
 

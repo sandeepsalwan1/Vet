@@ -10,6 +10,8 @@ import {
   dispatchWorkflow,
   ghApiJson,
   ghReadJson,
+  getIssueComments,
+  getIssueNodeId,
   issueSnapshotSha256,
   isTransientGitHubReadError,
   newestManagedComment,
@@ -74,25 +76,139 @@ test("newest trusted managed comment wins over a newer marker squatter", () => {
 
 test("upsert creates a new comment instead of patching an untrusted marker squatter", () => {
   let apiArgs;
+  let apiPayload;
   let patchCalled = false;
   const result = upsertManagedComment(
     { config, number: 9, marker, body: "managed body" },
     {
       getIssueComments: () => [comment(7, "someone")],
-      withTempJson: (_payload, callback) => callback("/tmp/comment.json"),
+      getIssueNodeId: () => "I_issue_9",
+      withTempJson: (payload, callback) => {
+        apiPayload = payload;
+        return callback("/tmp/comment.json");
+      },
       gh: () => {
         patchCalled = true;
       },
       ghJson: (args) => {
         apiArgs = args;
-        return { id: 8 };
+        return { data: { addComment: { commentEdge: { node: { id: "IC_8" } } } } };
       }
     }
   );
 
   assert.equal(patchCalled, false);
-  assert.deepEqual(apiArgs, ["api", "repos/repo-owner/repo/issues/9/comments", "-X", "POST", "--input", "/tmp/comment.json"]);
-  assert.deepEqual(result, { ok: true, action: "created", commentId: 8 });
+  assert.deepEqual(apiArgs, ["api", "graphql", "--input", "/tmp/comment.json"]);
+  assert.deepEqual(apiPayload.variables, {
+    subjectId: "I_issue_9",
+    body: `${marker}\nmanaged body\n`
+  });
+  assert.match(apiPayload.query, /addComment/);
+  assert.deepEqual(result, { ok: true, action: "created", commentId: "IC_8" });
+});
+
+test("issue comments use GraphQL and normalize Actions identity", () => {
+  let graphqlArgs;
+  const comments = getIssueComments(config, 9, {
+    ghApiJson: () => assert.fail("healthy GraphQL comments need no REST request"),
+    ghReadJson: (args) => {
+      graphqlArgs = args;
+      return {
+        comments: [
+          {
+            id: "IC_7",
+            body: `${marker}\nbody`,
+            createdAt: "2026-07-13T00:00:01Z",
+            updatedAt: null,
+            author: { login: "github-actions" }
+          }
+        ]
+      };
+    }
+  });
+
+  assert.deepEqual(graphqlArgs, [
+    "issue",
+    "view",
+    "9",
+    "--repo",
+    "repo-owner/repo",
+    "--json",
+    "comments"
+  ]);
+  assert.equal(comments[0].user.login, "github-actions[bot]");
+  assert.equal(comments[0].updated_at, "2026-07-13T00:00:01Z");
+  assert.equal(trustedManagedComment(comments[0], marker, "repo-owner"), true);
+});
+
+test("issue comments fall back to REST after a transient GraphQL outage", () => {
+  const rest = [comment(7, "github-actions[bot]", `${marker}\nbody`, "2026-07-13T00:00:01Z")];
+  const comments = getIssueComments(config, 9, {
+    ghReadJson: () => {
+      throw new AgentError("GitHub API read failed after 4 attempts", 1, {
+        stderr: "gh: HTTP 503"
+      });
+    },
+    ghApiJson: (path, options) => {
+      assert.equal(path, "repos/repo-owner/repo/issues/9/comments");
+      assert.deepEqual(options, { paginate: true });
+      return rest;
+    }
+  });
+
+  assert.equal(comments, rest);
+});
+
+test("managed GraphQL comments update in place", () => {
+  let payload;
+  const result = upsertManagedComment(
+    { config, number: 9, marker, body: "new body" },
+    {
+      getIssueComments: () => [
+        comment("IC_7", "github-actions[bot]", `${marker}\nold body`, "2026-07-13T00:00:01Z")
+      ],
+      getIssueNodeId: () => assert.fail("an existing comment needs no issue lookup"),
+      withTempJson: (value, callback) => {
+        payload = value;
+        return callback("/tmp/comment.json");
+      },
+      gh: () => assert.fail("GraphQL comments must not use REST patching"),
+      ghJson: (args) => {
+        assert.deepEqual(args, ["api", "graphql", "--input", "/tmp/comment.json"]);
+        return { data: { updateIssueComment: { issueComment: { id: "IC_7" } } } };
+      }
+    }
+  );
+
+  assert.match(payload.query, /updateIssueComment/);
+  assert.deepEqual(payload.variables, { id: "IC_7", body: `${marker}\nnew body\n` });
+  assert.deepEqual(result, { ok: true, action: "updated", commentId: "IC_7" });
+});
+
+test("issue node id uses GraphQL with REST fallback", () => {
+  assert.equal(
+    getIssueNodeId(config, 9, {
+      ghApiJson: () => assert.fail("healthy GraphQL needs no REST request"),
+      ghReadJson: (args) => {
+        assert.deepEqual(args, ["issue", "view", "9", "--repo", "repo-owner/repo", "--json", "id"]);
+        return { id: "I_issue_9" };
+      }
+    }),
+    "I_issue_9"
+  );
+
+  assert.equal(
+    getIssueNodeId(config, 9, {
+      ghReadJson: () => {
+        throw new AgentError("gh: HTTP 503", 1);
+      },
+      ghApiJson: (path) => {
+        assert.equal(path, "repos/repo-owner/repo/issues/9");
+        return { node_id: "I_issue_rest_9" };
+      }
+    }),
+    "I_issue_rest_9"
+  );
 });
 
 test("GitHub API reads retry transient service failures with bounded backoff", () => {

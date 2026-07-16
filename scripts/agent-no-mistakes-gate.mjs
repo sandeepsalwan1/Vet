@@ -9,6 +9,7 @@ import {
   assertTrustedAgentPull as assertSharedTrustedAgentPull,
   fail,
   finish,
+  getIssueComments,
   ghApiJson,
   loadConfig,
   markdownJsonBlock,
@@ -478,10 +479,7 @@ function fetchIntentContext(config, sourceIssueNumber) {
       1,
     );
   }
-  const comments =
-    ghApiJson(`${root}/issues/${sourceIssueNumber}/comments`, {
-      paginate: true,
-    }) ?? [];
+  const comments = getIssueComments(config, sourceIssueNumber);
   const triageComment = selectTrustedManagedTriageComment(
     comments,
     config.comments.triage,

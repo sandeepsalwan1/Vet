@@ -9,6 +9,7 @@ import {
   extractJson,
   fail,
   finish,
+  getIssueComments,
   gh,
   ghApiJson,
   ghReadJson,
@@ -29,11 +30,7 @@ import { runCrabboxLane } from "./agent-crabbox-run.mjs";
 const PROOF_KINDS = new Set(["none", "CI", "UI", "GIF"]);
 
 function commentsFor(config, number) {
-  return (
-    ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${number}/comments`, {
-      paginate: true
-    }) ?? []
-  );
+  return getIssueComments(config, number);
 }
 
 function managedJson(comments, marker, owner) {

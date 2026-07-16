@@ -8,6 +8,7 @@ import {
   extractJson,
   fail,
   finish,
+  getIssueComments,
   ghApiJson,
   ghReadJson,
   issueSnapshotSha256,
@@ -992,10 +993,7 @@ async function main() {
   try {
     const metadata = implementationMetadata(pull.body);
     sourceIssue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${metadata.sourceIssue}`);
-    sourceComments = ghApiJson(
-      `repos/${config.repo.owner}/${config.repo.name}/issues/${metadata.sourceIssue}/comments`,
-      { paginate: true }
-    );
+    sourceComments = getIssueComments(config, metadata.sourceIssue);
   } catch {
     // Evaluation reports malformed or missing metadata without trusting a source issue.
   }

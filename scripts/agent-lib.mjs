@@ -386,9 +386,64 @@ export function assertTrustedAgentPull(pull, config, options = {}) {
   return { metadata, sourceIssue: metadata.sourceIssue };
 }
 
-export function getIssueComments(config, number) {
+function normalizeGraphQLComment(comment) {
+  const login = String(comment?.author?.login ?? "");
+  return {
+    id: comment?.id,
+    body: comment?.body ?? "",
+    created_at: comment?.createdAt ?? null,
+    updated_at: comment?.updatedAt ?? comment?.createdAt ?? null,
+    user: { login: login === "github-actions" ? "github-actions[bot]" : login }
+  };
+}
+
+export function getIssueComments(config, number, dependencies = {}) {
   const path = `repos/${config.repo.owner}/${config.repo.name}/issues/${number}/comments`;
-  return ghApiJson(path, { paginate: true }) ?? [];
+  const args = [
+    "issue",
+    "view",
+    String(number),
+    "--repo",
+    repoSlug(config),
+    "--json",
+    "comments"
+  ];
+  const readJson = dependencies.ghReadJson ?? ghReadJson;
+  try {
+    const result = readJson(args, {}, { delays: [1000, 2000, 4000] });
+    if (!Array.isArray(result?.comments)) {
+      throw new AgentError(`issue #${number} GraphQL comments response is invalid`, 1);
+    }
+    return result.comments.map(normalizeGraphQLComment);
+  } catch (error) {
+    if (!isTransientGitHubReadError(error)) throw error;
+  }
+  const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  return apiJson(path, { paginate: true }) ?? [];
+}
+
+export function getIssueNodeId(config, number, dependencies = {}) {
+  const readJson = dependencies.ghReadJson ?? ghReadJson;
+  try {
+    const issue = readJson([
+      "issue",
+      "view",
+      String(number),
+      "--repo",
+      repoSlug(config),
+      "--json",
+      "id"
+    ]);
+    if (typeof issue?.id === "string" && issue.id) return issue.id;
+  } catch (error) {
+    if (!isTransientGitHubReadError(error)) throw error;
+  }
+  const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  const issue = apiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${number}`);
+  if (typeof issue?.node_id !== "string" || !issue.node_id) {
+    throw new AgentError(`issue #${number} has no GraphQL node id`, 1);
+  }
+  return issue.node_id;
 }
 
 export function commentHasManagedMarker(body, marker) {
@@ -423,15 +478,47 @@ export function upsertManagedComment({ config, number, marker, body, dryRun = fa
   const tempJson = dependencies.withTempJson ?? withTempJson;
   const runGh = dependencies.gh ?? gh;
   const apiJson = dependencies.ghJson ?? ghJson;
+  const issueNodeId = dependencies.getIssueNodeId ?? getIssueNodeId;
   const comments = getComments(config, number);
   const existing = newestManagedComment(comments, marker, config.repo.owner);
-  return tempJson({ body: fullBody }, (path) => {
-    if (existing) {
-      runGh(["api", `repos/${config.repo.owner}/${config.repo.name}/issues/comments/${existing.id}`, "-X", "PATCH", "--input", path]);
+  if (existing && typeof existing.id === "string") {
+    const payload = {
+      query: "mutation($id:ID!,$body:String!){updateIssueComment(input:{id:$id,body:$body}){issueComment{id}}}",
+      variables: { id: existing.id, body: fullBody }
+    };
+    return tempJson(payload, (path) => {
+      const updated = apiJson(["api", "graphql", "--input", path]);
+      const commentId = updated?.data?.updateIssueComment?.issueComment?.id;
+      if (typeof commentId !== "string" || !commentId) {
+        throw new AgentError("GraphQL managed comment update returned no comment id", 1);
+      }
+      return { ok: true, action: "updated", commentId };
+    });
+  }
+  if (existing) {
+    return tempJson({ body: fullBody }, (path) => {
+      runGh([
+        "api",
+        `repos/${config.repo.owner}/${config.repo.name}/issues/comments/${existing.id}`,
+        "-X",
+        "PATCH",
+        "--input",
+        path
+      ]);
       return { ok: true, action: "updated", commentId: existing.id };
+    });
+  }
+  const payload = {
+    query: "mutation($subjectId:ID!,$body:String!){addComment(input:{subjectId:$subjectId,body:$body}){commentEdge{node{id}}}}",
+    variables: { subjectId: issueNodeId(config, number), body: fullBody }
+  };
+  return tempJson(payload, (path) => {
+    const created = apiJson(["api", "graphql", "--input", path]);
+    const commentId = created?.data?.addComment?.commentEdge?.node?.id;
+    if (typeof commentId !== "string" || !commentId) {
+      throw new AgentError("GraphQL managed comment creation returned no comment id", 1);
     }
-    const created = apiJson(["api", `repos/${config.repo.owner}/${config.repo.name}/issues/${number}/comments`, "-X", "POST", "--input", path]);
-    return { ok: true, action: "created", commentId: created?.id };
+    return { ok: true, action: "created", commentId };
   });
 }
 

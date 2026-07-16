@@ -10,6 +10,7 @@ import {
   extractJson,
   fail,
   finish,
+  getIssueComments,
   ghApiJson,
   ghJson,
   gitOutput,
@@ -32,9 +33,7 @@ import {
 
 function fetchIssue(config, issueNumber) {
   const issue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${issueNumber}`);
-  const comments = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${issueNumber}/comments`, {
-    paginate: true
-  });
+  const comments = getIssueComments(config, issueNumber);
   return { issue, comments };
 }
 
