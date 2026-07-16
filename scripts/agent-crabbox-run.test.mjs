@@ -27,10 +27,12 @@ const config = {
     vercel: ["VERCEL_TOKEN", "VERCEL_OIDC_TOKEN"]
   },
   crabbox: {
+    credentialFreeVisualFallback: "local-container",
     readiness: {
       vercel: "CRABBOX_VERCEL_READY",
       hetzner: "CRABBOX_HETZNER_READY"
     },
+    visualProviders: ["hetzner", "local-container"],
     coordinatorProviders: ["aws"]
   }
 };
@@ -91,7 +93,7 @@ test("timing validation requires actual provider, lease, duration, and exit", ()
   assert.throws(() => validateTimingReport({ ...valid, leaseId: "" }, "hetzner"), /no lease id/);
 });
 
-test("provider choice uses the matching lane credential", () => {
+test("provider choice uses ready credentials, then credential-free visual Crabbox", () => {
   assert.equal(
     selectCrabboxProvider(config, "ciRemote", {
       VERCEL_TOKEN: "configured",
@@ -114,15 +116,19 @@ test("provider choice uses the matching lane credential", () => {
     }).provider,
     "hetzner"
   );
-  assert.match(
-    selectCrabboxProvider(config, "visualProof", { HCLOUD_TOKEN: "configured" }).reason,
-    /readiness smoke/
+  assert.equal(selectCrabboxProvider(config, "visualProof", {}).provider, "local-container");
+  assert.equal(
+    selectCrabboxProvider(config, "visualProof", { HCLOUD_TOKEN: "configured" }).provider,
+    "local-container"
   );
-  assert.match(
-    selectCrabboxProvider(config, "visualProof", { CRABBOX_HETZNER_READY: "true" }).reason,
-    /required auth/
+  assert.equal(
+    selectCrabboxProvider(config, "visualProof", { CRABBOX_HETZNER_READY: "true" }).provider,
+    "local-container"
   );
-  assert.equal(selectCrabboxProvider(config, "visualProof", { VERCEL_TOKEN: "configured" }).available, false);
+  assert.equal(
+    selectCrabboxProvider(config, "visualProof", { VERCEL_TOKEN: "configured" }).provider,
+    "local-container"
+  );
 });
 
 test("Crabbox child receives only selected provider auth and readiness", () => {
@@ -160,6 +166,13 @@ test("Crabbox child receives only selected provider auth and readiness", () => {
       HCLOUD_TOKEN: "hetzner",
       HETZNER_TOKEN: "hetzner-alias",
       CRABBOX_HETZNER_READY: "true"
+    }
+  );
+  assert.deepEqual(
+    providerChildEnvironment(config, { provider: "local-container", lane: "visualProof" }, source),
+    {
+      PATH: "/usr/bin",
+      CRABBOX_CONFIG: "/tmp/trusted.yaml"
     }
   );
   assert.equal(
@@ -219,6 +232,24 @@ test("remote implementation requires an explicitly ready Vercel provider", () =>
     selectCrabboxProvider(config, "implementRemote", { VERCEL_TOKEN: "configured" }).reason,
     /readiness smoke/
   );
+});
+
+test("credential-free visual dry-run requests Crabbox desktop and browser", () => {
+  const result = runCrabboxLane({
+    config,
+    lane: "visualProof",
+    command: "npm run smoke:local",
+    routes: ["/request"],
+    dryRun: true,
+    env: {}
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.provider, "local-container");
+  assert.ok(result.crabboxCommand.includes("--desktop"));
+  assert.ok(result.crabboxCommand.includes("--browser"));
+  assert.ok(result.crabboxCommand.includes("--keep"));
+  assert.equal(result.crabboxCommand.some((value) => /TOKEN|API_KEY/.test(value)), false);
 });
 
 test("remote implementation forwards only invocation auth and downloads generated outputs", () => {

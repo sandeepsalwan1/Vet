@@ -14,18 +14,21 @@ Local cache:
 /Users/sandeep/.opensrc/repos/github.com/mattpocock/sandcastle/main
 ```
 
-Current checked state on 2026-07-13:
+Current checked state on 2026-07-16:
 
 - latest release: `v0.12.0`
 - latest release time: `2026-06-29T20:16:27Z`
 - upstream last pushed: `2026-06-29T20:16:27Z`
+- checked commit: `e99f832f26dc9d245c019a9ddd19fa5dee792427`
 - language: TypeScript
 - license: MIT
-- stars at check time: 6733
+- stars at check time: 6858
 
 Use in this repo:
 
 - reference implementation for label-driven AFK issue and PR automation
+- label-filtered issues as the worker's bounded source of truth
+- one issue per iteration with a dedicated branch and separate implement/review phases
 - examples for `agent:implement`, `agent:review`, `agent:blocked`, branch updates, label-triggered assignment, and safe transitions
 - optional TypeScript orchestration adapter for AFK implementation/review runs
 - useful when raw GitHub Actions scripts become awkward for multi-agent planning, parallel execution, branch strategies, review pipelines, or session capture/resume

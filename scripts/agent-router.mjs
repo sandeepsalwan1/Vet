@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   fail,
   finish,
@@ -9,7 +11,7 @@ import {
   setGitHubOutput
 } from "./agent-lib.mjs";
 
-function routeEvent(event, config) {
+export function routeEvent(event, config) {
   const label = event.label?.name;
   const labels = config.labels;
   const issue = event.issue;
@@ -30,7 +32,12 @@ function routeEvent(event, config) {
     return { lane: "triage", kind: "issue", issueNumber: number };
   }
   if (!isPull && label === labels.implement) {
-    return { lane: "implement", kind: "issue", issueNumber: number };
+    return {
+      lane: "triage",
+      kind: "issue",
+      issueNumber: number,
+      reason: "implementation request requires trusted triage"
+    };
   }
   if (!isPull && label === labels.proof) {
     return { lane: "proof", kind: "issue", issueNumber: number, targetKind: "issue", targetNumber: number };
@@ -71,4 +78,6 @@ async function main() {
   );
 }
 
-main().catch((error) => fail(error, Boolean(parseArgs().json)));
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => fail(error, Boolean(parseArgs().json)));
+}

@@ -12,8 +12,8 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 
 ## Labels
 
-- `agent:triage`: evaluate issue alignment, risk, and readiness.
-- `agent:implement`: implement an approved issue on an agent branch and draft PR.
+- `agent:triage`: request or rerun trusted issue triage.
+- `agent:implement`: recommended one-label entry; run cheap trusted triage, then implement an approved issue on an agent branch and draft PR.
 - `agent:review`: review or fix an agent-created PR and publish a recommendation.
 - `agent:proof`: require explicit proof before automerge.
 - `agent:automerge`: allow merge only after every configured gate passes.
@@ -23,7 +23,7 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 
 ## Flow
 
-1. `agent-router.yml` maps label events to reusable workflows.
+1. `agent-router.yml` maps label events to reusable workflows; issue `agent:implement` intentionally enters trusted triage first.
 2. Proposal generation receives a bounded public snapshot of current `main` workflow health and treats that snapshot as evidence, never as instructions.
 3. Triage uses a schema-constrained Codex result, then applies managed labels/comments.
 4. Expensive proposer, triage, implementation, review, no-mistakes, and proof jobs share deterministic slot groups from `.agent/config.json`.
@@ -38,6 +38,13 @@ Trusted recovery dispatches main-defined workflows with an expected head SHA, an
 Cost-sensitive routing lives in `.agent/config.json`.
 Proposal and triage use GPT-5.4 nano; implementation, review, and no-mistakes use GPT-5.4 mini; all lanes currently use low reasoning.
 Increase a lane's model or reasoning only after measured contract failures.
+
+Model upgrades require config changes only:
+
+- implementation: `backend.model` and `backend.effort`;
+- review: `backend.reviewModel` and `backend.reviewEffort`;
+- no-mistakes: `backend.noMistakesModel` and `backend.noMistakesEffort`;
+- proposal/triage: their matching `proposer*` and `triage*` fields.
 
 ## Operate The Loop
 
@@ -58,6 +65,17 @@ Run `node scripts/agent-labels.mjs --json` only when the label dry-run reports d
 
 ### Start From A New Issue
 
+Recommended browser path:
+
+```text
+https://github.com/sandeepsalwan1/Vet/issues/new?template=afk-implementation.yml
+```
+
+The AFK form requires an outcome, acceptance criteria, and proof level.
+Submission automatically adds `agent:implement`.
+
+CLI path:
+
 Write the complete request, acceptance criteria, and proof needs in a temporary file.
 
 ```bash
@@ -66,11 +84,11 @@ gh issue create \
   --repo "$REPO" \
   --title "<clear outcome>" \
   --body-file /tmp/vet-agent-issue.md \
-  --label agent:triage
+  --label agent:implement
 ```
 
-That one label starts the normal plan path.
-Triage reads `VISION.md`, repository policy, current issue state, and architecture docs.
+That one label starts cheap trusted triage before any implementation model runs.
+Triage reads root and applicable nested `AGENTS.md` files, `VISION.md`, repository policy, current issue state, architecture docs, and any repository plan/spec linked by the issue.
 An aligned low-risk result adds `agent:implement` and `agent:automerge`, then dispatches implementation automatically.
 Implementation creates `agent/issue-<number>-<slug>`, validates the patch, opens or updates a draft PR, starts exact-head CI, and starts review.
 Review can apply a safe patch, requests proof when needed, publishes `agent-review`, then starts no-mistakes.
@@ -79,16 +97,16 @@ Automerge waits for every configured gate, updates a stale branch from `main`, r
 For an existing issue, start the same path with:
 
 ```bash
-gh issue edit <issue-number> --repo "$REPO" --add-label agent:triage
-```
-
-If the issue has already been manually reviewed and is clearly aligned, the owner may start implementation directly:
-
-```bash
 gh issue edit <issue-number> --repo "$REPO" --add-label agent:implement
 ```
 
-Do not use the direct implementation label to bypass a real product, risk, security, migration, or data decision.
+`agent:triage` remains available when an operator explicitly wants to request or rerun triage:
+
+```bash
+gh issue edit <issue-number> --repo "$REPO" --add-label agent:triage
+```
+
+Neither label bypasses product, risk, security, migration, or data decisions.
 
 ### Ask The Proposer For Candidates
 
@@ -109,8 +127,11 @@ gh pr edit <pr-number> --repo "$REPO" --add-label agent:proof
 ```
 
 CI proof can run on GitHub Actions.
-Remote UI or GIF proof requires a provider that passed a live smoke plus the matching readiness variable.
-Missing provider readiness blocks required visual proof instead of silently replacing it with weaker evidence.
+UI or GIF proof prefers a credentialed Crabbox provider that passed a live smoke plus its readiness variable.
+Without one, Crabbox uses its credential-free `local-container` provider on the GitHub runner with `--desktop` and `--browser`.
+The lane launches each affected route, checks desktop health, records the actual provider and lease, and collects authentic route-bound screenshots or requested video/GIF artifacts.
+This fallback spends GitHub Actions time only and does not require the user's laptop or a paid provider key.
+A missing Docker runtime, failed desktop bootstrap, or invalid artifact blocks required visual proof instead of silently replacing it with weaker evidence.
 
 ### Approve One no-mistakes Decision
 
@@ -170,7 +191,7 @@ Fix technical failures, answer real product questions, or use the exact-head app
 - Cheap proposal and triage: GPT-5.4 nano with low reasoning.
 - Remote implementation: Crabbox first after provider readiness; isolated GitHub Actions fallback for non-visual work.
 - Optional orchestration reference: Sandcastle demonstrates label-driven AFK orchestration patterns and remains an optional worker adapter.
-- OpenClaw execution reference: Crabbox is the remote execution and proof host pattern.
+- OpenClaw execution reference: Crabbox is the execution and computer-use proof host pattern; credential-free visual fallback runs in a Crabbox local container on GitHub Actions.
 - Implementation and review: separate credentialless model jobs and trusted write jobs, using GPT-5.4 mini with low reasoning.
 - Required final gate: exact-head no-mistakes status with default `ask-user` blocking.
 - Safe merge: low or medium risk only after CI, review, required proof, and no-mistakes pass.
@@ -185,6 +206,7 @@ Fix technical failures, answer real product questions, or use the exact-head app
 - Codex Action author gates allow the repository owner and `github-actions[bot]`; cross-repository PR review is rejected before Codex runs.
 - High-risk or high-priority work requires human review.
 - A missing provider, artifact, or lease blocks required visual proof; it does not fake success.
+- Credentialed Crabbox providers require readiness proof; built-in `local-container` receives no provider credentials and must pass the same route, lease, desktop, and media checks.
 - no-mistakes and proof statuses must reflect real execution.
 - The credentialless no-mistakes gate never rebases or publishes changes; deterministic scenario, API, and CLI checks may provide direct non-visual evidence when the trusted request calls for it.
 - A credential-free step runs the trusted typecheck, build, and scenario baseline inside a pinned networkless container before no-mistakes model auth; its Codex process stays read-only, performs each model stage directly without nested review or validation tools, and unpublished source changes fail closed.

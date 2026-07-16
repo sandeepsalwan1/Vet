@@ -7,10 +7,14 @@ Read:
 - PR diff
 - linked issue
 - triage comment
+- root `AGENTS.md`
+- every applicable nested `AGENTS.md` for reviewed files
 - `VISION.md`
+- `README.md`
 - `CONTEXT.md`
 - `docs/architecture.md`
 - `.agent/agent-policy.md`
+- any repository plan or spec file explicitly linked by the issue
 
 You may make small fixes directly when they are clearly correct and within scope.
 

@@ -95,6 +95,7 @@
   },
   "crabbox": {
     "preferWhenProviderAuthExists": true,
+    "credentialFreeVisualFallback": "local-container",
     "readiness": {
       "vercel": "CRABBOX_VERCEL_READY",
       "hetzner": "CRABBOX_HETZNER_READY"
@@ -104,7 +105,8 @@
       "github-actions"
     ],
     "visualProviders": [
-      "hetzner"
+      "hetzner",
+      "local-container"
     ],
     "lanes": {
       "implementRemote": [],

@@ -4,11 +4,14 @@ You are triaging one GitHub issue for this repository.
 
 Read:
 
+- root `AGENTS.md`
+- every applicable nested `AGENTS.md` for the likely change scope
 - `VISION.md`
 - `README.md`
 - `CONTEXT.md`
 - `docs/architecture.md`
 - `.agent/agent-policy.md`
+- any repository plan or spec file explicitly linked by the issue
 - the issue context appended to this prompt
 
 Return JSON only. Use the schema in `.agent/schemas/triage.schema.json`.

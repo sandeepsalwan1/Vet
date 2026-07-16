@@ -2,6 +2,8 @@
 
 Summarize the no-mistakes gate for one agent-created PR.
 
+Read root `AGENTS.md`, applicable nested `AGENTS.md` files, the linked issue, its repository-linked plan/spec, and the exact PR diff.
+
 Return JSON only. Use `.agent/schemas/gate.schema.json`.
 
 Rules:

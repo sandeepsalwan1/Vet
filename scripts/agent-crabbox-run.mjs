@@ -96,19 +96,25 @@ export function selectCrabboxProvider(config, lane, env = process.env) {
     env[vercelReadyName] === "true" &&
     ["VERCEL_TOKEN", "VERCEL_OIDC_TOKEN"].some((name) => present.has(name));
   const hasReadyHetzner = env[hetznerReadyName] === "true" && hasHetzner;
+  const credentialFreeVisualFallback = config.crabbox?.credentialFreeVisualFallback;
+  const hasCredentialFreeVisualFallback =
+    credentialFreeVisualFallback === "local-container" &&
+    config.crabbox?.visualProviders?.includes(credentialFreeVisualFallback);
 
   if (visual) {
-    return hasReadyHetzner
-      ? { available: true, provider: "hetzner", auth }
-      : {
-          available: false,
-          provider: "",
-          reason:
-            env[hetznerReadyName] === "true"
-              ? "ready Hetzner visual provider is missing its required auth"
-              : "Hetzner visual provider has not passed its live readiness smoke",
-          auth
-        };
+    if (hasReadyHetzner) return { available: true, provider: "hetzner", auth };
+    if (hasCredentialFreeVisualFallback) {
+      return { available: true, provider: credentialFreeVisualFallback, auth };
+    }
+    return {
+      available: false,
+      provider: "",
+      reason:
+        env[hetznerReadyName] === "true"
+          ? "ready Hetzner visual provider is missing its required auth"
+          : "Hetzner visual provider has not passed its live readiness smoke",
+      auth
+    };
   }
   if (hasVercel) return { available: true, provider: "vercel-sandbox", auth };
   if (hasReadyHetzner) return { available: true, provider: "hetzner", auth };

@@ -4,6 +4,7 @@ You are proposing useful GitHub issues for this repository.
 
 Read:
 
+- root `AGENTS.md`
 - `VISION.md`
 - `README.md`
 - `CONTEXT.md`

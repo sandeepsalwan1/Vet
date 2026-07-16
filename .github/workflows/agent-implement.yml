@@ -110,9 +110,9 @@ jobs:
           download="$RUNNER_TEMP/crabbox-download"
           bin="$RUNNER_TEMP/crabbox-bin"
           mkdir -p "$download" "$bin"
-          gh release download v0.38.0 --repo openclaw/crabbox --pattern crabbox_0.38.0_linux_amd64.tar.gz --pattern checksums.txt --dir "$download"
+          gh release download v0.38.4 --repo openclaw/crabbox --pattern crabbox_0.38.4_linux_amd64.tar.gz --pattern checksums.txt --dir "$download"
           (cd "$download" && sha256sum --check --ignore-missing checksums.txt)
-          tar -xzf "$download/crabbox_0.38.0_linux_amd64.tar.gz" -C "$bin"
+          tar -xzf "$download/crabbox_0.38.4_linux_amd64.tar.gz" -C "$bin"
           chmod 755 "$bin/crabbox"
           echo "$bin" >> "$GITHUB_PATH"
       - name: Install pinned Vercel Sandbox bridge

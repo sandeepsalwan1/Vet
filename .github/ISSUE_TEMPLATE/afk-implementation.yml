@@ -1,0 +1,60 @@
+name: AFK implementation
+description: Describe an outcome, then let the trusted agent loop implement and validate it.
+labels:
+  - "agent:implement"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Submitting this form starts cheap trusted triage, then unattended implementation for aligned work.
+        High-risk, unclear, or unprovable work stops for human input.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What should be true for the user when this is complete?
+      placeholder: A user can...
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Plan or context
+      description: Link a repository plan/spec, name relevant files, or explain the current behavior.
+      placeholder: Follow plan.md, especially...
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable requirements the agent must satisfy.
+      placeholder: |
+        - [ ] Required behavior works
+        - [ ] Regression coverage passes
+        - [ ] User-facing docs are current
+    validations:
+      required: true
+  - type: dropdown
+    id: proof
+    attributes:
+      label: Proof
+      description: Select the strongest proof the requested behavior needs.
+      options:
+        - Automated tests and checks
+        - UI screenshots through Crabbox
+        - GIF or video through Crabbox
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: Note scope limits, compatibility contracts, or decisions the agent must preserve.
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Start unattended work
+      options:
+        - label: I understand this issue starts unattended triage and may continue through implementation, review, validation, and safe merge.
+          required: true
+        - label: I did not include credentials or confidential information.
+          required: true

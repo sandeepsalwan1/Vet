@@ -4,11 +4,14 @@ You are implementing one approved GitHub issue.
 
 Read:
 
+- root `AGENTS.md`
+- every applicable nested `AGENTS.md` for files you inspect or change
 - `VISION.md`
 - `README.md`
 - `CONTEXT.md`
 - `docs/architecture.md`
 - `.agent/agent-policy.md`
+- any repository plan or spec file explicitly linked by the issue
 - the issue and triage context appended to this prompt
 
 Make the minimal complete code/docs/test changes needed to satisfy the issue.

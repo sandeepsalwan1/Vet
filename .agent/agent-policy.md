@@ -42,6 +42,7 @@ Automerge is forbidden for high-priority or high-risk work even if all checks pa
 - GitHub Actions owns label events and CI status.
 - Crabbox is preferred for implementation/proof when provider auth exists.
 - A provider is eligible only after a live smoke passes and its repository readiness variable is enabled.
+- Crabbox `local-container` is the credential-free exception for explicit visual proof on a GitHub runner; it receives no provider credentials and must produce the same authentic route-bound artifacts or fail closed.
 - GitHub-hosted Actions is the fallback for non-visual work when provider auth is missing.
 - The raw `crabbox` binary is not the issue brain; the worker script plus configured backend is.
 - Codex/OpenAI is one backend choice, not the control plane.
