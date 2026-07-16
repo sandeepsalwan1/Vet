@@ -107,35 +107,61 @@ test("upsert creates a new comment instead of patching an untrusted marker squat
   assert.deepEqual(result, { ok: true, action: "created", commentId: "IC_8" });
 });
 
-test("issue comments use GraphQL and normalize Actions identity", () => {
+test("issue comments use paginated GraphQL and normalize Actions identity", () => {
   let graphqlArgs;
   const comments = getIssueComments(config, 9, {
     ghApiJson: () => assert.fail("healthy GraphQL comments need no REST request"),
     ghReadJson: (args) => {
       graphqlArgs = args;
-      return {
-        comments: [
-          {
-            id: "IC_7",
-            body: `${marker}\nbody`,
-            createdAt: "2026-07-13T00:00:01Z",
-            updatedAt: null,
-            author: { login: "github-actions" }
+      return [
+        {
+          data: {
+            repository: {
+              issueOrPullRequest: {
+                comments: {
+                  nodes: [
+                    {
+                      id: "IC_7",
+                      body: `${marker}\nbody`,
+                      createdAt: "2026-07-13T00:00:01Z",
+                      updatedAt: null,
+                      author: { login: "github-actions" }
+                    }
+                  ]
+                }
+              }
+            }
           }
-        ]
-      };
+        },
+        {
+          data: {
+            repository: {
+              issueOrPullRequest: {
+                comments: {
+                  nodes: [
+                    {
+                      id: "IC_8",
+                      body: "second page",
+                      createdAt: "2026-07-13T00:00:02Z",
+                      updatedAt: "2026-07-13T00:00:03Z",
+                      author: { login: "repo-owner" }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ];
     }
   });
 
-  assert.deepEqual(graphqlArgs, [
-    "issue",
-    "view",
-    "9",
-    "--repo",
-    "repo-owner/repo",
-    "--json",
-    "comments"
-  ]);
+  assert.deepEqual(graphqlArgs.slice(0, 4), ["api", "graphql", "--paginate", "--slurp"]);
+  assert.equal(graphqlArgs.includes("owner=repo-owner"), true);
+  assert.equal(graphqlArgs.includes("name=repo"), true);
+  assert.equal(graphqlArgs.includes("number=9"), true);
+  assert.match(graphqlArgs.at(-1), /comments\(first:100,after:\$endCursor\)/);
+  assert.equal(comments.length, 2);
   assert.equal(comments[0].user.login, "github-actions[bot]");
   assert.equal(comments[0].updated_at, "2026-07-13T00:00:01Z");
   assert.equal(trustedManagedComment(comments[0], marker, "repo-owner"), true);
@@ -208,6 +234,16 @@ test("issue node id uses GraphQL with REST fallback", () => {
       }
     }),
     "I_issue_rest_9"
+  );
+});
+
+test("issue node id fails closed on malformed GraphQL metadata", () => {
+  assert.throws(
+    () => getIssueNodeId(config, 9, {
+      ghReadJson: () => ({ id: null }),
+      ghApiJson: () => assert.fail("malformed GraphQL metadata must not fall back")
+    }),
+    /GraphQL node id response is invalid/
   );
 });
 

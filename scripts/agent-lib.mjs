@@ -397,24 +397,57 @@ function normalizeGraphQLComment(comment) {
   };
 }
 
+const ISSUE_COMMENTS_QUERY = `
+  query($owner:String!,$name:String!,$number:Int!,$endCursor:String) {
+    repository(owner:$owner,name:$name) {
+      issueOrPullRequest(number:$number) {
+        ... on Issue {
+          comments(first:100,after:$endCursor) {
+            nodes { id body createdAt updatedAt author { login } }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+        ... on PullRequest {
+          comments(first:100,after:$endCursor) {
+            nodes { id body createdAt updatedAt author { login } }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      }
+    }
+  }
+`;
+
 export function getIssueComments(config, number, dependencies = {}) {
   const path = `repos/${config.repo.owner}/${config.repo.name}/issues/${number}/comments`;
   const args = [
-    "issue",
-    "view",
-    String(number),
-    "--repo",
-    repoSlug(config),
-    "--json",
-    "comments"
+    "api",
+    "graphql",
+    "--paginate",
+    "--slurp",
+    "-f",
+    `owner=${config.repo.owner}`,
+    "-f",
+    `name=${config.repo.name}`,
+    "-F",
+    `number=${number}`,
+    "-f",
+    `query=${ISSUE_COMMENTS_QUERY}`
   ];
   const readJson = dependencies.ghReadJson ?? ghReadJson;
   try {
-    const result = readJson(args, {}, { delays: [1000, 2000, 4000] });
-    if (!Array.isArray(result?.comments)) {
+    const pages = readJson(args, {}, { delays: [1000, 2000, 4000] });
+    if (!Array.isArray(pages) || pages.length === 0) {
       throw new AgentError(`issue #${number} GraphQL comments response is invalid`, 1);
     }
-    return result.comments.map(normalizeGraphQLComment);
+    const comments = pages.flatMap((page) => {
+      const nodes = page?.data?.repository?.issueOrPullRequest?.comments?.nodes;
+      if (!Array.isArray(nodes)) {
+        throw new AgentError(`issue #${number} GraphQL comments response is invalid`, 1);
+      }
+      return nodes;
+    });
+    return comments.map(normalizeGraphQLComment);
   } catch (error) {
     if (!isTransientGitHubReadError(error)) throw error;
   }
@@ -435,6 +468,7 @@ export function getIssueNodeId(config, number, dependencies = {}) {
       "id"
     ]);
     if (typeof issue?.id === "string" && issue.id) return issue.id;
+    throw new AgentError(`issue #${number} GraphQL node id response is invalid`, 1);
   } catch (error) {
     if (!isTransientGitHubReadError(error)) throw error;
   }
