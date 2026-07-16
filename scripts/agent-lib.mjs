@@ -387,9 +387,18 @@ export function assertTrustedAgentPull(pull, config, options = {}) {
 }
 
 function normalizeGraphQLComment(comment) {
+  if (
+    typeof comment?.id !== "string" ||
+    !comment.id ||
+    !Number.isSafeInteger(comment?.databaseId) ||
+    comment.databaseId <= 0
+  ) {
+    throw new AgentError("GraphQL issue comment metadata is invalid", 1);
+  }
   const login = String(comment?.author?.login ?? "");
   return {
     id: comment?.id,
+    database_id: comment.databaseId,
     body: comment?.body ?? "",
     created_at: comment?.createdAt ?? null,
     updated_at: comment?.updatedAt ?? comment?.createdAt ?? null,
@@ -403,13 +412,13 @@ const ISSUE_COMMENTS_QUERY = `
       issueOrPullRequest(number:$number) {
         ... on Issue {
           comments(first:100,after:$endCursor) {
-            nodes { id body createdAt updatedAt author { login } }
+            nodes { id databaseId body createdAt updatedAt author { login } }
             pageInfo { hasNextPage endCursor }
           }
         }
         ... on PullRequest {
           comments(first:100,after:$endCursor) {
-            nodes { id body createdAt updatedAt author { login } }
+            nodes { id databaseId body createdAt updatedAt author { login } }
             pageInfo { hasNextPage endCursor }
           }
         }
@@ -499,7 +508,12 @@ export function newestManagedComment(comments, marker, repoOwner) {
       const leftTime = Date.parse(left.updated_at ?? left.created_at ?? "") || 0;
       const rightTime = Date.parse(right.updated_at ?? right.created_at ?? "") || 0;
       if (leftTime !== rightTime) return rightTime - leftTime;
-      return Number(right.id ?? 0) - Number(left.id ?? 0);
+      const leftId = String(left.database_id ?? left.id ?? "");
+      const rightId = String(right.database_id ?? right.id ?? "");
+      if (/^\d+$/.test(leftId) && /^\d+$/.test(rightId) && leftId.length !== rightId.length) {
+        return rightId.length - leftId.length;
+      }
+      return rightId.localeCompare(leftId);
     })[0] ?? null;
 }
 

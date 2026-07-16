@@ -122,6 +122,7 @@ test("issue comments use paginated GraphQL and normalize Actions identity", () =
                   nodes: [
                     {
                       id: "IC_7",
+                      databaseId: 7,
                       body: `${marker}\nbody`,
                       createdAt: "2026-07-13T00:00:01Z",
                       updatedAt: null,
@@ -141,6 +142,7 @@ test("issue comments use paginated GraphQL and normalize Actions identity", () =
                   nodes: [
                     {
                       id: "IC_8",
+                      databaseId: 8,
                       body: "second page",
                       createdAt: "2026-07-13T00:00:02Z",
                       updatedAt: "2026-07-13T00:00:03Z",
@@ -165,6 +167,20 @@ test("issue comments use paginated GraphQL and normalize Actions identity", () =
   assert.equal(comments[0].user.login, "github-actions[bot]");
   assert.equal(comments[0].updated_at, "2026-07-13T00:00:01Z");
   assert.equal(trustedManagedComment(comments[0], marker, "repo-owner"), true);
+});
+
+test("newest managed comment uses GraphQL database ids when timestamps tie", () => {
+  const timestamp = "2026-07-13T00:00:01Z";
+  const selected = newestManagedComment(
+    [
+      { ...comment("IC_z", "github-actions[bot]", undefined, timestamp), database_id: 7 },
+      { ...comment("IC_a", "github-actions[bot]", undefined, timestamp), database_id: 8 }
+    ],
+    marker,
+    "repo-owner"
+  );
+
+  assert.equal(selected.id, "IC_a");
 });
 
 test("issue comments fall back to REST after a transient GraphQL outage", () => {
