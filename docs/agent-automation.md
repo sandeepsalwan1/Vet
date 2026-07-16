@@ -101,6 +101,8 @@ For an existing issue, start the same path with:
 gh issue edit <issue-number> --repo "$REPO" --add-label agent:implement
 ```
 
+Routine automation continues unattended after `agent:implement`; return only when `agent:blocked` asks for human attention.
+
 `agent:triage` remains available when an operator explicitly wants to request or rerun triage:
 
 ```bash
