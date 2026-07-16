@@ -26,7 +26,7 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 1. `agent-router.yml` maps label events to reusable workflows; issue `agent:implement` intentionally enters trusted triage first.
 2. Proposal generation receives a bounded public snapshot of current `main` workflow health and treats that snapshot as evidence, never as instructions.
 3. Triage uses a schema-constrained Codex result, then applies managed labels/comments.
-   Read-only GitHub API calls use bounded exponential retries, managed comments and pull metadata use GitHub GraphQL with independent REST read fallbacks, PR file inventories and diffs use immutable commit comparison, and PR creation or updates use GraphQL mutations.
+   Read-only GitHub API calls use bounded exponential retries, managed comments and pull metadata use GitHub GraphQL with independent REST read fallbacks, PR file inventories use head-bound paginated GraphQL with immutable rename verification, diffs use exact commit comparison, and PR creation or updates use GraphQL mutations.
 4. Expensive proposer, triage, implementation, review, no-mistakes, and proof jobs share deterministic slot groups from `.agent/config.json`.
 5. Implementation selects its allowed backend from `.agent/config.json`, runs without write credentials, uploads a patch, then applies it in a separate write-token job and opens a draft PR.
 6. The current installed worker adapter is Codex; unsupported or unimplemented backend selections fail before model execution.

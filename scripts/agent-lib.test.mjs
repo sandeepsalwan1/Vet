@@ -320,8 +320,93 @@ test("pull metadata falls back to REST after a transient GraphQL outage", () => 
   );
 });
 
-test("pull files and diff use the exact immutable comparison", () => {
+test("pull files use complete head-bound GraphQL pagination beyond the compare limit", () => {
   const pull = {
+    number: 9,
+    changed_files: 301,
+    base: { sha: "a".repeat(40) },
+    head: { sha: "b".repeat(40) }
+  };
+  const nodes = Array.from({ length: 301 }, (_, index) => ({
+    path: `docs/file-${index}.md`,
+    additions: 1,
+    deletions: 0,
+    changeType: "MODIFIED"
+  }));
+  const pages = [nodes.slice(0, 100), nodes.slice(100, 200), nodes.slice(200, 300), nodes.slice(300)].map(
+    (pageNodes) => ({
+      data: {
+        repository: {
+          pullRequest: {
+            number: 9,
+            changedFiles: 301,
+            baseRefOid: "a".repeat(40),
+            headRefOid: "b".repeat(40),
+            files: { nodes: pageNodes }
+          }
+        }
+      }
+    })
+  );
+  const files = getPullFiles(config, pull, {
+    ghApiJson: () => assert.fail("healthy GraphQL pagination needs no comparison request"),
+    ghReadJson: (args) => {
+      assert.ok(args.includes("--paginate"));
+      assert.ok(args.includes("number=9"));
+      return pages;
+    }
+  });
+
+  assert.equal(files.length, 301);
+  assert.deepEqual(files[300], {
+    filename: "docs/file-300.md",
+    status: "modified",
+    additions: 1,
+    deletions: 0,
+    changes: 1
+  });
+});
+
+test("pull file renames preserve immutable source paths", () => {
+  const pull = {
+    number: 9,
+    changed_files: 1,
+    base: { sha: "a".repeat(40) },
+    head: { sha: "b".repeat(40) }
+  };
+  const compared = [{
+    filename: "docs/new.md",
+    previous_filename: ".github/workflows/old.yml",
+    status: "renamed"
+  }];
+  const files = getPullFiles(config, pull, {
+    ghReadJson: () => [{
+      data: {
+        repository: {
+          pullRequest: {
+            number: 9,
+            changedFiles: 1,
+            baseRefOid: "a".repeat(40),
+            headRefOid: "b".repeat(40),
+            files: {
+              nodes: [{ path: "docs/new.md", additions: 0, deletions: 0, changeType: "RENAMED" }]
+            }
+          }
+        }
+      }
+    }],
+    ghApiJson: (path) => {
+      assert.equal(path, `repos/repo-owner/repo/compare/${"a".repeat(40)}...${"b".repeat(40)}`);
+      return { files: compared };
+    }
+  });
+
+  assert.equal(files[0].previous_filename, ".github/workflows/old.yml");
+});
+
+test("small pull file reads fall back to the immutable comparison after a transient GraphQL outage", () => {
+  const pull = {
+    number: 9,
     changed_files: 1,
     base: { sha: "a".repeat(40) },
     head: { sha: "b".repeat(40) }
@@ -329,6 +414,9 @@ test("pull files and diff use the exact immutable comparison", () => {
   const files = [{ filename: "docs/readme.md", status: "modified" }];
   assert.equal(
     getPullFiles(config, pull, {
+      ghReadJson: () => {
+        throw new AgentError("gh: HTTP 503", 1);
+      },
       ghApiJson: (path) => {
         assert.equal(path, `repos/repo-owner/repo/compare/${"a".repeat(40)}...${"b".repeat(40)}`);
         return { files };
@@ -336,6 +424,16 @@ test("pull files and diff use the exact immutable comparison", () => {
     }),
     files
   );
+});
+
+test("pull diff and snapshot stay bound to exact commits", () => {
+  const pull = {
+    number: 9,
+    changed_files: 1,
+    base: { sha: "a".repeat(40) },
+    head: { sha: "b".repeat(40) }
+  };
+  const files = [{ filename: "docs/readme.md", status: "modified" }];
   assert.equal(
     getPullDiff(config, pull, {
       ghRead: (args) => {

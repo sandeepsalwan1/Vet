@@ -571,19 +571,130 @@ export function getPullRequest(config, number, dependencies = {}) {
   return apiJson(`repos/${config.repo.owner}/${config.repo.name}/pulls/${number}`);
 }
 
+const PULL_FILES_QUERY = `
+  query($owner:String!,$name:String!,$number:Int!,$endCursor:String) {
+    repository(owner:$owner,name:$name) {
+      pullRequest(number:$number) {
+        number
+        baseRefOid
+        headRefOid
+        changedFiles
+        files(first:100,after:$endCursor) {
+          nodes { path additions deletions changeType }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    }
+  }
+`;
+
+function comparedPullFiles(config, pull, dependencies = {}) {
+  const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  const comparison = apiJson(
+    `repos/${config.repo.owner}/${config.repo.name}/compare/${pull.base.sha}...${pull.head.sha}`
+  );
+  const files = comparison?.files;
+  if (!Array.isArray(files) || Number(pull.changed_files) !== files.length) {
+    throw new AgentError("could not verify the complete immutable PR file inventory", 1);
+  }
+  return files;
+}
+
+function normalizeGraphQLPullFile(file) {
+  const status = file?.changeType === "DELETED" ? "removed" : String(file?.changeType ?? "").toLowerCase();
+  if (
+    typeof file?.path !== "string" ||
+    !file.path ||
+    !["added", "changed", "copied", "modified", "removed", "renamed"].includes(status) ||
+    !Number.isSafeInteger(file?.additions) ||
+    file.additions < 0 ||
+    !Number.isSafeInteger(file?.deletions) ||
+    file.deletions < 0
+  ) {
+    throw new AgentError("GraphQL pull file metadata is invalid", 1);
+  }
+  return {
+    filename: file.path,
+    status,
+    additions: file.additions,
+    deletions: file.deletions,
+    changes: file.additions + file.deletions
+  };
+}
+
 export function getPullFiles(config, pull, dependencies = {}) {
   const baseSha = String(pull?.base?.sha ?? "");
   const headSha = String(pull?.head?.sha ?? "");
-  if (!/^[a-f0-9]{40}$/.test(baseSha) || !/^[a-f0-9]{40}$/.test(headSha)) {
-    throw new AgentError("pull comparison requires exact base and head SHAs", 1);
+  const pullNumber = Number(pull?.number);
+  const changedFiles = Number(pull?.changed_files);
+  if (
+    !/^[a-f0-9]{40}$/.test(baseSha) ||
+    !/^[a-f0-9]{40}$/.test(headSha) ||
+    !Number.isSafeInteger(pullNumber) ||
+    pullNumber <= 0 ||
+    !Number.isSafeInteger(changedFiles) ||
+    changedFiles < 0
+  ) {
+    throw new AgentError("pull file inventory requires exact pull metadata", 1);
   }
-  const apiJson = dependencies.ghApiJson ?? ghApiJson;
-  const comparison = apiJson(
-    `repos/${config.repo.owner}/${config.repo.name}/compare/${baseSha}...${headSha}`
-  );
-  const files = comparison?.files;
-  if (!Array.isArray(files) || Number(pull?.changed_files) !== files.length) {
+  const args = [
+    "api",
+    "graphql",
+    "--paginate",
+    "--slurp",
+    "-f",
+    `owner=${config.repo.owner}`,
+    "-f",
+    `name=${config.repo.name}`,
+    "-F",
+    `number=${pullNumber}`,
+    "-f",
+    `query=${PULL_FILES_QUERY}`
+  ];
+  const readJson = dependencies.ghReadJson ?? ghReadJson;
+  let pages;
+  try {
+    pages = readJson(args, {}, { delays: [1000, 2000, 4000] });
+  } catch (error) {
+    if (!isTransientGitHubReadError(error) || changedFiles > 300) throw error;
+    return comparedPullFiles(config, pull, dependencies);
+  }
+
+  if (!Array.isArray(pages) || pages.length === 0) {
+    throw new AgentError(`PR #${pullNumber} GraphQL files response is invalid`, 1);
+  }
+  const files = pages.flatMap((page) => {
+    const value = page?.data?.repository?.pullRequest;
+    const nodes = value?.files?.nodes;
+    if (
+      value?.number !== pullNumber ||
+      value?.baseRefOid !== baseSha ||
+      value?.headRefOid !== headSha ||
+      value?.changedFiles !== changedFiles ||
+      !Array.isArray(nodes)
+    ) {
+      throw new AgentError(`PR #${pullNumber} GraphQL files response is invalid`, 1);
+    }
+    return nodes.map(normalizeGraphQLPullFile);
+  });
+  if (files.length !== changedFiles || new Set(files.map((file) => file.filename)).size !== files.length) {
     throw new AgentError("could not verify the complete PR file inventory", 1);
+  }
+
+  const renamed = files.filter((file) => file.status === "renamed");
+  if (renamed.length) {
+    if (changedFiles > 300) {
+      throw new AgentError("cannot verify renamed source paths in a PR with more than 300 files", 1);
+    }
+    const compared = comparedPullFiles(config, pull, dependencies);
+    const comparedByName = new Map(compared.map((file) => [file?.filename, file]));
+    for (const file of renamed) {
+      const immutable = comparedByName.get(file.filename);
+      if (immutable?.status !== "renamed" || typeof immutable?.previous_filename !== "string") {
+        throw new AgentError("could not verify a renamed PR source path", 1);
+      }
+      file.previous_filename = immutable.previous_filename;
+    }
   }
   return files;
 }
