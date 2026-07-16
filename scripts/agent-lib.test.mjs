@@ -32,6 +32,10 @@ function comment(id, login, body = `${marker}\nbody`, updatedAt = `2026-07-13T00
   return { id, body, updated_at: updatedAt, user: { login } };
 }
 
+function treeEntry(path, sha = "c".repeat(40)) {
+  return { path, mode: "100644", sha, type: "blob" };
+}
+
 test("managed comment markers match exact stage prefixes only", () => {
   const base = "<!-- agent-gate:v1 -->";
   const implement = `${base}\n<!-- agent-gate-implement:v1 -->`;
@@ -356,17 +360,17 @@ test("pull files use complete head-bound GraphQL pagination beyond the compare l
   );
   const files = getPullFiles(config, pull, {
     ghApiJson: (path) => {
-      const unchanged = nodes.slice(0, 300).map((node) => ({ path: node.path, type: "blob" }));
+      const unchanged = nodes.slice(0, 300).map((node) => treeEntry(node.path));
       if (path.endsWith(`${"a".repeat(40)}?recursive=1`)) {
         return {
           truncated: false,
-          tree: [...unchanged, { path: "docs/original.md", type: "blob" }]
+          tree: [...unchanged, treeEntry("docs/original.md")]
         };
       }
       if (path.endsWith(`${"b".repeat(40)}?recursive=1`)) {
         return {
           truncated: false,
-          tree: [...unchanged, { path: "docs/renamed.md", type: "blob" }]
+          tree: [...unchanged, treeEntry("docs/renamed.md")]
         };
       }
       return assert.fail(`unexpected immutable tree request: ${path}`);
@@ -421,13 +425,13 @@ test("pull file renames preserve immutable source paths", () => {
       if (path.endsWith(`${"a".repeat(40)}?recursive=1`)) {
         return {
           truncated: false,
-          tree: [{ path: compared[0].previous_filename, type: "blob" }]
+          tree: [treeEntry(compared[0].previous_filename)]
         };
       }
       if (path.endsWith(`${"b".repeat(40)}?recursive=1`)) {
         return {
           truncated: false,
-          tree: [{ path: compared[0].filename, type: "blob" }]
+          tree: [treeEntry(compared[0].filename)]
         };
       }
       return assert.fail(`unexpected immutable tree request: ${path}`);
@@ -460,33 +464,31 @@ test("small pull file reads fall back to the immutable comparison after a transi
   );
 });
 
-test("large pull file reads fall back to complete REST pagination with an exact-head recheck", () => {
+test("large pull file reads fall back to a complete immutable tree diff", () => {
   const pull = {
     number: 9,
     changed_files: 301,
     base: { sha: "a".repeat(40) },
     head: { sha: "b".repeat(40) }
   };
-  const files = Array.from({ length: 301 }, (_, index) => ({
-    filename: `docs/file-${index}.md`,
-    status: "modified"
-  }));
-  assert.equal(
-    getPullFiles(config, pull, {
-      ghReadJson: () => {
-        throw new AgentError("gh: HTTP 503", 1);
-      },
-      ghApiJson: (path, options) => {
-        if (path.endsWith("/files?per_page=100")) {
-          assert.equal(options.paginate, true);
-          return files;
-        }
-        assert.equal(path, "repos/repo-owner/repo/pulls/9");
-        return pull;
+  const paths = Array.from({ length: 301 }, (_, index) => `docs/file-${index}.md`);
+  const files = getPullFiles(config, pull, {
+    ghReadJson: () => {
+      throw new AgentError("gh: HTTP 503", 1);
+    },
+    ghApiJson: (path) => {
+      if (path.endsWith(`${"a".repeat(40)}?recursive=1`)) {
+        return { truncated: false, tree: paths.map((value) => treeEntry(value, "c".repeat(40))) };
       }
-    }),
-    files
-  );
+      if (path.endsWith(`${"b".repeat(40)}?recursive=1`)) {
+        return { truncated: false, tree: paths.map((value) => treeEntry(value, "d".repeat(40))) };
+      }
+      return assert.fail(`unexpected immutable tree request: ${path}`);
+    }
+  });
+
+  assert.equal(files.length, 301);
+  assert.ok(files.every((file) => file.status === "modified"));
 });
 
 test("pull diff and snapshot stay bound to exact commits", () => {

@@ -600,25 +600,7 @@ function comparedPullFiles(config, pull, dependencies = {}) {
   return files;
 }
 
-function restPullFiles(config, pull, dependencies = {}) {
-  const apiJson = dependencies.ghApiJson ?? ghApiJson;
-  const root = `repos/${config.repo.owner}/${config.repo.name}/pulls/${pull.number}`;
-  const files = apiJson(`${root}/files?per_page=100`, { paginate: true }) ?? [];
-  const current = apiJson(root);
-  if (
-    !Array.isArray(files) ||
-    files.length !== Number(pull.changed_files) ||
-    current?.number !== pull.number ||
-    current?.changed_files !== pull.changed_files ||
-    current?.base?.sha !== pull.base.sha ||
-    current?.head?.sha !== pull.head.sha
-  ) {
-    throw new AgentError("could not bind the REST PR file inventory to the expected head", 1);
-  }
-  return files;
-}
-
-function immutableTreePaths(config, sha, dependencies = {}) {
+function immutableTreeEntries(config, sha, dependencies = {}) {
   const apiJson = dependencies.ghApiJson ?? ghApiJson;
   const response = apiJson(
     `repos/${config.repo.owner}/${config.repo.name}/git/trees/${sha}?recursive=1`
@@ -626,16 +608,62 @@ function immutableTreePaths(config, sha, dependencies = {}) {
   if (response?.truncated !== false || !Array.isArray(response?.tree)) {
     throw new AgentError("could not verify the complete immutable repository tree", 1);
   }
-  const paths = response.tree
+  const entries = response.tree
     .filter((entry) => entry?.type !== "tree")
-    .map((entry) => entry?.path);
+    .map((entry) => ({
+      path: entry?.path,
+      mode: entry?.mode,
+      oid: entry?.sha,
+      type: entry?.type
+    }));
   if (
-    paths.some((path) => typeof path !== "string" || !path) ||
-    new Set(paths).size !== paths.length
+    entries.some(
+      (entry) =>
+        typeof entry.path !== "string" ||
+        !entry.path ||
+        typeof entry.mode !== "string" ||
+        !/^[a-f0-9]{40}$/.test(String(entry.oid ?? "")) ||
+        !["blob", "commit"].includes(entry.type)
+    ) ||
+    new Set(entries.map((entry) => entry.path)).size !== entries.length
   ) {
     throw new AgentError("immutable repository tree metadata is invalid", 1);
   }
-  return new Set(paths);
+  return new Map(entries.map((entry) => [entry.path, entry]));
+}
+
+function treeDiffPullFiles(config, pull, dependencies = {}) {
+  const base = immutableTreeEntries(config, pull.base.sha, dependencies);
+  const head = immutableTreeEntries(config, pull.head.sha, dependencies);
+  const removed = [...base.keys()].filter((path) => !head.has(path)).sort();
+  const added = [...head.keys()].filter((path) => !base.has(path)).sort();
+  const modified = [...base.keys()]
+    .filter((path) => {
+      const next = head.get(path);
+      if (!next) return false;
+      const prior = base.get(path);
+      return prior.oid !== next.oid || prior.mode !== next.mode || prior.type !== next.type;
+    })
+    .sort();
+  const renameCount = removed.length + added.length + modified.length - Number(pull.changed_files);
+  if (!Number.isSafeInteger(renameCount) || renameCount < 0 || renameCount > Math.min(removed.length, added.length)) {
+    throw new AgentError("immutable tree diff does not match the PR changed-file count", 1);
+  }
+
+  const files = [
+    ...modified.map((filename) => ({ filename, status: "modified" })),
+    ...added.slice(renameCount).map((filename) => ({ filename, status: "added" })),
+    ...removed.slice(renameCount).map((filename) => ({ filename, status: "removed" })),
+    ...added.slice(0, renameCount).map((filename, index) => ({
+      filename,
+      previous_filename: removed[index],
+      status: "renamed"
+    }))
+  ].sort((left, right) => left.filename.localeCompare(right.filename));
+  if (files.length !== Number(pull.changed_files)) {
+    throw new AgentError("could not verify the complete immutable PR file inventory", 1);
+  }
+  return files;
 }
 
 function normalizeGraphQLPullFile(file) {
@@ -697,7 +725,7 @@ export function getPullFiles(config, pull, dependencies = {}) {
     if (!isTransientGitHubReadError(error)) throw error;
     return changedFiles <= 300
       ? comparedPullFiles(config, pull, dependencies)
-      : restPullFiles(config, pull, dependencies);
+      : treeDiffPullFiles(config, pull, dependencies);
   }
 
   if (!Array.isArray(pages) || pages.length === 0) {
@@ -723,8 +751,8 @@ export function getPullFiles(config, pull, dependencies = {}) {
 
   const renamed = files.filter((file) => file.status === "renamed");
   if (renamed.length) {
-    const basePaths = immutableTreePaths(config, baseSha, dependencies);
-    const headPaths = immutableTreePaths(config, headSha, dependencies);
+    const basePaths = new Set(immutableTreeEntries(config, baseSha, dependencies).keys());
+    const headPaths = new Set(immutableTreeEntries(config, headSha, dependencies).keys());
     const removedPaths = new Set(
       files.filter((file) => file.status === "removed").map((file) => file.filename)
     );
