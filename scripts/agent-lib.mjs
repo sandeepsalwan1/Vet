@@ -600,6 +600,26 @@ function comparedPullFiles(config, pull, dependencies = {}) {
   return files;
 }
 
+function immutableTreePaths(config, sha, dependencies = {}) {
+  const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  const response = apiJson(
+    `repos/${config.repo.owner}/${config.repo.name}/git/trees/${sha}?recursive=1`
+  );
+  if (response?.truncated !== false || !Array.isArray(response?.tree)) {
+    throw new AgentError("could not verify the complete immutable repository tree", 1);
+  }
+  const paths = response.tree
+    .filter((entry) => entry?.type !== "tree")
+    .map((entry) => entry?.path);
+  if (
+    paths.some((path) => typeof path !== "string" || !path) ||
+    new Set(paths).size !== paths.length
+  ) {
+    throw new AgentError("immutable repository tree metadata is invalid", 1);
+  }
+  return new Set(paths);
+}
+
 function normalizeGraphQLPullFile(file) {
   const status = file?.changeType === "DELETED" ? "removed" : String(file?.changeType ?? "").toLowerCase();
   if (
@@ -683,17 +703,21 @@ export function getPullFiles(config, pull, dependencies = {}) {
 
   const renamed = files.filter((file) => file.status === "renamed");
   if (renamed.length) {
-    if (changedFiles > 300) {
-      throw new AgentError("cannot verify renamed source paths in a PR with more than 300 files", 1);
+    const basePaths = immutableTreePaths(config, baseSha, dependencies);
+    const headPaths = immutableTreePaths(config, headSha, dependencies);
+    const removedPaths = new Set(
+      files.filter((file) => file.status === "removed").map((file) => file.filename)
+    );
+    const renameSources = [...basePaths]
+      .filter((path) => !headPaths.has(path) && !removedPaths.has(path))
+      .sort();
+    if (renameSources.length !== renamed.length) {
+      throw new AgentError("could not verify every renamed PR source path", 1);
     }
-    const compared = comparedPullFiles(config, pull, dependencies);
-    const comparedByName = new Map(compared.map((file) => [file?.filename, file]));
-    for (const file of renamed) {
-      const immutable = comparedByName.get(file.filename);
-      if (immutable?.status !== "renamed" || typeof immutable?.previous_filename !== "string") {
-        throw new AgentError("could not verify a renamed PR source path", 1);
-      }
-      file.previous_filename = immutable.previous_filename;
+    // Gate consumers inspect the complete source/destination path union, not rename pairing.
+    renamed.sort((left, right) => left.filename.localeCompare(right.filename));
+    for (const [index, file] of renamed.entries()) {
+      file.previous_filename = renameSources[index];
     }
   }
   return files;

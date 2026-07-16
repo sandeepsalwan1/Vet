@@ -333,6 +333,12 @@ test("pull files use complete head-bound GraphQL pagination beyond the compare l
     deletions: 0,
     changeType: "MODIFIED"
   }));
+  nodes[300] = {
+    path: "docs/renamed.md",
+    additions: 0,
+    deletions: 0,
+    changeType: "RENAMED"
+  };
   const pages = [nodes.slice(0, 100), nodes.slice(100, 200), nodes.slice(200, 300), nodes.slice(300)].map(
     (pageNodes) => ({
       data: {
@@ -349,7 +355,22 @@ test("pull files use complete head-bound GraphQL pagination beyond the compare l
     })
   );
   const files = getPullFiles(config, pull, {
-    ghApiJson: () => assert.fail("healthy GraphQL pagination needs no comparison request"),
+    ghApiJson: (path) => {
+      const unchanged = nodes.slice(0, 300).map((node) => ({ path: node.path, type: "blob" }));
+      if (path.endsWith(`${"a".repeat(40)}?recursive=1`)) {
+        return {
+          truncated: false,
+          tree: [...unchanged, { path: "docs/original.md", type: "blob" }]
+        };
+      }
+      if (path.endsWith(`${"b".repeat(40)}?recursive=1`)) {
+        return {
+          truncated: false,
+          tree: [...unchanged, { path: "docs/renamed.md", type: "blob" }]
+        };
+      }
+      return assert.fail(`unexpected immutable tree request: ${path}`);
+    },
     ghReadJson: (args) => {
       assert.ok(args.includes("--paginate"));
       assert.ok(args.includes("number=9"));
@@ -359,11 +380,12 @@ test("pull files use complete head-bound GraphQL pagination beyond the compare l
 
   assert.equal(files.length, 301);
   assert.deepEqual(files[300], {
-    filename: "docs/file-300.md",
-    status: "modified",
-    additions: 1,
+    filename: "docs/renamed.md",
+    status: "renamed",
+    additions: 0,
     deletions: 0,
-    changes: 1
+    changes: 0,
+    previous_filename: "docs/original.md"
   });
 });
 
@@ -396,12 +418,24 @@ test("pull file renames preserve immutable source paths", () => {
       }
     }],
     ghApiJson: (path) => {
-      assert.equal(path, `repos/repo-owner/repo/compare/${"a".repeat(40)}...${"b".repeat(40)}`);
-      return { files: compared };
+      if (path.endsWith(`${"a".repeat(40)}?recursive=1`)) {
+        return {
+          truncated: false,
+          tree: [{ path: compared[0].previous_filename, type: "blob" }]
+        };
+      }
+      if (path.endsWith(`${"b".repeat(40)}?recursive=1`)) {
+        return {
+          truncated: false,
+          tree: [{ path: compared[0].filename, type: "blob" }]
+        };
+      }
+      return assert.fail(`unexpected immutable tree request: ${path}`);
     }
   });
 
   assert.equal(files[0].previous_filename, ".github/workflows/old.yml");
+  assert.deepEqual(privilegedCandidatePaths(files), [".github/workflows/old.yml"]);
 });
 
 test("small pull file reads fall back to the immutable comparison after a transient GraphQL outage", () => {
