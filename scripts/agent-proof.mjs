@@ -11,7 +11,7 @@ import {
   finish,
   gh,
   ghApiJson,
-  ghJson,
+  ghReadJson,
   issueLabels,
   loadConfig,
   markdownJsonBlock,
@@ -70,7 +70,7 @@ function implementationSourceIssue(body) {
 function sourceIssueNumber(config, pull) {
   const metadataNumber = implementationSourceIssue(pull.body);
   if (metadataNumber) return metadataNumber;
-  const closing = ghJson([
+  const closing = ghReadJson([
     "pr",
     "view",
     String(pull.number),

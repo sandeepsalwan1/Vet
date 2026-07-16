@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  AgentError,
   actionsRunUrl,
   assertTrustedAgentPull,
   candidatePaths,
   commentHasManagedMarker,
   dispatchWorkflow,
+  ghApiJson,
+  ghReadJson,
   issueSnapshotSha256,
+  isTransientGitHubReadError,
   newestManagedComment,
   parseImplementationMetadata,
   privilegedCandidatePaths,
@@ -89,6 +93,113 @@ test("upsert creates a new comment instead of patching an untrusted marker squat
   assert.equal(patchCalled, false);
   assert.deepEqual(apiArgs, ["api", "repos/repo-owner/repo/issues/9/comments", "-X", "POST", "--input", "/tmp/comment.json"]);
   assert.deepEqual(result, { ok: true, action: "created", commentId: 8 });
+});
+
+test("GitHub API reads retry transient service failures with bounded backoff", () => {
+  let calls = 0;
+  const delays = [];
+  const retries = [];
+  const result = ghApiJson(
+    "repos/repo-owner/repo/issues/9/comments",
+    { paginate: true },
+    {
+      delays: [10, 20, 40],
+      sleep: (delay) => delays.push(delay),
+      onRetry: (attempt, delay) => retries.push({ attempt, delay }),
+      ghJson: (args) => {
+        calls += 1;
+        assert.deepEqual(args, [
+          "api",
+          "repos/repo-owner/repo/issues/9/comments",
+          "--paginate",
+          "--slurp"
+        ]);
+        if (calls < 3) {
+          throw new AgentError("gh api exited 1", 1, {
+            stdout: "<!DOCTYPE html><title>Unicorn</title>",
+            stderr: "gh: HTTP 503"
+          });
+        }
+        return [[{ id: 1 }], [{ id: 2 }]];
+      }
+    }
+  );
+
+  assert.deepEqual(result, [{ id: 1 }, { id: 2 }]);
+  assert.equal(calls, 3);
+  assert.deepEqual(delays, [10, 20]);
+  assert.deepEqual(retries, [
+    { attempt: 1, delay: 10 },
+    { attempt: 2, delay: 20 }
+  ]);
+});
+
+test("read-only GitHub CLI JSON retries use the same bounded policy", () => {
+  let calls = 0;
+  const result = ghReadJson(
+    ["pr", "view", "9", "--json", "closingIssuesReferences"],
+    {},
+    {
+      delays: [1],
+      sleep: () => {},
+      onRetry: () => {},
+      gh: () => {
+        calls += 1;
+        if (calls === 1) {
+          throw new AgentError("gh pr view exited 1", 1, { stderr: "gh: HTTP 502" });
+        }
+        return { stdout: '{"closingIssuesReferences":[]}' };
+      }
+    }
+  );
+
+  assert.deepEqual(result, { closingIssuesReferences: [] });
+  assert.equal(calls, 2);
+});
+
+test("GitHub API reads do not retry permanent failures", () => {
+  let calls = 0;
+  assert.throws(
+    () =>
+      ghApiJson("repos/repo-owner/repo/issues/9", {}, {
+        delays: [1, 2],
+        sleep: () => assert.fail("permanent errors must not sleep"),
+        onRetry: () => assert.fail("permanent errors must not retry"),
+        ghJson: () => {
+          calls += 1;
+          throw new AgentError("gh: HTTP 404", 1);
+        }
+      }),
+    /HTTP 404/
+  );
+  assert.equal(calls, 1);
+  assert.equal(isTransientGitHubReadError(new AgentError("gh: HTTP 503", 1)), true);
+  assert.equal(isTransientGitHubReadError(new AgentError("gh: HTTP 404", 1)), false);
+});
+
+test("GitHub API read retries stop at the configured bound and redact HTML", () => {
+  let calls = 0;
+  assert.throws(
+    () =>
+      ghApiJson("repos/repo-owner/repo/issues/9", {}, {
+        delays: [1, 2],
+        sleep: () => {},
+        onRetry: () => {},
+        ghJson: () => {
+          calls += 1;
+          throw new AgentError("gh api exited 1", 1, {
+            stdout: "<!DOCTYPE html><title>Unicorn</title>",
+            stderr: "gh: HTTP 503"
+          });
+        }
+      }),
+    (error) => {
+      assert.match(error.message, /failed after 3 attempts/);
+      assert.doesNotMatch(JSON.stringify(error.details), /DOCTYPE|Unicorn/);
+      return true;
+    }
+  );
+  assert.equal(calls, 3);
 });
 
 test("privileged candidate policy covers nested instructions, agent roots, package controls, and rename sources", () => {

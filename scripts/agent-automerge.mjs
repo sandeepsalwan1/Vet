@@ -9,7 +9,7 @@ import {
   fail,
   finish,
   ghApiJson,
-  ghJson,
+  ghReadJson,
   issueSnapshotSha256,
   issueLabels,
   loadConfig,
@@ -941,7 +941,7 @@ async function main() {
     `repos/${config.repo.owner}/${config.repo.name}/pulls/${prNumber}/files?per_page=100`,
     { paginate: true }
   ) ?? [];
-  const closing = ghJson([
+  const closing = ghReadJson([
     "pr",
     "view",
     String(prNumber),

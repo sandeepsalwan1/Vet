@@ -7,7 +7,7 @@ import {
   AgentError,
   fail,
   finish,
-  ghJson,
+  ghReadJson,
   loadConfig,
   parseArgs,
   requireValue,
@@ -303,7 +303,7 @@ export function buildProposerContext(config, payloads) {
 
 export function collectProposerContext(config, dependencies = {}) {
   const env = proposerContextEnvironment(dependencies.env ?? process.env);
-  const api = dependencies.api ?? ((endpoint, fields) => ghJson(["api", endpoint, "--jq", fields], { env }));
+  const api = dependencies.api ?? ((endpoint, fields) => ghReadJson(["api", endpoint, "--jq", fields], { env }));
   const repository = repoSlug(config);
   const branch = encodeURIComponent(config.repo.defaultBranch);
   const commit = api(`repos/${repository}/commits/${branch}`, COMMIT_FIELDS);

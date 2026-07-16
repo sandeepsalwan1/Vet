@@ -6,6 +6,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const GITHUB_READ_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000];
+const SYNC_SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
 
 export class AgentError extends Error {
   constructor(message, code = 1, details = undefined) {
@@ -135,8 +137,63 @@ export function ghJson(args, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-export function ghApiJson(path, options = {}) {
-  const result = ghJson(["api", path, ...(options.paginate ? ["--paginate", "--slurp"] : [])], options);
+function sleepSync(milliseconds) {
+  Atomics.wait(SYNC_SLEEP_BUFFER, 0, 0, milliseconds);
+}
+
+export function isTransientGitHubReadError(error) {
+  const text = [error?.message, error?.details?.stdout, error?.details?.stderr]
+    .filter(Boolean)
+    .join("\n");
+  return (
+    /\b(?:HTTP\s*)?(?:429|500|502|503|504)\b/i.test(text) ||
+    /(?:bad gateway|connection reset|connection refused|connection timed out|temporary failure|tls handshake timeout|unexpected eof)/i.test(
+      text
+    )
+  );
+}
+
+export function retryGitHubRead(operation, options = {}) {
+  const delays = options.delays ?? GITHUB_READ_RETRY_DELAYS_MS;
+  const sleep = options.sleep ?? sleepSync;
+  const onRetry = options.onRetry ?? ((attempt, delay) => {
+    process.stderr.write(`GitHub API read unavailable; retry ${attempt}/${delays.length} in ${delay}ms\n`);
+  });
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return operation();
+    } catch (error) {
+      if (!isTransientGitHubReadError(error) || attempt >= delays.length) {
+        if (isTransientGitHubReadError(error)) {
+          throw new AgentError(`GitHub API read failed after ${attempt + 1} attempts`, 1, {
+            stderr: String(error?.details?.stderr ?? error?.message ?? "transient GitHub API failure").trim()
+          });
+        }
+        throw error;
+      }
+      const delay = delays[attempt];
+      onRetry(attempt + 1, delay);
+      sleep(delay);
+    }
+  }
+}
+
+export function ghRead(args, options = {}, dependencies = {}) {
+  const execute = dependencies.gh ?? gh;
+  return retryGitHubRead(() => execute(args, options), dependencies);
+}
+
+export function ghReadJson(args, options = {}, dependencies = {}) {
+  const result = ghRead(args, options, dependencies);
+  const text = result.stdout.trim();
+  return text ? JSON.parse(text) : null;
+}
+
+export function ghApiJson(path, options = {}, dependencies = {}) {
+  const args = ["api", path, ...(options.paginate ? ["--paginate", "--slurp"] : [])];
+  const execute = dependencies.ghJson ?? ghJson;
+  const result = retryGitHubRead(() => execute(args, options), dependencies);
   if (options.paginate && Array.isArray(result) && result.every((page) => Array.isArray(page))) {
     return result.flat();
   }

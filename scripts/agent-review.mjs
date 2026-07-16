@@ -9,9 +9,9 @@ import {
   dispatchWorkflow,
   fail,
   finish,
-  gh,
   ghApiJson,
-  ghJson,
+  ghRead,
+  ghReadJson,
   gitOutput,
   issueLabels,
   loadConfig,
@@ -150,7 +150,7 @@ export function requireManagedTriageComment(comments, marker, sourceIssueNumber,
 function writePrompt(config, prNumber, outputPath, expectedHeadSha) {
   const { pull, issue, comments, files } = fetchPull(config, prNumber);
   assertReviewedHead(pull, expectedHeadSha);
-  const closing = ghJson([
+  const closing = ghReadJson([
     "pr",
     "view",
     String(prNumber),
@@ -171,7 +171,7 @@ function writePrompt(config, prNumber, outputPath, expectedHeadSha) {
     sourceIssueNumber,
     config.repo.owner
   );
-  const diff = gh(["pr", "diff", String(prNumber), "--repo", `${config.repo.owner}/${config.repo.name}`, "--patch"]).stdout;
+  const diff = ghRead(["pr", "diff", String(prNumber), "--repo", `${config.repo.owner}/${config.repo.name}`, "--patch"]).stdout;
   const prompt = buildReviewPrompt({
     template: readText(join(repoRoot(), ".agent/prompts/review.md")),
     pull,
@@ -364,7 +364,7 @@ export function reviewLabelChanges(config, review) {
 function applyReview(config, prNumber, reviewPath, patchPath, dryRun, expectedHeadSha) {
   const { pull, files } = fetchPull(config, prNumber);
   assertReviewedHead(pull, expectedHeadSha);
-  const closing = ghJson([
+  const closing = ghReadJson([
     "pr",
     "view",
     String(prNumber),
