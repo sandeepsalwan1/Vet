@@ -9,7 +9,7 @@ import {
   gateLabelChanges,
   gateCommentBody,
   isRetryableInvalidOutput,
-  isActiveAxiResult,
+  isReattachableAxiError,
   isRetryableReviewEnvironmentBlock,
   isRetryableTestEnvironmentBlock,
   isRetryableTechnicalFailure,
@@ -618,10 +618,7 @@ test("empty invalid AXI output receives one bounded fresh retry", () => {
   let calls = 0;
   const result = runNoMistakesGate("Validate the PR", "/repo", {
     runCommand: () => ({ status: 0 }),
-    spawnSync: (_command, args) => {
-      if (args[1] === "status") {
-        return { stdout: "runs: 0 runs yet\n", stderr: "", status: 0 };
-      }
+    spawnSync: () => {
       calls += 1;
       if (calls === 1) {
         return { stdout: "error: transient agent output", stderr: "", status: 1 };
@@ -649,15 +646,7 @@ test("client timeout reattaches to one active AXI run without a fresh retry", ()
       if (command === "no-mistakes" && args[0] === "init") initCalls += 1;
       return { status: 0 };
     },
-    spawnSync: (_command, args) => {
-      if (args[1] === "status") {
-        return {
-          stdout:
-            "run:\n  id: run-active\n  status: running\n  head: abcdef12\n",
-          stderr: "",
-          status: 0,
-        };
-      }
+    spawnSync: () => {
       runCalls += 1;
       if (runCalls === 1) {
         return {
@@ -687,18 +676,41 @@ test("client timeout reattaches to one active AXI run without a fresh retry", ()
   assert.equal(parseAxiResult(result.stdout, result.status).status, "passed");
 });
 
-test("active AXI status is distinct from malformed terminal output", () => {
-  const active = parseAxiResult(
-    "run:\n  id: run-active\n  status: running\n  head: abcdef12\n",
-    0,
-  );
-
-  assert.equal(isActiveAxiResult(active), true);
-  assert.equal(isRetryableInvalidOutput(active), false);
+test("only AXI drive-loop client errors qualify for direct reattachment", () => {
   assert.equal(
-    isActiveAxiResult(parseAxiResult("error: malformed output", 1)),
-    false,
+    isReattachableAxiError(
+      "error: drive run: read response: i/o timeout\n",
+    ),
+    true,
   );
+  assert.equal(isReattachableAxiError("error: malformed output"), false);
+});
+
+test("repeated AXI drive errors stop without restarting the active daemon", () => {
+  let runCalls = 0;
+  let daemonStops = 0;
+  const result = runNoMistakesGate("Validate the PR", "/repo", {
+    runCommand: (command, args) => {
+      if (command === "no-mistakes" && args[0] === "daemon") daemonStops += 1;
+      return { status: 0 };
+    },
+    spawnSync: () => {
+      runCalls += 1;
+      return {
+        stdout: "error: drive run: read response: i/o timeout\n",
+        stderr: "",
+        status: 1,
+      };
+    },
+    maxReattachments: 1,
+    onReattach: () => {},
+  });
+
+  assert.equal(runCalls, 2);
+  assert.equal(daemonStops, 0);
+  assert.equal(result.attempts, 1);
+  assert.equal(result.attachments, 2);
+  assert.equal(parseAxiResult(result.stdout, result.status).outcome, "invalid-output");
 });
 
 test("failure stage diagnostics accept only fixed pipeline stage names", () => {
