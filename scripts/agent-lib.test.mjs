@@ -478,10 +478,34 @@ test("large pull file reads fall back to a complete immutable tree diff", () => 
     },
     ghApiJson: (path) => {
       if (path.endsWith(`${"a".repeat(40)}?recursive=1`)) {
-        return { truncated: false, tree: paths.map((value) => treeEntry(value, "c".repeat(40))) };
+        return { truncated: true, sha: "e".repeat(40), tree: [] };
       }
       if (path.endsWith(`${"b".repeat(40)}?recursive=1`)) {
-        return { truncated: false, tree: paths.map((value) => treeEntry(value, "d".repeat(40))) };
+        return { truncated: true, sha: "f".repeat(40), tree: [] };
+      }
+      if (path.endsWith("e".repeat(40))) {
+        return {
+          truncated: false,
+          tree: [{ path: "docs", mode: "040000", sha: "1".repeat(40), type: "tree" }]
+        };
+      }
+      if (path.endsWith("f".repeat(40))) {
+        return {
+          truncated: false,
+          tree: [{ path: "docs", mode: "040000", sha: "2".repeat(40), type: "tree" }]
+        };
+      }
+      if (path.endsWith("1".repeat(40))) {
+        return {
+          truncated: false,
+          tree: paths.map((value) => treeEntry(value.replace("docs/", ""), "c".repeat(40)))
+        };
+      }
+      if (path.endsWith("2".repeat(40))) {
+        return {
+          truncated: false,
+          tree: paths.map((value) => treeEntry(value.replace("docs/", ""), "d".repeat(40)))
+        };
       }
       return assert.fail(`unexpected immutable tree request: ${path}`);
     }
@@ -690,7 +714,7 @@ test("GitHub API read retries stop at the configured bound and redact HTML", () 
 test("privileged candidate policy covers nested instructions, agent roots, package controls, and rename sources", () => {
   const files = [
     { filename: "src/safe.ts" },
-    { filename: "docs/old.md", previous_filename: "docs/AGENTS.md" },
+    { filename: "docs/old.md", previous_filenames: ["docs/AGENTS.md", ".github/workflows/old.yml"] },
     { filename: "packages/client/.codex/config.toml" },
     { filename: "packages/widget/package.json" },
     { filename: "skills/local/SKILL.md" },
@@ -701,6 +725,7 @@ test("privileged candidate policy covers nested instructions, agent roots, packa
     "src/safe.ts",
     "docs/old.md",
     "docs/AGENTS.md",
+    ".github/workflows/old.yml",
     "packages/client/.codex/config.toml",
     "packages/widget/package.json",
     "skills/local/SKILL.md",
@@ -708,6 +733,7 @@ test("privileged candidate policy covers nested instructions, agent roots, packa
   ]);
   assert.deepEqual(privilegedCandidatePaths(files), [
     "docs/AGENTS.md",
+    ".github/workflows/old.yml",
     "packages/client/.codex/config.toml",
     "packages/widget/package.json",
     "skills/local/SKILL.md",

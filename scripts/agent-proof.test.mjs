@@ -165,10 +165,15 @@ test("affected routes derive only from concrete changed Next.js pages", () => {
     { filename: "apps/internal/app/(staff)/staff/tasks/page.tsx", status: "modified" },
     { filename: "apps/internal/app/api/tasks/route.ts", status: "modified" },
     { filename: "apps/internal/app/approvals/[id]/page.tsx", status: "modified" },
+    {
+      filename: "apps/internal/app/new/page.tsx",
+      previous_filenames: ["apps/internal/app/old/page.tsx"],
+      status: "renamed"
+    },
     { filename: "apps/internal/app/records/page.tsx", status: "removed" }
   ]);
 
-  assert.deepEqual(routes, ["/request", "/staff/tasks"]);
+  assert.deepEqual(routes, ["/new", "/old", "/request", "/staff/tasks"]);
 });
 
 test("explicit visual route is local, static, and normalized", () => {

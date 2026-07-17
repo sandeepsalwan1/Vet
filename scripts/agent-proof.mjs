@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   AgentError,
   addLabels,
+  candidatePaths,
   dispatchWorkflow,
   extractJson,
   fail,
@@ -223,7 +224,7 @@ export function deriveAffectedRoutes(files, explicitRoute = "") {
   const routes = [];
   for (const file of files ?? []) {
     if (file?.status === "removed") continue;
-    for (const path of [file?.filename, file?.previous_filename]) {
+    for (const path of candidatePaths([file])) {
       if (!path) continue;
       const route = routeForPageFile(path);
       if (route) routes.push(route);

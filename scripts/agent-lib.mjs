@@ -266,7 +266,9 @@ const PRIVILEGED_PACKAGE_FILES = new Set([
 function candidatePathValues(candidate) {
   if (typeof candidate === "string") return [candidate];
   if (!candidate || typeof candidate !== "object") return [];
-  return [candidate.filename, candidate.previous_filename].filter((value) => typeof value === "string");
+  const prior = Array.isArray(candidate.previous_filenames) ? candidate.previous_filenames : [];
+  return [candidate.filename, candidate.previous_filename, ...prior]
+    .filter((value) => typeof value === "string");
 }
 
 export function candidatePaths(candidates) {
@@ -602,13 +604,41 @@ function comparedPullFiles(config, pull, dependencies = {}) {
 
 function immutableTreeEntries(config, sha, dependencies = {}) {
   const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  const root = `repos/${config.repo.owner}/${config.repo.name}/git/trees`;
   const response = apiJson(
-    `repos/${config.repo.owner}/${config.repo.name}/git/trees/${sha}?recursive=1`
+    `${root}/${sha}?recursive=1`
   );
-  if (response?.truncated !== false || !Array.isArray(response?.tree)) {
+  if (!Array.isArray(response?.tree) || typeof response?.truncated !== "boolean") {
     throw new AgentError("could not verify the complete immutable repository tree", 1);
   }
-  const entries = response.tree
+  let rawEntries = response.tree;
+  if (response.truncated) {
+    if (!/^[a-f0-9]{40}$/.test(String(response?.sha ?? ""))) {
+      throw new AgentError("truncated immutable repository tree has no root SHA", 1);
+    }
+    rawEntries = [];
+    const walk = (treeSha, prefix = "", depth = 0) => {
+      if (depth > 128) throw new AgentError("immutable repository tree exceeds the depth limit", 1);
+      const page = apiJson(`${root}/${treeSha}`);
+      if (page?.truncated !== false || !Array.isArray(page?.tree)) {
+        throw new AgentError("could not traverse the complete immutable repository tree", 1);
+      }
+      for (const entry of page.tree) {
+        const name = entry?.path;
+        if (typeof name !== "string" || !name || !/^[a-f0-9]{40}$/.test(String(entry?.sha ?? ""))) {
+          throw new AgentError("immutable repository tree metadata is invalid", 1);
+        }
+        const path = prefix ? `${prefix}/${name}` : name;
+        if (entry.type === "tree") {
+          walk(entry.sha, path, depth + 1);
+        } else {
+          rawEntries.push({ ...entry, path });
+        }
+      }
+    };
+    walk(response.sha);
+  }
+  const entries = rawEntries
     .filter((entry) => entry?.type !== "tree")
     .map((entry) => ({
       path: entry?.path,
@@ -654,12 +684,11 @@ function treeDiffPullFiles(config, pull, dependencies = {}) {
     ...modified.map((filename) => ({ filename, status: "modified" })),
     ...added.slice(renameCount).map((filename) => ({ filename, status: "added" })),
     ...removed.slice(renameCount).map((filename) => ({ filename, status: "removed" })),
-    ...added.slice(0, renameCount).map((filename, index) => ({
-      filename,
-      previous_filename: removed[index],
-      status: "renamed"
-    }))
+    ...added.slice(0, renameCount).map((filename) => ({ filename, status: "renamed" }))
   ].sort((left, right) => left.filename.localeCompare(right.filename));
+  const renamed = files.filter((file) => file.status === "renamed");
+  if (renamed.length === 1) renamed[0].previous_filename = removed[0];
+  if (renamed.length > 1) renamed[0].previous_filenames = removed.slice(0, renameCount);
   if (files.length !== Number(pull.changed_files)) {
     throw new AgentError("could not verify the complete immutable PR file inventory", 1);
   }
@@ -762,11 +791,9 @@ export function getPullFiles(config, pull, dependencies = {}) {
     if (renameSources.length !== renamed.length) {
       throw new AgentError("could not verify every renamed PR source path", 1);
     }
-    // Gate consumers inspect the complete source/destination path union, not rename pairing.
     renamed.sort((left, right) => left.filename.localeCompare(right.filename));
-    for (const [index, file] of renamed.entries()) {
-      file.previous_filename = renameSources[index];
-    }
+    if (renamed.length === 1) renamed[0].previous_filename = renameSources[0];
+    if (renamed.length > 1) renamed[0].previous_filenames = renameSources;
   }
   return files;
 }
