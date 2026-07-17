@@ -291,6 +291,7 @@ test("pull metadata uses GraphQL and normalizes the trusted REST shape", () => {
         body: "body",
         url: "https://example.test/pull/9",
         author: { login: "app/github-actions" },
+        mergedBy: { login: "github-actions" },
         baseRefName: "main",
         baseRefOid: "a".repeat(40),
         headRefName: "agent/issue-9-fix",
@@ -302,6 +303,7 @@ test("pull metadata uses GraphQL and normalizes the trusted REST shape", () => {
 
   assert.equal(pull.state, "open");
   assert.equal(pull.user.login, "github-actions[bot]");
+  assert.equal(pull.merged_by.login, "github-actions[bot]");
   assert.equal(pull.head.repo.full_name, "repo-owner/repo");
   assert.equal(pull.base.repo.full_name, "repo-owner/repo");
   assert.equal(pull.mergeable_state, "clean");
