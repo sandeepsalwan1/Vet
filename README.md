@@ -73,3 +73,5 @@ Main routes:
 - `/arrival`, `/booking`, `/pickup`, `/records`, `/followup`, `/call`, `/request`
 - `/staff`, `/staff/agent`, `/staff/approvals`
 - `/api/mock/clinic`, `/api/agent/*`, `/api/approvals`, `/api/reports/*`
+
+hi this works
