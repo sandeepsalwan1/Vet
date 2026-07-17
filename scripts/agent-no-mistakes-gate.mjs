@@ -210,7 +210,7 @@ function parseRunFields(output) {
   if (runIndex === -1) return fields;
   for (const line of lines.slice(runIndex + 1)) {
     if (!line.startsWith("  ")) break;
-    const match = line.match(/^\s{2}(id|head):\s*(.+?)\s*$/);
+    const match = line.match(/^\s{2}(id|head|status):\s*(.+?)\s*$/);
     if (match) {
       const value = match[2];
       if (value.startsWith('"') && value.endsWith('"')) {
@@ -320,6 +320,14 @@ export function isRetryableInvalidOutput(gate) {
     gate?.outcome === "invalid-output" &&
     Object.keys(gate?.run ?? {}).length === 0 &&
     gate?.findings?.length === 0
+  );
+}
+
+export function isActiveAxiResult(gate) {
+  return (
+    gate?.status === "failed" &&
+    gate?.outcome === "invalid-output" &&
+    ["pending", "running"].includes(gate?.run?.status)
   );
 }
 
@@ -637,6 +645,13 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
       process.stderr.write(
         "retrying no-mistakes once after an isolated gate infrastructure failure\n",
       ));
+  const onReattach =
+    dependencies.onReattach ??
+    (() =>
+      process.stderr.write(
+        "reattaching to the active no-mistakes run after a transient client timeout\n",
+      ));
+  const maxReattachments = dependencies.maxReattachments ?? 12;
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     execute("no-mistakes", ["init"], { cwd: repoDir, env });
@@ -649,29 +664,59 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
       "--skip",
       "rebase,test,push,pr,ci",
     ];
-    const result = spawn(
-      "no-mistakes",
-      axiArgs,
-      {
+    let run;
+    let parsed;
+    for (let attachment = 0; attachment <= maxReattachments; attachment += 1) {
+      const result = spawn("no-mistakes", axiArgs, {
         cwd: repoDir,
         env,
         encoding: "utf8",
         stdio: "pipe",
-      },
-    );
-    if (result.error) {
-      throw new AgentError("no-mistakes gate could not start", 1);
+      });
+      if (result.error) {
+        throw new AgentError("no-mistakes gate could not start", 1);
+      }
+      run = {
+        stdout: result.stdout ?? "",
+        stderr: result.stderr ?? "",
+        status: result.status ?? 1,
+        attempts: attempt,
+        attachments: attachment + 1,
+      };
+      parsed = parseAxiResult(
+        `${run.stdout}\n${run.stderr}`.trim(),
+        run.status,
+      );
+      if (!isRetryableInvalidOutput(parsed)) break;
+
+      const statusResult = spawn("no-mistakes", ["axi", "status"], {
+        cwd: repoDir,
+        env,
+        encoding: "utf8",
+        stdio: "pipe",
+      });
+      if (statusResult.error) break;
+      const statusRun = {
+        stdout: statusResult.stdout ?? "",
+        stderr: statusResult.stderr ?? "",
+        status: statusResult.status ?? 1,
+        attempts: attempt,
+        attachments: attachment + 1,
+      };
+      const statusParsed = parseAxiResult(
+        `${statusRun.stdout}\n${statusRun.stderr}`.trim(),
+        statusRun.status,
+      );
+      if (!isActiveAxiResult(statusParsed)) {
+        run = statusRun;
+        parsed = statusParsed;
+        break;
+      }
+      run = statusRun;
+      parsed = statusParsed;
+      if (attachment === maxReattachments) break;
+      onReattach(statusParsed);
     }
-    const run = {
-      stdout: result.stdout ?? "",
-      stderr: result.stderr ?? "",
-      status: result.status ?? 1,
-      attempts: attempt,
-    };
-    const parsed = parseAxiResult(
-      `${run.stdout}\n${run.stderr}`.trim(),
-      run.status,
-    );
     if (
       attempt === 1 &&
       (isRetryableReviewEnvironmentBlock(parsed) ||

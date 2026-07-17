@@ -9,6 +9,7 @@ import {
   gateLabelChanges,
   gateCommentBody,
   isRetryableInvalidOutput,
+  isActiveAxiResult,
   isRetryableReviewEnvironmentBlock,
   isRetryableTestEnvironmentBlock,
   isRetryableTechnicalFailure,
@@ -617,7 +618,10 @@ test("empty invalid AXI output receives one bounded fresh retry", () => {
   let calls = 0;
   const result = runNoMistakesGate("Validate the PR", "/repo", {
     runCommand: () => ({ status: 0 }),
-    spawnSync: () => {
+    spawnSync: (_command, args) => {
+      if (args[1] === "status") {
+        return { stdout: "runs: 0 runs yet\n", stderr: "", status: 0 };
+      }
       calls += 1;
       if (calls === 1) {
         return { stdout: "error: transient agent output", stderr: "", status: 1 };
@@ -634,6 +638,67 @@ test("empty invalid AXI output receives one bounded fresh retry", () => {
   assert.equal(calls, 2);
   assert.equal(result.attempts, 2);
   assert.equal(parseAxiResult(result.stdout, result.status).status, "passed");
+});
+
+test("client timeout reattaches to one active AXI run without a fresh retry", () => {
+  let runCalls = 0;
+  let initCalls = 0;
+  let reattachments = 0;
+  const result = runNoMistakesGate("Validate the PR", "/repo", {
+    runCommand: (command, args) => {
+      if (command === "no-mistakes" && args[0] === "init") initCalls += 1;
+      return { status: 0 };
+    },
+    spawnSync: (_command, args) => {
+      if (args[1] === "status") {
+        return {
+          stdout:
+            "run:\n  id: run-active\n  status: running\n  head: abcdef12\n",
+          stderr: "",
+          status: 0,
+        };
+      }
+      runCalls += 1;
+      if (runCalls === 1) {
+        return {
+          stdout: "error: drive run: read response: i/o timeout\n",
+          stderr: "",
+          status: 1,
+        };
+      }
+      return {
+        stdout:
+          "run:\n  id: run-active\n  status: completed\n  head: abcdef12\noutcome: passed\n",
+        stderr: "",
+        status: 0,
+      };
+    },
+    onReattach: () => {
+      reattachments += 1;
+    },
+    expectedHead: HEAD,
+  });
+
+  assert.equal(initCalls, 1);
+  assert.equal(runCalls, 2);
+  assert.equal(reattachments, 1);
+  assert.equal(result.attempts, 1);
+  assert.equal(result.attachments, 2);
+  assert.equal(parseAxiResult(result.stdout, result.status).status, "passed");
+});
+
+test("active AXI status is distinct from malformed terminal output", () => {
+  const active = parseAxiResult(
+    "run:\n  id: run-active\n  status: running\n  head: abcdef12\n",
+    0,
+  );
+
+  assert.equal(isActiveAxiResult(active), true);
+  assert.equal(isRetryableInvalidOutput(active), false);
+  assert.equal(
+    isActiveAxiResult(parseAxiResult("error: malformed output", 1)),
+    false,
+  );
 });
 
 test("failure stage diagnostics accept only fixed pipeline stage names", () => {

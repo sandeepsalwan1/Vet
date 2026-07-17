@@ -31,6 +31,7 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 5. Implementation selects its allowed backend from `.agent/config.json`, runs without write credentials, uploads a patch, then applies it in a separate write-token job and opens a draft PR.
 6. The current installed worker adapter is Codex; unsupported or unimplemented backend selections fail before model execution.
 7. Review repeats the read/patch separation, publishes `agent-review`, and invokes no-mistakes.
+   If the no-mistakes client times out while its daemon is still reviewing, the gate reattaches to that exact active run instead of starting another model run.
 8. Proof runs configured commands and records provider/artifact evidence when remote visual proof is required.
 9. Automerge updates an eligible stale branch, reruns head-bound CI and review, and merges only after every gate passes on the new head.
 10. After a trusted merge, automerge resolves the exact merge commit, dispatches baseline CI and CodeQL for it, removes agent workflow labels, and closes the linked source issue while preserving priority labels.

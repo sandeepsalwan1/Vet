@@ -493,12 +493,14 @@ export function getIssueNodeId(config, number, dependencies = {}) {
 
 function normalizeGraphQLPull(pull, config) {
   const headRepo = pull?.headRepository?.nameWithOwner ?? "";
-  const author = String(pull?.author?.login ?? "");
-  const normalizedAuthor = ["app/github-actions", "github-actions", "github-actions[bot]"].includes(
-    author.toLowerCase()
-  )
-    ? "github-actions[bot]"
-    : author;
+  const normalizeLogin = (value) => {
+    const login = String(value ?? "");
+    return ["app/github-actions", "github-actions", "github-actions[bot]"].includes(
+      login.toLowerCase()
+    )
+      ? "github-actions[bot]"
+      : login;
+  };
   return {
     number: pull?.number,
     node_id: pull?.id,
@@ -514,7 +516,10 @@ function normalizeGraphQLPull(pull, config) {
     title: pull?.title ?? "",
     body: pull?.body ?? "",
     html_url: pull?.url,
-    user: { login: normalizedAuthor },
+    user: { login: normalizeLogin(pull?.author?.login) },
+    merged_by: pull?.mergedBy
+      ? { login: normalizeLogin(pull.mergedBy.login) }
+      : null,
     base: {
       ref: pull?.baseRefName ?? "",
       sha: pull?.baseRefOid ?? "",
@@ -543,6 +548,7 @@ export function getPullRequest(config, number, dependencies = {}) {
     "isDraft",
     "mergeCommit",
     "mergeable",
+    "mergedBy",
     "mergedAt",
     "mergeStateStatus",
     "number",
