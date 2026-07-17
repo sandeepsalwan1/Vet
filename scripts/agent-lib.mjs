@@ -266,7 +266,9 @@ const PRIVILEGED_PACKAGE_FILES = new Set([
 function candidatePathValues(candidate) {
   if (typeof candidate === "string") return [candidate];
   if (!candidate || typeof candidate !== "object") return [];
-  return [candidate.filename, candidate.previous_filename].filter((value) => typeof value === "string");
+  const prior = Array.isArray(candidate.previous_filenames) ? candidate.previous_filenames : [];
+  return [candidate.filename, candidate.previous_filename, ...prior]
+    .filter((value) => typeof value === "string");
 }
 
 export function candidatePaths(candidates) {
@@ -487,6 +489,340 @@ export function getIssueNodeId(config, number, dependencies = {}) {
     throw new AgentError(`issue #${number} has no GraphQL node id`, 1);
   }
   return issue.node_id;
+}
+
+function normalizeGraphQLPull(pull, config) {
+  const headRepo = pull?.headRepository?.nameWithOwner ?? "";
+  const author = String(pull?.author?.login ?? "");
+  const normalizedAuthor = ["app/github-actions", "github-actions", "github-actions[bot]"].includes(
+    author.toLowerCase()
+  )
+    ? "github-actions[bot]"
+    : author;
+  return {
+    number: pull?.number,
+    node_id: pull?.id,
+    state: String(pull?.state ?? "").toLowerCase() === "open" ? "open" : "closed",
+    merged: Boolean(pull?.mergedAt),
+    merged_at: pull?.mergedAt ?? null,
+    merge_commit_sha: pull?.mergeCommit?.oid ?? null,
+    mergeable: pull?.mergeable === "MERGEABLE",
+    mergeable_state: String(pull?.mergeStateStatus ?? "unknown").toLowerCase(),
+    draft: Boolean(pull?.isDraft),
+    auto_merge: pull?.autoMergeRequest ?? null,
+    changed_files: pull?.changedFiles,
+    title: pull?.title ?? "",
+    body: pull?.body ?? "",
+    html_url: pull?.url,
+    user: { login: normalizedAuthor },
+    base: {
+      ref: pull?.baseRefName ?? "",
+      sha: pull?.baseRefOid ?? "",
+      repo: { full_name: repoSlug(config) }
+    },
+    head: {
+      ref: pull?.headRefName ?? "",
+      sha: pull?.headRefOid ?? "",
+      repo: { full_name: headRepo }
+    }
+  };
+}
+
+export function getPullRequest(config, number, dependencies = {}) {
+  const readJson = dependencies.ghReadJson ?? ghReadJson;
+  const fields = [
+    "autoMergeRequest",
+    "baseRefName",
+    "baseRefOid",
+    "body",
+    "changedFiles",
+    "headRefName",
+    "headRefOid",
+    "headRepository",
+    "id",
+    "isDraft",
+    "mergeCommit",
+    "mergeable",
+    "mergedAt",
+    "mergeStateStatus",
+    "number",
+    "state",
+    "title",
+    "url",
+    "author"
+  ].join(",");
+  try {
+    const pull = readJson([
+      "pr",
+      "view",
+      String(number),
+      "--repo",
+      repoSlug(config),
+      "--json",
+      fields
+    ], {}, { delays: [1000, 2000, 4000] });
+    if (
+      pull?.number !== Number(number) ||
+      typeof pull?.id !== "string" ||
+      !pull.id ||
+      !/^[a-f0-9]{40}$/.test(String(pull?.headRefOid ?? "")) ||
+      !/^[a-f0-9]{40}$/.test(String(pull?.baseRefOid ?? ""))
+    ) {
+      throw new AgentError(`PR #${number} GraphQL response is invalid`, 1);
+    }
+    return normalizeGraphQLPull(pull, config);
+  } catch (error) {
+    if (!isTransientGitHubReadError(error)) throw error;
+  }
+  const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  return apiJson(`repos/${config.repo.owner}/${config.repo.name}/pulls/${number}`);
+}
+
+const PULL_FILES_QUERY = `
+  query($owner:String!,$name:String!,$number:Int!,$endCursor:String) {
+    repository(owner:$owner,name:$name) {
+      pullRequest(number:$number) {
+        number
+        baseRefOid
+        headRefOid
+        changedFiles
+        files(first:100,after:$endCursor) {
+          nodes { path additions deletions changeType }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    }
+  }
+`;
+
+function comparedPullFiles(config, pull, dependencies = {}) {
+  const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  const comparison = apiJson(
+    `repos/${config.repo.owner}/${config.repo.name}/compare/${pull.base.sha}...${pull.head.sha}`
+  );
+  const files = comparison?.files;
+  if (!Array.isArray(files) || Number(pull.changed_files) !== files.length) {
+    throw new AgentError("could not verify the complete immutable PR file inventory", 1);
+  }
+  return files;
+}
+
+function immutableTreeEntries(config, sha, dependencies = {}) {
+  const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  const root = `repos/${config.repo.owner}/${config.repo.name}/git/trees`;
+  const response = apiJson(
+    `${root}/${sha}?recursive=1`
+  );
+  if (!Array.isArray(response?.tree) || typeof response?.truncated !== "boolean") {
+    throw new AgentError("could not verify the complete immutable repository tree", 1);
+  }
+  let rawEntries = response.tree;
+  if (response.truncated) {
+    if (!/^[a-f0-9]{40}$/.test(String(response?.sha ?? ""))) {
+      throw new AgentError("truncated immutable repository tree has no root SHA", 1);
+    }
+    rawEntries = [];
+    const walk = (treeSha, prefix = "", depth = 0) => {
+      if (depth > 128) throw new AgentError("immutable repository tree exceeds the depth limit", 1);
+      const page = apiJson(`${root}/${treeSha}`);
+      if (page?.truncated !== false || !Array.isArray(page?.tree)) {
+        throw new AgentError("could not traverse the complete immutable repository tree", 1);
+      }
+      for (const entry of page.tree) {
+        const name = entry?.path;
+        if (typeof name !== "string" || !name || !/^[a-f0-9]{40}$/.test(String(entry?.sha ?? ""))) {
+          throw new AgentError("immutable repository tree metadata is invalid", 1);
+        }
+        const path = prefix ? `${prefix}/${name}` : name;
+        if (entry.type === "tree") {
+          walk(entry.sha, path, depth + 1);
+        } else {
+          rawEntries.push({ ...entry, path });
+        }
+      }
+    };
+    walk(response.sha);
+  }
+  const entries = rawEntries
+    .filter((entry) => entry?.type !== "tree")
+    .map((entry) => ({
+      path: entry?.path,
+      mode: entry?.mode,
+      oid: entry?.sha,
+      type: entry?.type
+    }));
+  if (
+    entries.some(
+      (entry) =>
+        typeof entry.path !== "string" ||
+        !entry.path ||
+        typeof entry.mode !== "string" ||
+        !/^[a-f0-9]{40}$/.test(String(entry.oid ?? "")) ||
+        !["blob", "commit"].includes(entry.type)
+    ) ||
+    new Set(entries.map((entry) => entry.path)).size !== entries.length
+  ) {
+    throw new AgentError("immutable repository tree metadata is invalid", 1);
+  }
+  return new Map(entries.map((entry) => [entry.path, entry]));
+}
+
+function treeDiffPullFiles(config, pull, dependencies = {}) {
+  const base = immutableTreeEntries(config, pull.base.sha, dependencies);
+  const head = immutableTreeEntries(config, pull.head.sha, dependencies);
+  const removed = [...base.keys()].filter((path) => !head.has(path)).sort();
+  const added = [...head.keys()].filter((path) => !base.has(path)).sort();
+  const modified = [...base.keys()]
+    .filter((path) => {
+      const next = head.get(path);
+      if (!next) return false;
+      const prior = base.get(path);
+      return prior.oid !== next.oid || prior.mode !== next.mode || prior.type !== next.type;
+    })
+    .sort();
+  const renameCount = removed.length + added.length + modified.length - Number(pull.changed_files);
+  if (!Number.isSafeInteger(renameCount) || renameCount < 0 || renameCount > Math.min(removed.length, added.length)) {
+    throw new AgentError("immutable tree diff does not match the PR changed-file count", 1);
+  }
+
+  const files = [
+    ...modified.map((filename) => ({ filename, status: "modified" })),
+    ...added.slice(renameCount).map((filename) => ({ filename, status: "added" })),
+    ...removed.slice(renameCount).map((filename) => ({ filename, status: "removed" })),
+    ...added.slice(0, renameCount).map((filename) => ({ filename, status: "renamed" }))
+  ].sort((left, right) => left.filename.localeCompare(right.filename));
+  const renamed = files.filter((file) => file.status === "renamed");
+  if (renamed.length === 1) renamed[0].previous_filename = removed[0];
+  if (renamed.length > 1) renamed[0].previous_filenames = removed.slice(0, renameCount);
+  if (files.length !== Number(pull.changed_files)) {
+    throw new AgentError("could not verify the complete immutable PR file inventory", 1);
+  }
+  return files;
+}
+
+function normalizeGraphQLPullFile(file) {
+  const status = file?.changeType === "DELETED" ? "removed" : String(file?.changeType ?? "").toLowerCase();
+  if (
+    typeof file?.path !== "string" ||
+    !file.path ||
+    !["added", "changed", "copied", "modified", "removed", "renamed"].includes(status) ||
+    !Number.isSafeInteger(file?.additions) ||
+    file.additions < 0 ||
+    !Number.isSafeInteger(file?.deletions) ||
+    file.deletions < 0
+  ) {
+    throw new AgentError("GraphQL pull file metadata is invalid", 1);
+  }
+  return {
+    filename: file.path,
+    status,
+    additions: file.additions,
+    deletions: file.deletions,
+    changes: file.additions + file.deletions
+  };
+}
+
+export function getPullFiles(config, pull, dependencies = {}) {
+  const baseSha = String(pull?.base?.sha ?? "");
+  const headSha = String(pull?.head?.sha ?? "");
+  const pullNumber = Number(pull?.number);
+  const changedFiles = Number(pull?.changed_files);
+  if (
+    !/^[a-f0-9]{40}$/.test(baseSha) ||
+    !/^[a-f0-9]{40}$/.test(headSha) ||
+    !Number.isSafeInteger(pullNumber) ||
+    pullNumber <= 0 ||
+    !Number.isSafeInteger(changedFiles) ||
+    changedFiles < 0
+  ) {
+    throw new AgentError("pull file inventory requires exact pull metadata", 1);
+  }
+  const args = [
+    "api",
+    "graphql",
+    "--paginate",
+    "--slurp",
+    "-f",
+    `owner=${config.repo.owner}`,
+    "-f",
+    `name=${config.repo.name}`,
+    "-F",
+    `number=${pullNumber}`,
+    "-f",
+    `query=${PULL_FILES_QUERY}`
+  ];
+  const readJson = dependencies.ghReadJson ?? ghReadJson;
+  let pages;
+  try {
+    pages = readJson(args, {}, { delays: [1000, 2000, 4000] });
+  } catch (error) {
+    if (!isTransientGitHubReadError(error)) throw error;
+    return changedFiles <= 300
+      ? comparedPullFiles(config, pull, dependencies)
+      : treeDiffPullFiles(config, pull, dependencies);
+  }
+
+  if (!Array.isArray(pages) || pages.length === 0) {
+    throw new AgentError(`PR #${pullNumber} GraphQL files response is invalid`, 1);
+  }
+  const files = pages.flatMap((page) => {
+    const value = page?.data?.repository?.pullRequest;
+    const nodes = value?.files?.nodes;
+    if (
+      value?.number !== pullNumber ||
+      value?.baseRefOid !== baseSha ||
+      value?.headRefOid !== headSha ||
+      value?.changedFiles !== changedFiles ||
+      !Array.isArray(nodes)
+    ) {
+      throw new AgentError(`PR #${pullNumber} GraphQL files response is invalid`, 1);
+    }
+    return nodes.map(normalizeGraphQLPullFile);
+  });
+  if (files.length !== changedFiles || new Set(files.map((file) => file.filename)).size !== files.length) {
+    throw new AgentError("could not verify the complete PR file inventory", 1);
+  }
+
+  const renamed = files.filter((file) => file.status === "renamed");
+  if (renamed.length) {
+    const basePaths = new Set(immutableTreeEntries(config, baseSha, dependencies).keys());
+    const headPaths = new Set(immutableTreeEntries(config, headSha, dependencies).keys());
+    const removedPaths = new Set(
+      files.filter((file) => file.status === "removed").map((file) => file.filename)
+    );
+    const renameSources = [...basePaths]
+      .filter((path) => !headPaths.has(path) && !removedPaths.has(path))
+      .sort();
+    if (renameSources.length !== renamed.length) {
+      throw new AgentError("could not verify every renamed PR source path", 1);
+    }
+    renamed.sort((left, right) => left.filename.localeCompare(right.filename));
+    if (renamed.length === 1) renamed[0].previous_filename = renameSources[0];
+    if (renamed.length > 1) renamed[0].previous_filenames = renameSources;
+  }
+  return files;
+}
+
+export function getPullSnapshot(config, number, dependencies = {}) {
+  const getPull = dependencies.getPullRequest ?? getPullRequest;
+  const getFiles = dependencies.getPullFiles ?? getPullFiles;
+  const pull = getPull(config, number, dependencies);
+  return { pull, files: getFiles(config, pull, dependencies) };
+}
+
+export function getPullDiff(config, pull, dependencies = {}) {
+  const baseSha = String(pull?.base?.sha ?? "");
+  const headSha = String(pull?.head?.sha ?? "");
+  if (!/^[a-f0-9]{40}$/.test(baseSha) || !/^[a-f0-9]{40}$/.test(headSha)) {
+    throw new AgentError("pull diff requires exact base and head SHAs", 1);
+  }
+  const read = dependencies.ghRead ?? ghRead;
+  return read([
+    "api",
+    "-H",
+    "Accept: application/vnd.github.v3.diff",
+    `repos/${config.repo.owner}/${config.repo.name}/compare/${baseSha}...${headSha}`
+  ]).stdout;
 }
 
 export function commentHasManagedMarker(body, marker) {

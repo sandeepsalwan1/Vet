@@ -530,7 +530,8 @@ test("trusted workflows reject mutable dispatch targets and publish exact-head C
   const automerge = readFileSync(new URL("../.github/workflows/agent-automerge.yml", import.meta.url), "utf8");
 
   assert.match(ci, /expected-head-sha:\n\s+description: Exact current pull request head SHA/);
-  assert.match(ci, /test "\$\(jq -r '\.head\.sha' "\$pull_file"\)" = "\$REQUESTED_SHA"/);
+  assert.match(ci, /gh pr view "\$REQUESTED_PR"/);
+  assert.match(ci, /test "\$\(jq -r '\.headRefOid' "\$pull_file"\)" = "\$REQUESTED_SHA"/);
   assert.match(ci, /ref: \$\{\{ needs\.resolve\.outputs\.candidate_sha \}\}/);
   assert.match(ci, /gh api --method POST "repos\/\$GITHUB_REPOSITORY\/check-runs"/);
   for (const workflow of [review, proof, noMistakes, automerge]) {

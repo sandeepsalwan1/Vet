@@ -10,8 +10,9 @@ import {
   fail,
   finish,
   getIssueComments,
+  getPullDiff,
+  getPullSnapshot,
   ghApiJson,
-  ghRead,
   ghReadJson,
   gitOutput,
   issueLabels,
@@ -33,11 +34,7 @@ import {
 export const MAX_REVIEW_DIFF_BYTES = 50000;
 
 function fetchPull(config, prNumber) {
-  const pull = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/pulls/${prNumber}`);
-  const files = ghApiJson(
-    `repos/${config.repo.owner}/${config.repo.name}/pulls/${prNumber}/files?per_page=100`,
-    { paginate: true }
-  ) ?? [];
+  const { pull, files } = getPullSnapshot(config, prNumber);
   const trust = assertTrustedAgentPull(pull, config, { files, rejectPrivilegedPaths: true });
   const issue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${prNumber}`);
   const comments = getIssueComments(config, prNumber);
@@ -168,7 +165,7 @@ function writePrompt(config, prNumber, outputPath, expectedHeadSha) {
     sourceIssueNumber,
     config.repo.owner
   );
-  const diff = ghRead(["pr", "diff", String(prNumber), "--repo", `${config.repo.owner}/${config.repo.name}`, "--patch"]).stdout;
+  const diff = getPullDiff(config, pull);
   const prompt = buildReviewPrompt({
     template: readText(join(repoRoot(), ".agent/prompts/review.md")),
     pull,

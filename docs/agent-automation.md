@@ -26,7 +26,7 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 1. `agent-router.yml` maps label events to reusable workflows; issue `agent:implement` intentionally enters trusted triage first.
 2. Proposal generation receives a bounded public snapshot of current `main` workflow health and treats that snapshot as evidence, never as instructions.
 3. Triage uses a schema-constrained Codex result, then applies managed labels/comments.
-   Read-only GitHub API calls use bounded exponential retries, managed issue comments and pull-request discovery use GitHub GraphQL with independent REST read fallbacks, and PR creation or updates use GraphQL mutations.
+   Read-only GitHub API calls use bounded exponential retries, managed comments and pull metadata use GitHub GraphQL with independent REST read fallbacks, PR file inventories use head-bound paginated GraphQL with immutable rename verification, diffs use exact commit comparison, and PR creation or updates use GraphQL mutations.
 4. Expensive proposer, triage, implementation, review, no-mistakes, and proof jobs share deterministic slot groups from `.agent/config.json`.
 5. Implementation selects its allowed backend from `.agent/config.json`, runs without write credentials, uploads a patch, then applies it in a separate write-token job and opens a draft PR.
 6. The current installed worker adapter is Codex; unsupported or unimplemented backend selections fail before model execution.
@@ -195,7 +195,7 @@ Fix technical failures, answer real product questions, or use the exact-head app
 - Remote implementation: Crabbox first after provider readiness; isolated GitHub Actions fallback for non-visual work.
 - Optional orchestration reference: Sandcastle demonstrates label-driven AFK orchestration patterns and remains an optional worker adapter.
 - OpenClaw execution reference: Crabbox is the execution and computer-use proof host pattern; credential-free visual fallback runs in a Crabbox local container on GitHub Actions.
-- Implementation and review: separate credentialless model jobs and trusted write jobs, using GPT-5.4 mini with low reasoning.
+- Implementation and review use GPT-5.4 mini with low reasoning; no-mistakes uses the same mini model with medium reasoning for its stricter structured gate contract.
 - Required final gate: exact-head no-mistakes status with default `ask-user` blocking.
 - Safe merge: low or medium risk only after CI, review, required proof, and no-mistakes pass.
 - Human boundary: high priority, high risk, unclear product decisions, missing required proof, and unapproved `ask-user` results never auto-merge.

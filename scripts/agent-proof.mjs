@@ -5,11 +5,14 @@ import { fileURLToPath } from "node:url";
 import {
   AgentError,
   addLabels,
+  candidatePaths,
   dispatchWorkflow,
   extractJson,
   fail,
   finish,
   getIssueComments,
+  getPullRequest,
+  getPullSnapshot,
   gh,
   ghApiJson,
   ghReadJson,
@@ -86,7 +89,7 @@ function sourceIssueNumber(config, pull) {
 
 function targetDetails(config, kind, number) {
   if (kind === "pr") {
-    const pull = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/pulls/${number}`);
+    const { pull, files } = getPullSnapshot(config, number);
     const headRepo = String(pull.head?.repo?.full_name ?? "").toLowerCase();
     const baseRepo = String(pull.base?.repo?.full_name ?? "").toLowerCase();
     if (!headRepo || headRepo !== baseRepo) {
@@ -103,16 +106,13 @@ function targetDetails(config, kind, number) {
           comments: commentsFor(config, sourceNumber)
         }
       : null;
-    const files = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/pulls/${number}/files`, {
-      paginate: true
-    });
     return {
       title: pull.title,
       body: pull.body ?? "",
       labels: issueLabels(issue),
       comments: commentsFor(config, number),
       source,
-      files: files ?? [],
+      files,
       sha: pull.head.sha,
       pull
     };
@@ -224,7 +224,7 @@ export function deriveAffectedRoutes(files, explicitRoute = "") {
   const routes = [];
   for (const file of files ?? []) {
     if (file?.status === "removed") continue;
-    for (const path of [file?.filename, file?.previous_filename]) {
+    for (const path of candidatePaths([file])) {
       if (!path) continue;
       const route = routeForPageFile(path);
       if (route) routes.push(route);
@@ -422,7 +422,7 @@ async function legacyMain(args = parseArgs(), config = loadConfig()) {
   }
 
   if (kind === "pr" && result.status === "passed" && run && !dryRun) {
-    const current = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/pulls/${number}`);
+    const current = getPullRequest(config, number);
     if (!isProofHeadFresh(details.sha, current.head.sha)) {
       result.status = "failed";
       result.summary = "PR head changed while proof was running; proof must rerun on the current head.";

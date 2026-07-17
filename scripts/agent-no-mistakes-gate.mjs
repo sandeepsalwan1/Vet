@@ -10,6 +10,7 @@ import {
   fail,
   finish,
   getIssueComments,
+  getPullSnapshot,
   ghApiJson,
   loadConfig,
   markdownJsonBlock,
@@ -444,16 +445,7 @@ function actionsRunUrl(env = process.env) {
 }
 
 function fetchPullSnapshot(config, prNumber) {
-  const root = `repos/${config.repo.owner}/${config.repo.name}`;
-  const pull = ghApiJson(`${root}/pulls/${prNumber}`);
-  const files =
-    ghApiJson(`${root}/pulls/${prNumber}/files?per_page=100`, {
-      paginate: true,
-    }) ?? [];
-  if (!Array.isArray(files) || Number(pull?.changed_files) !== files.length) {
-    throw new AgentError("could not verify the complete PR file inventory", 1);
-  }
-  return { pull, files };
+  return getPullSnapshot(config, prNumber);
 }
 
 function fetchTrustedPull(config, prNumber) {

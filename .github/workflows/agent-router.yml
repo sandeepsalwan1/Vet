@@ -57,7 +57,7 @@ jobs:
           set -euo pipefail
           head_sha=""
           if [ -n "$PR_NUMBER" ]; then
-            head_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)"
+            head_sha="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)"
             [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
           fi
           case "$LANE" in

@@ -45,7 +45,7 @@ test("repository config enables only implemented worker backends", () => {
       { lane: "triage", model: "gpt-5.4-mini", effort: "low" },
       { lane: "implement", model: "gpt-5.4-mini", effort: "low" },
       { lane: "review", model: "gpt-5.4-mini", effort: "low" },
-      { lane: "no-mistakes", model: "gpt-5.4-mini", effort: "low" }
+      { lane: "no-mistakes", model: "gpt-5.4-mini", effort: "medium" }
     ]
   );
 });

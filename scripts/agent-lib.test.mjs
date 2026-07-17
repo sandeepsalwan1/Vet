@@ -12,6 +12,10 @@ import {
   ghReadJson,
   getIssueComments,
   getIssueNodeId,
+  getPullDiff,
+  getPullFiles,
+  getPullRequest,
+  getPullSnapshot,
   issueSnapshotSha256,
   isTransientGitHubReadError,
   newestManagedComment,
@@ -26,6 +30,10 @@ const config = { repo: { owner: "repo-owner", name: "repo" } };
 
 function comment(id, login, body = `${marker}\nbody`, updatedAt = `2026-07-13T00:00:0${id}Z`) {
   return { id, body, updated_at: updatedAt, user: { login } };
+}
+
+function treeEntry(path, sha = "c".repeat(40)) {
+  return { path, mode: "100644", sha, type: "blob" };
 }
 
 test("managed comment markers match exact stage prefixes only", () => {
@@ -263,6 +271,276 @@ test("issue node id fails closed on malformed GraphQL metadata", () => {
   );
 });
 
+test("pull metadata uses GraphQL and normalizes the trusted REST shape", () => {
+  const pull = getPullRequest(config, 9, {
+    ghApiJson: () => assert.fail("healthy GraphQL pull metadata needs no REST request"),
+    ghReadJson: (args) => {
+      assert.deepEqual(args.slice(0, 6), ["pr", "view", "9", "--repo", "repo-owner/repo", "--json"]);
+      return {
+        number: 9,
+        id: "PR_9",
+        state: "OPEN",
+        mergedAt: null,
+        mergeCommit: null,
+        mergeable: "MERGEABLE",
+        mergeStateStatus: "CLEAN",
+        isDraft: true,
+        autoMergeRequest: null,
+        changedFiles: 1,
+        title: "Agent PR",
+        body: "body",
+        url: "https://example.test/pull/9",
+        author: { login: "app/github-actions" },
+        baseRefName: "main",
+        baseRefOid: "a".repeat(40),
+        headRefName: "agent/issue-9-fix",
+        headRefOid: "b".repeat(40),
+        headRepository: { nameWithOwner: "repo-owner/repo" }
+      };
+    }
+  });
+
+  assert.equal(pull.state, "open");
+  assert.equal(pull.user.login, "github-actions[bot]");
+  assert.equal(pull.head.repo.full_name, "repo-owner/repo");
+  assert.equal(pull.base.repo.full_name, "repo-owner/repo");
+  assert.equal(pull.mergeable_state, "clean");
+  assert.equal(pull.draft, true);
+});
+
+test("pull metadata falls back to REST after a transient GraphQL outage", () => {
+  const rest = { number: 9, head: { sha: "b".repeat(40) } };
+  assert.equal(
+    getPullRequest(config, 9, {
+      ghReadJson: () => {
+        throw new AgentError("gh: HTTP 503", 1);
+      },
+      ghApiJson: (path) => {
+        assert.equal(path, "repos/repo-owner/repo/pulls/9");
+        return rest;
+      }
+    }),
+    rest
+  );
+});
+
+test("pull files use complete head-bound GraphQL pagination beyond the compare limit", () => {
+  const pull = {
+    number: 9,
+    changed_files: 301,
+    base: { sha: "a".repeat(40) },
+    head: { sha: "b".repeat(40) }
+  };
+  const nodes = Array.from({ length: 301 }, (_, index) => ({
+    path: `docs/file-${index}.md`,
+    additions: 1,
+    deletions: 0,
+    changeType: "MODIFIED"
+  }));
+  nodes[300] = {
+    path: "docs/renamed.md",
+    additions: 0,
+    deletions: 0,
+    changeType: "RENAMED"
+  };
+  const pages = [nodes.slice(0, 100), nodes.slice(100, 200), nodes.slice(200, 300), nodes.slice(300)].map(
+    (pageNodes) => ({
+      data: {
+        repository: {
+          pullRequest: {
+            number: 9,
+            changedFiles: 301,
+            baseRefOid: "a".repeat(40),
+            headRefOid: "b".repeat(40),
+            files: { nodes: pageNodes }
+          }
+        }
+      }
+    })
+  );
+  const files = getPullFiles(config, pull, {
+    ghApiJson: (path) => {
+      const unchanged = nodes.slice(0, 300).map((node) => treeEntry(node.path));
+      if (path.endsWith(`${"a".repeat(40)}?recursive=1`)) {
+        return {
+          truncated: false,
+          tree: [...unchanged, treeEntry("docs/original.md")]
+        };
+      }
+      if (path.endsWith(`${"b".repeat(40)}?recursive=1`)) {
+        return {
+          truncated: false,
+          tree: [...unchanged, treeEntry("docs/renamed.md")]
+        };
+      }
+      return assert.fail(`unexpected immutable tree request: ${path}`);
+    },
+    ghReadJson: (args) => {
+      assert.ok(args.includes("--paginate"));
+      assert.ok(args.includes("number=9"));
+      return pages;
+    }
+  });
+
+  assert.equal(files.length, 301);
+  assert.deepEqual(files[300], {
+    filename: "docs/renamed.md",
+    status: "renamed",
+    additions: 0,
+    deletions: 0,
+    changes: 0,
+    previous_filename: "docs/original.md"
+  });
+});
+
+test("pull file renames preserve immutable source paths", () => {
+  const pull = {
+    number: 9,
+    changed_files: 1,
+    base: { sha: "a".repeat(40) },
+    head: { sha: "b".repeat(40) }
+  };
+  const compared = [{
+    filename: "docs/new.md",
+    previous_filename: ".github/workflows/old.yml",
+    status: "renamed"
+  }];
+  const files = getPullFiles(config, pull, {
+    ghReadJson: () => [{
+      data: {
+        repository: {
+          pullRequest: {
+            number: 9,
+            changedFiles: 1,
+            baseRefOid: "a".repeat(40),
+            headRefOid: "b".repeat(40),
+            files: {
+              nodes: [{ path: "docs/new.md", additions: 0, deletions: 0, changeType: "RENAMED" }]
+            }
+          }
+        }
+      }
+    }],
+    ghApiJson: (path) => {
+      if (path.endsWith(`${"a".repeat(40)}?recursive=1`)) {
+        return {
+          truncated: false,
+          tree: [treeEntry(compared[0].previous_filename)]
+        };
+      }
+      if (path.endsWith(`${"b".repeat(40)}?recursive=1`)) {
+        return {
+          truncated: false,
+          tree: [treeEntry(compared[0].filename)]
+        };
+      }
+      return assert.fail(`unexpected immutable tree request: ${path}`);
+    }
+  });
+
+  assert.equal(files[0].previous_filename, ".github/workflows/old.yml");
+  assert.deepEqual(privilegedCandidatePaths(files), [".github/workflows/old.yml"]);
+});
+
+test("small pull file reads fall back to the immutable comparison after a transient GraphQL outage", () => {
+  const pull = {
+    number: 9,
+    changed_files: 1,
+    base: { sha: "a".repeat(40) },
+    head: { sha: "b".repeat(40) }
+  };
+  const files = [{ filename: "docs/readme.md", status: "modified" }];
+  assert.equal(
+    getPullFiles(config, pull, {
+      ghReadJson: () => {
+        throw new AgentError("gh: HTTP 503", 1);
+      },
+      ghApiJson: (path) => {
+        assert.equal(path, `repos/repo-owner/repo/compare/${"a".repeat(40)}...${"b".repeat(40)}`);
+        return { files };
+      }
+    }),
+    files
+  );
+});
+
+test("large pull file reads fall back to a complete immutable tree diff", () => {
+  const pull = {
+    number: 9,
+    changed_files: 301,
+    base: { sha: "a".repeat(40) },
+    head: { sha: "b".repeat(40) }
+  };
+  const paths = Array.from({ length: 301 }, (_, index) => `docs/file-${index}.md`);
+  const files = getPullFiles(config, pull, {
+    ghReadJson: () => {
+      throw new AgentError("gh: HTTP 503", 1);
+    },
+    ghApiJson: (path) => {
+      if (path.endsWith(`${"a".repeat(40)}?recursive=1`)) {
+        return { truncated: true, sha: "e".repeat(40), tree: [] };
+      }
+      if (path.endsWith(`${"b".repeat(40)}?recursive=1`)) {
+        return { truncated: true, sha: "f".repeat(40), tree: [] };
+      }
+      if (path.endsWith("e".repeat(40))) {
+        return {
+          truncated: false,
+          tree: [{ path: "docs", mode: "040000", sha: "1".repeat(40), type: "tree" }]
+        };
+      }
+      if (path.endsWith("f".repeat(40))) {
+        return {
+          truncated: false,
+          tree: [{ path: "docs", mode: "040000", sha: "2".repeat(40), type: "tree" }]
+        };
+      }
+      if (path.endsWith("1".repeat(40))) {
+        return {
+          truncated: false,
+          tree: paths.map((value) => treeEntry(value.replace("docs/", ""), "c".repeat(40)))
+        };
+      }
+      if (path.endsWith("2".repeat(40))) {
+        return {
+          truncated: false,
+          tree: paths.map((value) => treeEntry(value.replace("docs/", ""), "d".repeat(40)))
+        };
+      }
+      return assert.fail(`unexpected immutable tree request: ${path}`);
+    }
+  });
+
+  assert.equal(files.length, 301);
+  assert.ok(files.every((file) => file.status === "modified"));
+});
+
+test("pull diff and snapshot stay bound to exact commits", () => {
+  const pull = {
+    number: 9,
+    changed_files: 1,
+    base: { sha: "a".repeat(40) },
+    head: { sha: "b".repeat(40) }
+  };
+  const files = [{ filename: "docs/readme.md", status: "modified" }];
+  assert.equal(
+    getPullDiff(config, pull, {
+      ghRead: (args) => {
+        assert.deepEqual(args.slice(0, 4), ["api", "-H", "Accept: application/vnd.github.v3.diff", `repos/repo-owner/repo/compare/${"a".repeat(40)}...${"b".repeat(40)}`]);
+        return { stdout: "diff --git a/docs/readme.md b/docs/readme.md\n" };
+      }
+    }),
+    "diff --git a/docs/readme.md b/docs/readme.md\n"
+  );
+  assert.deepEqual(
+    getPullSnapshot(config, 9, {
+      getPullRequest: () => pull,
+      getPullFiles: () => files
+    }),
+    { pull, files }
+  );
+});
+
 test("GitHub API reads retry transient service failures with bounded backoff", () => {
   let calls = 0;
   const delays = [];
@@ -436,7 +714,7 @@ test("GitHub API read retries stop at the configured bound and redact HTML", () 
 test("privileged candidate policy covers nested instructions, agent roots, package controls, and rename sources", () => {
   const files = [
     { filename: "src/safe.ts" },
-    { filename: "docs/old.md", previous_filename: "docs/AGENTS.md" },
+    { filename: "docs/old.md", previous_filenames: ["docs/AGENTS.md", ".github/workflows/old.yml"] },
     { filename: "packages/client/.codex/config.toml" },
     { filename: "packages/widget/package.json" },
     { filename: "skills/local/SKILL.md" },
@@ -447,6 +725,7 @@ test("privileged candidate policy covers nested instructions, agent roots, packa
     "src/safe.ts",
     "docs/old.md",
     "docs/AGENTS.md",
+    ".github/workflows/old.yml",
     "packages/client/.codex/config.toml",
     "packages/widget/package.json",
     "skills/local/SKILL.md",
@@ -454,6 +733,7 @@ test("privileged candidate policy covers nested instructions, agent roots, packa
   ]);
   assert.deepEqual(privilegedCandidatePaths(files), [
     "docs/AGENTS.md",
+    ".github/workflows/old.yml",
     "packages/client/.codex/config.toml",
     "packages/widget/package.json",
     "skills/local/SKILL.md",

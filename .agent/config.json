@@ -74,7 +74,7 @@
     "reviewModel": "gpt-5.4-mini",
     "reviewEffort": "low",
     "noMistakesModel": "gpt-5.4-mini",
-    "noMistakesEffort": "low",
+    "noMistakesEffort": "medium",
     "sandbox": "workspace-write",
     "readOnlySandbox": "read-only"
   },

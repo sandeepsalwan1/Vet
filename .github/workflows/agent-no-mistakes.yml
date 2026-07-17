@@ -78,10 +78,12 @@ jobs:
           set -euo pipefail
           pull_file="$RUNNER_TEMP/no-mistakes-pull.json"
           payload_file="$RUNNER_TEMP/no-mistakes-pending.json"
-          gh api "repos/$GITHUB_REPOSITORY/pulls/${{ inputs.pr-number }}" > "$pull_file"
-          head_repo="$(jq -r '.head.repo.full_name // ""' "$pull_file")"
-          head_sha="$(jq -r '.head.sha // ""' "$pull_file")"
-          if [[ "$head_repo" != "$GITHUB_REPOSITORY" || ! "$head_sha" =~ ^[0-9a-f]{40}$ || ! "$REQUESTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ || "$head_sha" != "$REQUESTED_HEAD_SHA" ]]; then
+          gh pr view "${{ inputs.pr-number }}" --repo "$GITHUB_REPOSITORY" \
+            --json headRepository,isCrossRepository,headRefOid > "$pull_file"
+          head_repo="$(jq -r '.headRepository.nameWithOwner // ""' "$pull_file")"
+          head_sha="$(jq -r '.headRefOid // ""' "$pull_file")"
+          cross_repo="$(jq -r '.isCrossRepository' "$pull_file")"
+          if [[ "$head_repo" != "$GITHUB_REPOSITORY" || "$cross_repo" != false || ! "$head_sha" =~ ^[0-9a-f]{40}$ || ! "$REQUESTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ || "$head_sha" != "$REQUESTED_HEAD_SHA" ]]; then
             echo "refusing pending status for an untrusted PR head" >&2
             exit 1
           fi

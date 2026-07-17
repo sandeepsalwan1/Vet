@@ -97,7 +97,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$TARGET_KIND" = pr ]; then
-            sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$TARGET_NUMBER" --jq .head.sha)"
+            sha="$(gh pr view "$TARGET_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)"
             [[ "$REQUESTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
             test "$sha" = "$REQUESTED_HEAD_SHA"
             gh api "repos/$GITHUB_REPOSITORY/statuses/$sha" -X POST \
