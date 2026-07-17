@@ -193,7 +193,7 @@ Fix technical failures, answer real product questions, or use the exact-head app
 - Remote implementation: Crabbox first after provider readiness; isolated GitHub Actions fallback for non-visual work.
 - Optional orchestration reference: Sandcastle demonstrates label-driven AFK orchestration patterns and remains an optional worker adapter.
 - OpenClaw execution reference: Crabbox is the execution and computer-use proof host pattern; credential-free visual fallback runs in a Crabbox local container on GitHub Actions.
-- Implementation and review: separate credentialless model jobs and trusted write jobs, using GPT-5.4 mini with low reasoning.
+- Implementation and review use GPT-5.4 mini with low reasoning; no-mistakes uses the same mini model with medium reasoning for its stricter structured gate contract.
 - Required final gate: exact-head no-mistakes status with default `ask-user` blocking.
 - Safe merge: low or medium risk only after CI, review, required proof, and no-mistakes pass.
 - Human boundary: high priority, high risk, unclear product decisions, missing required proof, and unapproved `ask-user` results never auto-merge.
