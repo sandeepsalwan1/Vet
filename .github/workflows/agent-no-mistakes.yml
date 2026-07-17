@@ -100,7 +100,7 @@ jobs:
         with:
           ref: main
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Select no-mistakes model
@@ -164,7 +164,7 @@ jobs:
           path: candidate
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Pin exact candidate branch
@@ -345,7 +345,7 @@ jobs:
         with:
           ref: main
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Download sanitized gate result

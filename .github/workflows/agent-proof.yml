@@ -114,7 +114,7 @@ jobs:
           ref: ${{ github.workflow_sha }}
           path: trusted
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Allocate proof capacity
@@ -169,7 +169,7 @@ jobs:
           ref: ${{ github.workflow_sha }}
           path: trusted
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Install Crabbox without provider credentials
@@ -265,7 +265,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           path: target
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Run credential-free local proof
