@@ -210,7 +210,7 @@ function parseRunFields(output) {
   if (runIndex === -1) return fields;
   for (const line of lines.slice(runIndex + 1)) {
     if (!line.startsWith("  ")) break;
-    const match = line.match(/^\s{2}(id|head|status):\s*(.+?)\s*$/);
+    const match = line.match(/^\s{2}(id|head):\s*(.+?)\s*$/);
     if (match) {
       const value = match[2];
       if (value.startsWith('"') && value.endsWith('"')) {
@@ -323,12 +323,8 @@ export function isRetryableInvalidOutput(gate) {
   );
 }
 
-export function isActiveAxiResult(gate) {
-  return (
-    gate?.status === "failed" &&
-    gate?.outcome === "invalid-output" &&
-    ["pending", "running"].includes(gate?.run?.status)
-  );
+export function isReattachableAxiError(output) {
+  return /^error:\s*drive run:\s*/m.test(String(output ?? ""));
 }
 
 export function validatedHeadMatches(result, sha) {
@@ -666,6 +662,7 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
     ];
     let run;
     let parsed;
+    let reattachExhausted = false;
     for (let attachment = 0; attachment <= maxReattachments; attachment += 1) {
       const result = spawn("no-mistakes", axiArgs, {
         cwd: repoDir,
@@ -683,42 +680,20 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
         attempts: attempt,
         attachments: attachment + 1,
       };
-      parsed = parseAxiResult(
-        `${run.stdout}\n${run.stderr}`.trim(),
-        run.status,
-      );
-      if (!isRetryableInvalidOutput(parsed)) break;
-
-      const statusResult = spawn("no-mistakes", ["axi", "status"], {
-        cwd: repoDir,
-        env,
-        encoding: "utf8",
-        stdio: "pipe",
-      });
-      if (statusResult.error) break;
-      const statusRun = {
-        stdout: statusResult.stdout ?? "",
-        stderr: statusResult.stderr ?? "",
-        status: statusResult.status ?? 1,
-        attempts: attempt,
-        attachments: attachment + 1,
-      };
-      const statusParsed = parseAxiResult(
-        `${statusRun.stdout}\n${statusRun.stderr}`.trim(),
-        statusRun.status,
-      );
-      if (!isActiveAxiResult(statusParsed)) {
-        run = statusRun;
-        parsed = statusParsed;
+      const output = `${run.stdout}\n${run.stderr}`.trim();
+      parsed = parseAxiResult(output, run.status);
+      if (!isRetryableInvalidOutput(parsed) || !isReattachableAxiError(output)) {
         break;
       }
-      run = statusRun;
-      parsed = statusParsed;
-      if (attachment === maxReattachments) break;
-      onReattach(statusParsed);
+      if (attachment === maxReattachments) {
+        reattachExhausted = true;
+        break;
+      }
+      onReattach(parsed);
     }
     if (
       attempt === 1 &&
+      !reattachExhausted &&
       (isRetryableReviewEnvironmentBlock(parsed) ||
         isRetryableTestEnvironmentBlock(parsed) ||
         isRetryableInvalidOutput(parsed) ||
