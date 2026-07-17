@@ -494,6 +494,11 @@ export function getIssueNodeId(config, number, dependencies = {}) {
 function normalizeGraphQLPull(pull, config) {
   const headRepo = pull?.headRepository?.nameWithOwner ?? "";
   const author = String(pull?.author?.login ?? "");
+  const normalizedAuthor = ["app/github-actions", "github-actions", "github-actions[bot]"].includes(
+    author.toLowerCase()
+  )
+    ? "github-actions[bot]"
+    : author;
   return {
     number: pull?.number,
     node_id: pull?.id,
@@ -509,7 +514,7 @@ function normalizeGraphQLPull(pull, config) {
     title: pull?.title ?? "",
     body: pull?.body ?? "",
     html_url: pull?.url,
-    user: { login: author === "github-actions" ? "github-actions[bot]" : author },
+    user: { login: normalizedAuthor },
     base: {
       ref: pull?.baseRefName ?? "",
       sha: pull?.baseRefOid ?? "",

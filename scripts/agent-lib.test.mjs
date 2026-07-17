@@ -290,7 +290,7 @@ test("pull metadata uses GraphQL and normalizes the trusted REST shape", () => {
         title: "Agent PR",
         body: "body",
         url: "https://example.test/pull/9",
-        author: { login: "github-actions" },
+        author: { login: "app/github-actions" },
         baseRefName: "main",
         baseRefOid: "a".repeat(40),
         headRefName: "agent/issue-9-fix",
