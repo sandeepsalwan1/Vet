@@ -99,6 +99,7 @@ Review can apply a safe patch, reruns exact-head CI and review until clean withi
 After model review, a credential-free deterministic repair removes extra blank lines at EOF only when `git diff --check` identifies them in a safe, non-privileged text file.
 Malformed no-mistakes output retries once automatically on the unchanged head.
 Automerge waits for every configured gate, updates a stale branch from `main`, reruns head-bound gates, merges, dispatches baseline CI and CodeQL for the exact merge commit, closes the source issue, and removes workflow labels.
+If GitHub reports a stale-branch merge conflict, trusted automation creates a merge commit that preserves `main` in conflicting hunks, then reruns CI, review, proof when required, and no-mistakes so the issue behavior must be restored and verified before merge.
 
 For an existing issue, start the same path with:
 

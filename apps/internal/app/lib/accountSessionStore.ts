@@ -24,6 +24,9 @@ function sessionForAccount(account: Account): AccountSession {
     email: account.email,
     phone: account.phone,
     petName: account.petName,
+    clientId: account.clientId,
+    petId: account.petId,
+    accessToken: account.accessToken,
     passcode: taskBoardPasscodeForRole(account.role, account.passcode),
     source: "account"
   };

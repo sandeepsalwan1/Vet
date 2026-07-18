@@ -13,6 +13,7 @@ import {
   disableNativeAutomergeArgs,
   evaluate,
   isStaleBase,
+  isUpdateBranchMergeConflict,
   nativeMergeArgs,
   postMergeDispatchArgs,
   postMergeRunName,
@@ -26,6 +27,7 @@ import {
   settleAutomerge,
   statusState,
   trustedClosingIssueNumbers,
+  trustedConflictRecoveryCommands,
   updateBranchArgs
 } from "./agent-automerge.mjs";
 
@@ -406,6 +408,47 @@ test("stale base recovery uses the authorized head and reruns head-bound gates",
   assert.equal(commands.some(([, args]) => args[0] === "pr" && args[1] === "merge"), false);
 });
 
+test("stale conflict recovery prefers trusted base hunks and reruns every exact-head gate", async () => {
+  const value = fixture();
+  value.pull.mergeable_state = "dirty";
+  const commands = [];
+  const mergeConflict = new Error("update failed");
+  mergeConflict.details = {
+    stdout: '{"message":"merge conflict between base and head","status":"422"}',
+    stderr: "gh: merge conflict between base and head (HTTP 422)"
+  };
+
+  const outcome = await recoverStaleBase(
+    {
+      config,
+      prNumber: 18,
+      pull: value.pull,
+      decision: evaluate(value),
+      baseState: { stale: true, baseHead: baseSha }
+    },
+    {
+      runCommand: (command, args) => {
+        commands.push([command, args]);
+        if (command === "gh" && args[1]?.includes("/update-branch")) throw mergeConflict;
+      },
+      getPull: () => ({ ...value.pull, head: { ...value.pull.head, sha: updatedSha } }),
+      hasAncestor: (ancestor, descendant) =>
+        (ancestor === sha || ancestor === baseSha) && descendant === updatedSha,
+      wait: () => Promise.resolve()
+    }
+  );
+
+  assert.equal(isUpdateBranchMergeConflict(mergeConflict), true);
+  assert.equal(isUpdateBranchMergeConflict(new Error("network failure")), false);
+  assert.equal(outcome.code, 0);
+  assert.equal(outcome.result.recovery.updateStrategy, "trusted-base-preferred-merge");
+  assert.deepEqual(commands, [
+    ["gh", updateBranchArgs(18, config, sha)],
+    ...trustedConflictRecoveryCommands(config, value.pull.head.ref, sha, baseSha),
+    ...recoveryDispatchArgs(18, config, updatedSha).map((args) => ["gh", args])
+  ]);
+});
+
 test("stale base recovery replaces failed old-head gates only for a policy-eligible PR", async () => {
   const value = fixture();
   value.pull.auto_merge = { merge_method: "merge" };
@@ -537,6 +580,7 @@ test("trusted workflows reject mutable dispatch targets and publish exact-head C
   for (const workflow of [review, proof, noMistakes, automerge]) {
     assert.match(workflow, /expected-head-sha:/);
   }
+  assert.match(automerge, /ref: main\n          fetch-depth: 0\n          persist-credentials: false/);
   assert.match(review, /test "\$sha" = "\$REQUESTED_HEAD_SHA"/);
   assert.match(proof, /test "\$sha" = "\$REQUESTED_HEAD_SHA"/);
   assert.match(noMistakes, /"\$head_sha" != "\$REQUESTED_HEAD_SHA"/);

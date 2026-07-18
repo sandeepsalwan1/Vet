@@ -89,6 +89,9 @@ export async function signupCustomer(params: {
   phone: string;
   petName: string;
   password: string;
+  clientId: string;
+  petId: string;
+  accessToken: string;
 }): Promise<Account> {
   seedDemoAccounts();
   const accounts = loadAccounts();
@@ -102,6 +105,9 @@ export async function signupCustomer(params: {
     email: cleanEmail(params.email),
     phone: params.phone.trim(),
     petName: params.petName.trim(),
+    clientId: params.clientId,
+    petId: params.petId,
+    accessToken: params.accessToken,
     passwordHash: mockHash(params.password),
     createdAt: new Date().toISOString(),
   };

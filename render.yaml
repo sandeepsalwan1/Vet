@@ -6,7 +6,7 @@ services:
     region: oregon
     autoDeploy: true
     rootDir: .
-    buildCommand: npm ci && npm run build --workspace @central-vet/internal
+    buildCommand: npm ci && npm run db:migrate && npm run build --workspace @central-vet/internal
     startCommand: npm run start --workspace @central-vet/internal -- -p $PORT
     envVars:
       - key: NODE_VERSION
@@ -83,16 +83,40 @@ services:
         sync: false
       - key: TEST_SMS_NOTIFICATION_RECIPIENTS
         sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
       - key: CRON_SECRET
         sync: false
       - key: INTERNAL_BASE_URL
         value: https://vetagent-internal.onrender.com
 
   - type: cron
+    name: vetagent-client-journey-delivery
+    runtime: node
+    plan: starter
+    region: oregon
+    schedule: "*/5 * * * *"
+    rootDir: .
+    buildCommand: npm ci
+    startCommand: >-
+      node -e "const url=process.env.INTERNAL_BASE_URL + '/api/notifications/client-journey'; fetch(url,{headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(async r=>{const text=await r.text(); console.log(r.status,text); if(!r.ok) process.exit(1);}).catch((error)=>{console.error(error); process.exit(1);})"
+    envVars:
+      - key: NODE_VERSION
+        value: 22.16.0
+      - key: INTERNAL_BASE_URL
+        value: https://vetagent-internal.onrender.com
+      - key: CRON_SECRET
+        sync: false
+
+  - type: cron
     # Keep the legacy Render service name so blueprint sync updates the existing cron in place.
     name: vetagent-overdue-summary
     runtime: node
-    plan: free
+    plan: starter
     region: oregon
     schedule: "0 2 * * *"
     rootDir: .
@@ -110,7 +134,7 @@ services:
   - type: cron
     name: vetagent-monthly-agent-email
     runtime: node
-    plan: free
+    plan: starter
     region: oregon
     schedule: "15 17 1 * *"
     rootDir: .

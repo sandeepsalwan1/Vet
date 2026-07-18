@@ -1,11 +1,8 @@
-# AGENTS.md
+# Database Migrations
 
-Database migrations.
-
-## Rules
-
-- Append-only numbered SQL: `NNN_short_name.sql`.
-- Never edit shipped migrations unless explicitly repairing local-only work before release.
+- Add append-only numbered SQL as `NNN_short_name.sql`.
+- Never edit a shipped migration unless explicitly repairing unreleased local work.
 - Scope tenant-owned rows by `clinic_id`.
-- Include idempotent seed/repair SQL where reruns are expected.
+- Make seed and repair SQL idempotent when reruns are expected.
+- Keep secrets, provider ids, and private operational data out of migrations.
 - Run `npm run db:migrate` against the intended database after migration changes.

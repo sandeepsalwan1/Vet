@@ -10,18 +10,14 @@ One deployed Render app in an npm workspace monorepo, backed by Supabase Postgre
 - `packages/notifications`: Resend email and email-to-SMS notification helpers.
 - `packages/client-request`: shared public request guard, validation, dedupe, and task creation.
 - `opensrc`: upstream mirror/provenance notes for dependencies that need source inspection.
+- `.agent` and `.github/workflows/agent-*`: issue-label automation config, prompts, and workflows.
 - `skills` and `.claude/skills`: project-local agent launch/scraping skills.
 
 Docs:
 
-- `AGENTS.md`: repo rules for coding agents; key folders have local `AGENTS.md` files.
-- `docs/README.md`: docs index.
-- `docs/architecture.md`: architecture shape, design principles, and key seams.
-- `docs/implementation-notes.md`: current implementation locality notes.
-- `docs/agent-route-contracts.md`: public/internal agent route contracts.
-- `docs/agent-architecture.md`: external/internal agent architecture, route ownership, and open checks.
-- `docs/deployment.md`: Render/Supabase deployment shape, env, and proof commands.
-- `docs/pims-integration.md`: PIMS/lab integration architecture and adapter rules.
+- Run `npm run docs:list` to find maintained docs by purpose and task.
+- Start with `docs/architecture.md` for system boundaries and `docs/deployment.md` for operations.
+- Coding-agent policy lives in `AGENTS.md`; scoped guides add only subtree-specific rules.
 
 Local commands:
 
@@ -30,6 +26,7 @@ Local commands:
 - `npm run db:migrate`
 - `npm run dev`
 - `npm run lint`, `npm run typecheck`, `npm run lint:dead`, and `npm run lint:duplicates` for source health checks. Duplication ignores append-only DB migrations.
+- `npm run test:client-journey` for welcome, appointment, consent, checkout, and follow-up messaging policy.
 - `npm run smoke:local` while the dev server is running to warm local pages/routes, then verify core agent route response-time budgets.
 - `npm run smoke:agent-email -- --base-url http://localhost:3000` while the app is running to verify monthly email idempotency through `/api/agent/email` without sending live email.
 - `npm run scenarios:local` while the dev server is running to exercise semantic agent scenarios against local routes.
@@ -41,6 +38,7 @@ Local commands:
 Demo accounts:
 
 - Pet owner: `maya@example.com` / `demo1234` (Maya Parker + Biscuit; check-in matches seeded appointment data)
+- New-client record claim: `maya.parker@example.com` + `Biscuit` (development shows the verification code; production never does)
 - Staff: `staff@centralvet.demo` / `staff1234`
 - Veterinarian: `vet@centralvet.demo` / `vet1234` or direct board passcode `135790`
 - Admin: `admin@centralvet.demo` / `admin1234` or direct board passcode `246810`
@@ -52,7 +50,7 @@ Agent runtime:
 - Live target: Google ADK TypeScript through `AGENT_RUNTIME=google-adk`.
 - Missing live credentials fall back to deterministic runtime with a `runtime_fallback` event.
 - E2B is for sandboxed proof/evals, not normal request paths.
-- See `docs/agent-architecture.md` and `docs/agent-route-contracts.md`.
+- See `docs/agent-architecture.md`.
 
 Dependency holds:
 
@@ -73,5 +71,4 @@ Main routes:
 - `/arrival`, `/booking`, `/pickup`, `/records`, `/followup`, `/call`, `/request`
 - `/staff`, `/staff/agent`, `/staff/approvals`
 - `/api/mock/clinic`, `/api/agent/*`, `/api/approvals`, `/api/reports/*`
-
-hi this works
+- `/api/client-account-claim`, `/api/client-journey`, `/api/client-journey/staff`, `/api/notifications/client-journey`

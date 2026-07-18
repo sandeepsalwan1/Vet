@@ -23,6 +23,26 @@ export type SendResult = {
   error?: string;
 };
 
+async function sendTwilioSms(recipient: string, text: string) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const from = process.env.TWILIO_PHONE_NUMBER;
+  if (!accountSid || !authToken || !from) {
+    throw new Error("Twilio SMS credentials are required.");
+  }
+  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages.json`, {
+    method: "POST",
+    headers: {
+      authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({ To: recipient, From: from, Body: text })
+  });
+  const body = await response.json().catch(() => ({})) as { sid?: string; message?: string };
+  if (!response.ok || !body.sid) throw new Error(body.message || `Twilio SMS failed with ${response.status}.`);
+  return body.sid;
+}
+
 export async function sendNotification(args: {
   clinicId?: string | null;
   clinicName?: string;
@@ -79,7 +99,7 @@ export async function sendNotification(args: {
         continue;
       }
 
-      if (!resend) {
+      if (delivery.channel === "email" && !resend) {
         await markNotificationFailed(notificationId, "RESEND_API_KEY is required.");
         results.push({
           recipient,
@@ -91,24 +111,18 @@ export async function sendNotification(args: {
       }
 
       try {
-        const emailPayload =
-          delivery.channel === "sms"
-            ? {
-                from,
-                to: [recipient],
-                subject: args.clinicName || "Clinic Notification",
-                text: args.text
-              }
-            : {
-                from,
-                to: [recipient],
-                subject: args.subject,
-                html: args.html
-              };
-        const { data, error } = await resend.emails.send(
-          emailPayload,
-          { idempotencyKey }
-        );
+        if (delivery.channel === "sms") {
+          const providerId = await sendTwilioSms(recipient, args.text);
+          await markNotificationSent(notificationId, providerId);
+          results.push({ recipient, status: "sent", channel: delivery.channel, resendId: providerId });
+          continue;
+        }
+        const { data, error } = await resend!.emails.send({
+          from,
+          to: [recipient],
+          subject: args.subject,
+          html: args.html
+        }, { idempotencyKey });
 
         if (error) {
           const message = error.message || "Resend send failed.";

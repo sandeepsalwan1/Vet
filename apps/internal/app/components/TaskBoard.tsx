@@ -16,6 +16,7 @@ import {
 } from "../lib/taskWorkflow";
 import { TaskActivityPanel, TaskLaneGrid } from "./TaskBoardPanels";
 import { ArrivalDeskPanel } from "./ArrivalDeskPanel";
+import { ClientJourneyStaffPanel } from "./ClientJourneyStaffPanel";
 import { useClinicBrand } from "./ClinicContext";
 import { TaskForm } from "./TaskForm";
 import { BootScreen, EntryScreen, MiniConfetti, SessionNameTag } from "./TaskBoardChrome";
@@ -229,6 +230,14 @@ export function TaskBoard() {
         actorQuery={actorQuery}
         onError={setError}
       />
+
+      {session.role === "admin" ? (
+        <ClientJourneyStaffPanel
+          session={session}
+          actorQuery={actorQuery}
+          onError={setError}
+        />
+      ) : null}
 
       <TaskLaneGrid
         tasks={tasks}

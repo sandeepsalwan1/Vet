@@ -10,6 +10,8 @@
     "dev": "npm run dev:internal",
     "dev:internal": "node scripts/with-root-env.mjs npm --workspace @central-vet/internal run dev -- --port 3000",
     "build": "npm run build --workspace @central-vet/internal",
+    "docs:list": "node scripts/docs-list.mjs",
+    "docs:check": "node scripts/docs-list.mjs --check",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "lint:dead": "knip --treat-config-hints-as-errors",
@@ -23,6 +25,7 @@
     "scenarios:e2b": "node scripts/with-root-env.mjs node scripts/vetagent-scenarios.mjs --e2b",
     "smoke:e2b": "node scripts/with-root-env.mjs node scripts/e2b-smoke.mjs",
     "test:scenarios": "node --import tsx packages/agents/src/scenarioRunner.ts",
+    "test:client-journey": "node --import tsx --test packages/notifications/src/clientJourney.test.ts apps/internal/app/api/client-account-claim/claimRequest.test.ts apps/internal/app/api/client-journey/route.test.ts",
     "verify:agents": "node scripts/with-root-env.mjs node scripts/verify-agents.mjs --allow-fallback",
     "verify:agents:google": "node scripts/with-root-env.mjs node scripts/verify-agents.mjs"
   },

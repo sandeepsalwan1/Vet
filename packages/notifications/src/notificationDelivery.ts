@@ -79,12 +79,13 @@ export function localNotificationParts(
   };
 }
 
-function smsAddressFor(phone: string) {
+export function smsDestinationFor(phone: string) {
   const clean = phone.trim();
-  if (clean.includes("@")) return clean;
+  if (!/^\+?[0-9().\-\s]+$/.test(clean)) return "";
   const digits = clean.replace(/\D/g, "");
-  if (digits.length === 10) return `${digits}@vtext.com`;
-  if (digits.length === 11 && digits.startsWith("1")) return `${digits.slice(1)}@vtext.com`;
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  if (clean.startsWith("+") && digits.length >= 8 && digits.length <= 15) return `+${digits}`;
   return "";
 }
 
@@ -103,7 +104,7 @@ export async function veterinarianDeliveries(
     .map((profile) => profile.email);
   const smsRecipients = profiles
     .filter((profile) => enabledForKind(profile) && profile.smsOptIn && profile.phone)
-    .map((profile) => smsAddressFor(profile.phone))
+    .map((profile) => smsDestinationFor(profile.phone))
     .filter(Boolean);
   const deliveries: Delivery[] = [
     { channel: "email", recipients: emailRecipients },

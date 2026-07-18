@@ -1,0 +1,762 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tri-City Client Journey | Product Plan</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #d9e1df;
+      --paper: #fbfcfb;
+      --field: #ffffff;
+      --sage: #e8f2ed;
+      --blue: #1d5f91;
+      --blue-soft: #dceefe;
+      --cyan: #cfeff1;
+      --purple: #e8def8;
+      --amber: #ffe7a3;
+      --peach: #ffd7bf;
+      --green: #ccebd6;
+      --green-strong: #16834a;
+      --green-deep: #0f3327;
+      --red: #c53c35;
+      --red-soft: #ffe0dd;
+      --shadow: 0 16px 50px rgba(23, 32, 51, 0.12);
+      --radius: 18px;
+      --serif: "Fraunces", Georgia, serif;
+      --sans: "Avenir Next", "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; background: #f6f8f6; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: var(--sans);
+      background:
+        linear-gradient(90deg, rgba(29, 95, 145, 0.04) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(22, 131, 74, 0.035) 1px, transparent 1px),
+        #f6f8f6;
+      background-size: 32px 32px;
+    }
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; }
+    p, h1, h2, h3, h4, li, td, th, label, span { overflow-wrap: anywhere; }
+    img, svg { max-width: 100%; }
+
+    .page { width: min(1240px, calc(100% - 32px)); margin: 0 auto; padding: 26px 0 80px; }
+    .topbar {
+      position: sticky;
+      top: 12px;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 12px 16px;
+      border: 1px solid rgba(217, 225, 223, 0.9);
+      border-radius: 16px;
+      background: rgba(251, 252, 251, 0.9);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 10px 34px rgba(23, 32, 51, 0.08);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; background: var(--green-deep); color: #fff; }
+    .brand strong { display: block; font-family: var(--serif); font-size: 16px; }
+    .brand small { display: block; color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+    .nav { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+    .nav a { color: var(--muted); text-decoration: none; font-size: 12px; font-weight: 800; padding: 8px 10px; border-radius: 9px; }
+    .nav a:hover { color: var(--green-deep); background: var(--sage); }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr);
+      gap: 24px;
+      margin-top: 22px;
+      padding: 38px;
+      color: #fff;
+      background: linear-gradient(140deg, #0f3327 0%, #164b3b 58%, #1d5f91 100%);
+      border-radius: 26px;
+      box-shadow: var(--shadow);
+      overflow: visible;
+      position: relative;
+    }
+    .hero::after { content: ""; position: absolute; width: 250px; height: 250px; border-radius: 50%; right: 16px; top: 16px; border: 34px solid rgba(255,255,255,.045); pointer-events: none; }
+    .hero > * { min-width: 0; position: relative; z-index: 1; }
+    .eyebrow { margin: 0 0 12px; color: #a9dcc5; font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: .12em; }
+    .hero h1 { max-width: 790px; margin: 0; font-family: var(--serif); font-size: clamp(38px, 5.5vw, 72px); line-height: .98; font-weight: 600; letter-spacing: -.04em; }
+    .hero-copy { max-width: 700px; color: rgba(255,255,255,.78); font-size: 18px; line-height: 1.6; margin: 20px 0 0; }
+    .pill-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 24px; }
+    .pill { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: 999px; font-size: 12px; font-weight: 800; background: rgba(255,255,255,.11); border: 1px solid rgba(255,255,255,.14); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #79d69f; flex: 0 0 auto; }
+    .hero-card { align-self: stretch; padding: 22px; border-radius: 18px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.15); backdrop-filter: blur(12px); }
+    .hero-card h3 { margin: 0 0 16px; font-family: var(--serif); font-size: 23px; }
+    .hero-stat { display: grid; grid-template-columns: 54px minmax(0,1fr); gap: 11px; align-items: center; min-height: 58px; padding: 14px 0; border-top: 1px solid rgba(255,255,255,.12); overflow: visible; }
+    .hero-stat strong { font-family: var(--serif); font-size: 23px; line-height: 1.2; color: #bceacf; }
+    .hero-stat span { color: rgba(255,255,255,.74); font-size: 13px; line-height: 1.35; }
+
+    section { margin-top: 28px; }
+    .section-head { display: flex; justify-content: space-between; align-items: end; gap: 20px; margin-bottom: 14px; }
+    .section-head > * { min-width: 0; }
+    .section-kicker { color: var(--blue); font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .11em; margin: 0 0 6px; }
+    h2 { font-family: var(--serif); font-size: clamp(28px, 3.6vw, 42px); line-height: 1.05; font-weight: 600; letter-spacing: -.025em; margin: 0; }
+    .section-note { max-width: 560px; margin: 0; color: var(--muted); line-height: 1.5; font-size: 14px; }
+    .card { min-width: 0; background: rgba(251,252,251,.97); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 10px 34px rgba(23,32,51,.07); }
+    .pad { padding: 22px; }
+    .badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 999px; font-size: 11px; line-height: 1; font-weight: 900; }
+    .badge.green { background: var(--green); color: #0b6034; }
+    .badge.blue { background: var(--blue-soft); color: #174d75; }
+    .badge.amber { background: var(--amber); color: #775500; }
+    .badge.red { background: var(--red-soft); color: #8c2722; }
+    .badge.gray { background: #eceff1; color: #4e5b69; }
+    .callout { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; padding: 16px; border-radius: 14px; border: 1px solid rgba(194, 142, 0, .25); background: #fff8df; }
+    .callout b { display: block; margin-bottom: 3px; }
+    .callout p { margin: 0; color: #6c5a24; line-height: 1.5; font-size: 13px; }
+
+    .mermaid-wrap { padding: 20px; overflow: auto; }
+    .mermaid { min-width: 720px; }
+    .journey-legend { display: flex; gap: 14px; flex-wrap: wrap; padding: 0 20px 18px; color: var(--muted); font-size: 12px; }
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+
+    .matrix { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { padding: 12px 14px; text-align: left; color: var(--muted); background: #f1f5f2; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+    td { padding: 14px; border-top: 1px solid var(--line); vertical-align: top; line-height: 1.45; }
+    tr:hover td { background: rgba(232,242,237,.38); }
+    td strong { display: block; margin-bottom: 3px; }
+    .channel { display: flex; gap: 5px; flex-wrap: wrap; }
+    .decision { color: var(--green-deep); font-weight: 800; }
+
+    .compare-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 18px; }
+    .mock-window { overflow: hidden; }
+    .window-bar { display: flex; align-items: center; gap: 6px; padding: 10px 14px; background: #eff3f0; border-bottom: 1px solid var(--line); }
+    .window-dot { width: 9px; height: 9px; border-radius: 50%; background: #bdc7c1; }
+    .mock-body { padding: 22px; background: #fff; min-height: 365px; }
+    .mock-label { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 18px; }
+    .mock-label h3 { margin: 0; font-family: var(--serif); font-size: 22px; }
+    .form-title { margin: 18px 0 5px; font-family: var(--serif); font-size: 25px; }
+    .muted { color: var(--muted); }
+    .form-field { display: grid; gap: 6px; margin-top: 14px; font-size: 12px; font-weight: 800; }
+    .form-field input { width: 100%; height: 45px; border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; color: var(--ink); background: #fff; }
+    .primary-btn { width: 100%; min-height: 46px; border: 0; border-radius: 10px; margin-top: 16px; color: #fff; background: var(--green-deep); font-weight: 800; }
+    .old-btn { background: #738078; }
+    .microcopy { margin: 11px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; text-align: center; }
+    .benefits { display: grid; gap: 9px; margin-top: 16px; }
+    .benefit { display: grid; grid-template-columns: 22px minmax(0,1fr); gap: 8px; color: #355145; font-size: 12px; }
+    .benefit i { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--green); font-style: normal; font-weight: 900; }
+
+    .messages-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 16px; }
+    .message-card { overflow: hidden; }
+    .message-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); background: #f4f7f5; }
+    .message-head strong { font-size: 13px; }
+    .message-body { padding: 17px; }
+    .message-body h3 { margin: 0 0 10px; font-family: var(--serif); font-size: 20px; }
+    .message-body p { color: #465268; font-size: 13px; line-height: 1.55; }
+    .sms { background: #e8f2ed; border-radius: 16px 16px 4px 16px; padding: 13px 14px; font-size: 13px; line-height: 1.5; }
+    .thumbs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+    .thumb { border: 1px solid var(--line); border-radius: 10px; padding: 10px; text-align: center; font-weight: 900; background: #fff; }
+    .step-list { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+    .step-list li { display: grid; grid-template-columns: 24px minmax(0,1fr); gap: 9px; color: #465268; font-size: 12px; line-height: 1.4; }
+    .step-list b { display: grid; place-items: center; width: 23px; height: 23px; border-radius: 50%; background: var(--blue-soft); color: var(--blue); }
+    .small-link { display: inline-flex; margin-top: 12px; color: var(--blue); font-size: 12px; font-weight: 900; text-decoration: none; }
+
+    .staff-shell { display: grid; grid-template-columns: 220px minmax(0,1fr); overflow: hidden; min-height: 590px; }
+    .staff-nav { padding: 18px 14px; background: #102c24; color: #fff; }
+    .staff-nav h3 { font-family: var(--serif); margin: 0 0 22px; }
+    .staff-nav-item { padding: 10px 11px; margin: 4px 0; border-radius: 9px; color: rgba(255,255,255,.7); font-size: 12px; font-weight: 800; }
+    .staff-nav-item.active { color: #fff; background: rgba(255,255,255,.12); }
+    .staff-main { min-width: 0; padding: 22px; background: #f5f7f5; }
+    .staff-title { display: flex; justify-content: space-between; gap: 14px; align-items: center; }
+    .staff-title h3 { font-family: var(--serif); font-size: 27px; margin: 0; }
+    .staff-actions { display: flex; gap: 7px; flex-wrap: wrap; }
+    .action-btn { border: 1px solid var(--line); border-radius: 9px; background: #fff; padding: 8px 10px; color: var(--ink); font-size: 11px; font-weight: 900; }
+    .action-btn.primary { background: var(--green-deep); color: #fff; border-color: var(--green-deep); }
+    .staff-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; margin: 16px 0; }
+    .stat { padding: 13px; border-radius: 12px; border: 1px solid var(--line); background: #fff; }
+    .stat small { display: block; color: var(--muted); font-weight: 800; }
+    .stat strong { display: block; font-family: var(--serif); font-size: 26px; margin-top: 4px; }
+    .staff-content { display: grid; grid-template-columns: minmax(0,1.15fr) minmax(250px,.85fr); gap: 12px; }
+    .panel { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: #fff; }
+    .panel h4 { margin: 0 0 12px; font-size: 13px; }
+    .timeline { display: grid; gap: 0; }
+    .timeline-row { display: grid; grid-template-columns: 14px 74px minmax(0,1fr); gap: 10px; min-height: 56px; font-size: 11px; }
+    .timeline-track { position: relative; }
+    .timeline-track::after { content: ""; position: absolute; left: 6px; top: 15px; bottom: -5px; width: 2px; background: var(--line); }
+    .timeline-row:last-child .timeline-track::after { display: none; }
+    .timeline-track::before { content: ""; position: absolute; left: 2px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: var(--green-strong); box-shadow: 0 0 0 3px var(--green); }
+    .timeline-time { color: var(--muted); font-weight: 800; }
+    .timeline-copy strong { display: block; margin-bottom: 3px; }
+    .timeline-copy span { color: var(--muted); line-height: 1.35; }
+    .alert-card { padding: 14px; border: 1px solid rgba(197,60,53,.2); border-radius: 12px; background: #fff3f1; margin-bottom: 10px; }
+    .alert-card strong { display: block; color: #8c2722; font-size: 12px; }
+    .alert-card p { color: #76504d; font-size: 11px; line-height: 1.4; }
+    .profile-row { display: grid; gap: 7px; padding: 11px 0; border-top: 1px solid var(--line); font-size: 11px; }
+    .profile-row:first-of-type { border-top: 0; }
+    .profile-row span { color: var(--muted); }
+    .insurance-card { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin-top: 14px; }
+    .insurance-card .card { padding: 16px; }
+    .insurance-card h3 { font-size: 14px; margin: 0 0 7px; }
+    .insurance-card p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+
+    .architecture-grid { display: grid; grid-template-columns: minmax(0,1.25fr) minmax(300px,.75fr); gap: 16px; }
+    .rule-list { display: grid; gap: 10px; }
+    .rule { display: grid; grid-template-columns: 28px minmax(0,1fr); gap: 10px; padding: 12px; border-radius: 11px; background: #f4f7f5; }
+    .rule b:first-child { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 8px; background: var(--sage); color: var(--green-deep); }
+    .rule strong { display: block; font-size: 12px; }
+    .rule span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+    .phase-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; }
+    .phase { padding: 18px; position: relative; overflow: hidden; }
+    .phase-num { position: absolute; right: 28px; top: 12px; color: rgba(15,51,39,.08); font-family: var(--serif); font-size: 46px; line-height: 1; }
+    .phase h3 { margin: 0 0 10px; font-family: var(--serif); font-size: 21px; }
+    .phase ul { padding-left: 18px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+
+    .review { padding: 24px; background: linear-gradient(180deg,#fbfcfb,#eef5f0); }
+    .review-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; margin-top: 18px; }
+    .question { min-width: 0; padding: 17px; background: #fff; border: 1px solid var(--line); border-radius: 14px; }
+    .question h3 { margin: 0 0 5px; font-size: 14px; }
+    .question > p { margin: 0 0 12px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .option { display: grid; grid-template-columns: 18px minmax(0,1fr); gap: 8px; align-items: start; padding: 9px 0; border-top: 1px solid #edf0ee; font-size: 12px; }
+    .option:first-of-type { border-top: 0; }
+    .option input { margin-top: 2px; }
+    .option strong { display: block; }
+    .option small { display: block; color: var(--muted); line-height: 1.4; }
+    .queue-btn { width: 100%; border: 0; border-radius: 9px; margin-top: 10px; padding: 10px; background: var(--green-deep); color: #fff; font-size: 12px; font-weight: 900; }
+    .queue-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .queued { min-height: 17px; margin: 7px 0 0; color: var(--green-strong); font-size: 11px; font-weight: 800; }
+    .source-note { margin-top: 16px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+
+    @media (max-width: 960px) {
+      .hero, .architecture-grid { grid-template-columns: 1fr; }
+      .messages-grid, .phase-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+      .staff-shell { grid-template-columns: 1fr; }
+      .staff-nav { display: none; }
+      .staff-summary { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    }
+    @media (max-width: 720px) {
+      .page { width: min(100% - 18px, 1240px); padding-top: 9px; }
+      .topbar { position: static; }
+      .nav { display: none; }
+      .hero { padding: 26px 20px; }
+      .hero h1 { font-size: clamp(34px, 11vw, 44px); line-height: 1.04; }
+      .hero-card { padding: 18px; }
+      .hero-stat { grid-template-columns: 42px minmax(0,1fr); gap: 8px; }
+      .hero-stat strong { font-size: 21px; }
+      .section-head { align-items: start; flex-direction: column; gap: 8px; }
+      .compare-grid, .messages-grid, .phase-grid, .review-grid, .staff-content, .insurance-card { grid-template-columns: 1fr; }
+      .staff-main { padding: 14px; }
+      .staff-title { align-items: flex-start; flex-direction: column; }
+    }
+    @media (max-width: 420px) {
+      .staff-summary { grid-template-columns: 1fr; }
+      .stat strong { font-size: 22px; line-height: 1.2; }
+      .phase-num { right: 28px; top: 14px; font-size: 40px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">🐾</div>
+        <div><strong>Client Journey Plan</strong><small>Vet app review surface</small></div>
+      </div>
+      <nav class="nav" aria-label="Artifact sections">
+        <a href="#reality">Reality</a><a href="#scope">Scope</a><a href="#screens">Screens</a><a href="#journey">Journey</a><a href="#messages">Messages</a><a href="#signin">Sign-in</a><a href="#staff">Settings</a><a href="#build">Build</a><a href="#decisions">Approve</a>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Plan only · UI approval required</p>
+        <h1>See every screen before anything ships.</h1>
+        <p class="hero-copy">Release target: a complete Tri-City experience at <strong>tricityvet.eepish.com</strong>. This page is the plan, not the product. It names every UI surface, backend change, and deployment step before implementation or release.</p>
+        <div class="pill-row">
+          <span class="pill"><span class="dot"></span>Not deployed</span>
+          <span class="pill"><span class="dot"></span>Four disclosed UI surfaces</span>
+          <span class="pill"><span class="dot"></span>Real email + SMS backend</span>
+          <span class="pill"><span class="dot"></span>Fresh approval required</span>
+        </div>
+      </div>
+      <aside class="hero-card">
+        <h3>Release truth</h3>
+        <div class="hero-stat"><strong>200</strong><span>Render origin is online, but still shows the older Central Vet experience</span></div>
+        <div class="hero-stat"><strong>OFF</strong><span>Tri-City custom domain currently has broken routing and TLS</span></div>
+        <div class="hero-stat"><strong>4</strong><span>customer, staff, veterinarian, and admin surfaces disclosed below</span></div>
+        <div class="hero-stat"><strong>0</strong><span>new UI surfaces approved for deployment after this review reopened</span></div>
+      </aside>
+    </section>
+
+    <section>
+      <div class="callout">
+        <div>⚠️</div>
+        <div><b>Do not deploy the current unapproved UI</b><p>The prior review did not make UI impact clear enough. Approval is reopened. Implementation and domain release wait until the screen inventory below matches what you expect.</p></div>
+      </div>
+    </section>
+
+    <section id="reality">
+      <div class="section-head">
+        <div><p class="section-kicker">Current vs target</p><h2>No mockup mistaken for the live product</h2></div>
+        <p class="section-note">Verified July 16, 2026. The Render origin works. The Tri-City hostname does not yet reach a verified Tri-City deployment.</p>
+      </div>
+      <div class="compare-grid">
+        <article class="card pad">
+          <span class="badge amber">Live now</span>
+          <h3>Older Central Vet product</h3>
+          <ul><li>Render origin returns HTTP 200.</li><li>Customer home still carries Central Vet branding.</li><li><code>tricityvet.eepish.com</code> falls through an old Vercel wildcard and fails HTTPS.</li><li>Current local UI changes are not deployed.</li></ul>
+        </article>
+        <article class="card pad">
+          <span class="badge green">Release target</span>
+          <h3>Official Tri-City product</h3>
+          <ul><li>Tri-City tenant branding and family story.</li><li>Approved customer, staff, veterinarian, and admin screens.</li><li>Real notification pipeline with production sends explicitly gated.</li><li>Verified custom domain, TLS, database migration, and browser smoke proof.</li></ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="scope">
+      <div class="section-head">
+        <div><p class="section-kicker">Scope ledger</p><h2>What changes where</h2></div>
+        <p class="section-note">Primary UI change: Admin settings. Customer, staff, and veterinarian surfaces stay small. This is the complete surface map before implementation.</p>
+      </div>
+      <div class="card matrix">
+        <table>
+          <thead><tr><th>Surface</th><th>Owns</th><th>Planned change</th><th>Explicit boundary</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Admin settings</strong><span class="badge green">Primary UI</span></td><td>Hospital owner/manager</td><td>Welcome, reminders, outreach rules, channels, delivery mode, templates, reporting, and PIMS integration status</td><td>No clinic-wide settings on staff or veterinarian screens</td></tr>
+            <tr><td><strong>Customer portal</strong><span class="badge blue">Minimal</span></td><td>Pet owner</td><td>Chat first, current appointment or visit state, pickup, discharge, and feedback only when due</td><td>A records request creates a staff task; no internal queues, automation settings, or permanent after-visit cards</td></tr>
+            <tr><td><strong>Staff tasks</strong><span class="badge blue">Front desk</span></td><td>Front desk/cashier</td><td>Daily tasks, arrivals, payment/checkout, automatic state updates, and on-demand room controls</td><td>No manual refresh as primary UX; cannot delete or archive veterinarian-owned clinical tasks</td></tr>
+            <tr><td><strong>Veterinarian tasks</strong><span class="badge blue">Clinical</span></td><td>Veterinarian</td><td>Staff-like task flow plus clinical callbacks, discharge approval, and clinical ownership</td><td>Separate role; no clinic-wide outreach settings</td></tr>
+            <tr><td><strong>Notification backend</strong><span class="badge green">Real delivery</span></td><td>Outbox and transports</td><td>Database-backed schedules, current consent, quiet hours, dedupe, retries, delivery attempts, and disabled/test/production modes</td><td>No pretend send state; production remains explicitly gated</td></tr>
+            <tr><td><strong>PIMS boundary</strong><span class="badge amber">Adapter-ready</span></td><td>Cornerstone, AVImark, or another provider adapter</td><td>Appointment and visit events replace mock data without changing UI or journey policy</td><td>Provider-specific behavior stays outside core workflows</td></tr>
+            <tr><td><strong>Project guidance</strong><span class="badge gray">AGENTS.md</span></td><td>Future agents</td><td>Role ownership, terse UI, real-product standard, and PIMS-ready constraints live in scoped component and API guides</td><td>Not left only in review chat</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="screens">
+      <div class="section-head">
+        <div><p class="section-kicker">Complete UI inventory</p><h2>These are the only material screen changes</h2></div>
+        <p class="section-note">Each card is a light proposed mockup, not implemented-product proof. Annotate any card before approval.</p>
+      </div>
+      <div class="review-grid">
+        <article class="card pad">
+          <div class="mock-label"><h3>Customer home</h3><span class="badge amber">Proposed</span></div>
+          <div class="panel">
+            <div class="profile-row"><strong>Chat first</strong><span>Primary action at the top</span></div>
+            <div class="profile-row"><strong>Quick actions</strong><span>Book, check in, refill, pickup, concern</span></div>
+            <div class="profile-row"><strong>One current-state card</strong><span>Appointment, pickup, discharge, or feedback only when due</span></div>
+          </div>
+          <p class="source-note"><b>Not included:</b> permanent after-visit dashboard, message queue, admin settings, or staff language. Records requests create staff tasks.</p>
+        </article>
+        <article class="card pad">
+          <div class="mock-label"><h3>Staff task board</h3><span class="badge amber">Proposed</span></div>
+          <div class="panel">
+            <div class="profile-row"><strong>Tasks first</strong><span>Front desk and cashier work</span></div>
+            <div class="profile-row"><strong>Arrivals + payment</strong><span>Current operational state only</span></div>
+            <div class="profile-row"><strong>Rooms popup</strong><span>Opens on demand; pressure warning after two-thirds occupancy</span></div>
+          </div>
+          <p class="source-note"><b>Not included:</b> client journey dashboard, notification settings, manual refresh button, or permission to delete veterinarian-owned work.</p>
+        </article>
+        <article class="card pad">
+          <div class="mock-label"><h3>Veterinarian task board</h3><span class="badge amber">Proposed</span></div>
+          <div class="panel">
+            <div class="profile-row"><strong>Same task shell</strong><span>Familiar layout shared with staff</span></div>
+            <div class="profile-row"><strong>Clinical ownership</strong><span>Callbacks and clinical follow-up</span></div>
+            <div class="profile-row"><strong>Discharge approval</strong><span>Doctor-approved content only</span></div>
+          </div>
+          <p class="source-note"><b>Boundary:</b> separate authenticated role. Staff cannot delete or archive veterinarian-owned clinical tasks.</p>
+        </article>
+        <article class="card pad">
+          <div class="mock-label"><h3>Admin settings</h3><span class="badge green">Primary UI</span></div>
+          <div class="panel">
+            <div class="profile-row"><strong>Communication</strong><span>Welcome, preparation, reminders, follow-up</span></div>
+            <div class="profile-row"><strong>Delivery</strong><span>Email/SMS channels, test/production mode, consent</span></div>
+            <div class="profile-row"><strong>Integrations</strong><span>Cornerstone, AVImark, tenant domain, adapter status</span></div>
+          </div>
+          <p class="source-note"><b>Placement:</b> clinic-wide outreach, templates, reporting, and delivery status stay here, not on staff or veterinarian screens.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="journey">
+      <div class="section-head">
+        <div><p class="section-kicker">End-to-end journey</p><h2>Lifecycle, not scattered reminders</h2></div>
+        <p class="section-note">Every send is caused by a state change or a scheduled job. Negative feedback becomes staff work. The client never needs to know which internal system produced the message.</p>
+      </div>
+      <div class="card mermaid-wrap">
+        <pre class="mermaid">
+flowchart TD
+  A["New client account"] --> B["Welcome to the family<br/>Email + SMS"]
+  B --> C["Appointment booked"]
+  C --> D["Preparation reminder<br/>records + pre-check-in"]
+  D --> E["Client checks in"]
+  E --> F["Technician intake<br/>questions confirmed"]
+  F --> G{"Visit path"}
+  G -->|Routine| H["Exam and care updates"]
+  G -->|Hospitalized| I["Scheduled status updates"]
+  H --> J["Pet ready<br/>pickup + payment link"]
+  I --> J
+  J --> K["Checkout complete"]
+  K --> L["Discharge instructions<br/>Email + SMS link"]
+  L --> M["Visit check<br/>60-90 minutes later"]
+  M --> N{"Thumbs up or down"}
+  N -->|Up| O["Thank client"]
+  N -->|Down| P["Service recovery task + staff call"]
+  O --> Q["Pet check<br/>next day"]
+  P --> U["Human follow-up owns next contact"]
+  Q --> R{"Pet doing well?"}
+  R -->|Yes| S["Close journey"]
+  R -->|No| T["Clinical callback task"]
+  classDef primary fill:#e8f2ed,stroke:#16834a,color:#172033;
+  classDef action fill:#dceefe,stroke:#1d5f91,color:#172033;
+  classDef alert fill:#ffe0dd,stroke:#c53c35,color:#172033;
+  class A,B,C,D,E,F,H,I,J,K,L,M,O,Q,S,U primary;
+  class G,N,R action;
+  class P,T alert;
+        </pre>
+      </div>
+      <div class="journey-legend card">
+        <span class="legend-item"><span class="dot"></span>Client touchpoint</span>
+        <span class="legend-item"><span class="badge blue">Decision</span>Branch from real response or visit state</span>
+        <span class="legend-item"><span class="badge red">Staff action</span>No silent negative response</span>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <div><p class="section-kicker">Automation contract</p><h2>Exactly what sends, and when</h2></div>
+        <p class="section-note">Email carries details and attachments. SMS carries urgency, the key action, and a secure portal link.</p>
+      </div>
+      <div class="card matrix">
+        <table>
+          <thead><tr><th>Moment</th><th>Trigger</th><th>Channels</th><th>Client receives</th><th>Staff sees</th></tr></thead>
+          <tbody>
+            <tr><td><strong>1. Welcome</strong><span class="badge green">Immediate</span></td><td>Customer account created</td><td><div class="channel"><span class="badge blue">Email</span><span class="badge green">SMS</span></div></td><td>Family story, clinic workflow, portal, records upload, communication choices</td><td>Profile completeness and consent</td></tr>
+            <tr><td><strong>2. Booking confirmed</strong><span class="badge green">Immediate</span></td><td>Appointment booked or imported</td><td><div class="channel"><span class="badge blue">Email default</span><span class="badge green">SMS optional</span></div></td><td>Date, time, pet, clinician if known, reschedule link</td><td>Confirmation status</td></tr>
+            <tr><td><strong>3. Prepare</strong><span class="badge amber">24 hours before</span></td><td>Appointment reminder due</td><td><div class="channel"><span class="badge blue">48h email default</span><span class="badge green">24h SMS guaranteed when opted in</span></div></td><td>Arrive on time, transfer records, pre-check-in questions, and what happens during the visit</td><td>Records and questionnaire completion</td></tr>
+            <tr><td><strong>4. Checked in</strong><span class="badge green">Event</span></td><td>Matched arrival completes</td><td><div class="channel"><span class="badge green">SMS</span></div></td><td>Arrival confirmed and what happens next</td><td>Journey stage and submitted answers</td></tr>
+            <tr><td><strong>5. Visit update</strong><span class="badge blue">Staff/PIMS event</span></td><td>Approved status change</td><td><div class="channel"><span class="badge green">SMS</span><span class="badge blue">Email optional</span></div></td><td>Plain-language update with no unsupported diagnosis</td><td>Sent status, author, timestamp</td></tr>
+            <tr><td><strong>6. Hospitalized update</strong><span class="badge amber">Scheduled</span></td><td>Hospitalized status + update due</td><td><div class="channel"><span class="badge green">SMS</span><span class="badge blue">Email</span></div></td><td>Current status, next expected update, call-us path</td><td>Overdue update alert</td></tr>
+            <tr><td><strong>7. Ready for pickup</strong><span class="badge green">Event</span></td><td>Pet marked ready</td><td><div class="channel"><span class="badge green">SMS</span><span class="badge blue">Email</span></div></td><td>Ready time, pickup steps, amount due, secure payment link</td><td>Delivery and payment status</td></tr>
+            <tr><td><strong>8. Discharge</strong><span class="badge green">After checkout</span></td><td>Checkout completed</td><td><div class="channel"><span class="badge blue">Email</span><span class="badge green">SMS</span></div></td><td>Doctor-approved instructions, medications, red flags, recheck, portal copy</td><td>Acknowledgment and failed delivery</td></tr>
+            <tr><td><strong>9. Visit feedback</strong><span class="badge amber">60-90 min later</span></td><td>Checkout + delay</td><td><div class="channel"><span class="badge green">SMS opt-in</span><span class="badge blue">Email fallback</span></div></td><td>“How was your visit?” with thumbs up or down</td><td>Down creates a high-priority Tasks item and suppresses automated next-day messaging</td></tr>
+            <tr><td><strong>10. Pet check</strong><span class="badge amber">Next day</span></td><td>Positive visit response + follow-up due</td><td><div class="channel"><span class="badge green">SMS opt-in</span><span class="badge blue">Email fallback</span></div></td><td>“How is your pet doing?” with clear urgent-care warning</td><td>“Needs help” creates a clinical callback task</td></tr>
+            <tr><td><strong>11. Records or insurance help</strong><span class="badge gray">On demand</span></td><td>Client request creates a staff task</td><td><div class="channel"><span class="badge blue">Portal</span><span class="badge blue">Email</span></div></td><td>Staff prepares the approved records, invoice, or claim-ready attachments</td><td>Recipient and scope confirmation, protected identifiers, files, and audited release</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="source-note"><b>Recommended default:</b> immediate email confirmation, 48-hour email reminder, and a guaranteed 24-hour SMS for clients who explicitly opted in. Cancellation, rescheduling, or opt-out cancels the send; quiet hours apply.</p>
+    </section>
+
+    <section id="signin">
+      <div class="section-head">
+        <div><p class="section-kicker">Customer access</p><h2>Claim a client account without changing sign-in.</h2></div>
+        <p class="section-note">Existing sign-in, password recovery, and staff authentication stay intact. Only new-client setup changes: match the email or phone already on the clinic record, then verify that contact.</p>
+      </div>
+      <div class="compare-grid">
+        <article class="card mock-window">
+          <div class="window-bar"><span class="window-dot"></span><span class="window-dot"></span><span class="window-dot"></span></div>
+          <div class="mock-body">
+            <div class="mock-label"><h3>Existing sign-in</h3><span class="badge green">Keep</span></div>
+            <h4 class="form-title">Welcome back</h4><p class="muted">Sign in to manage your pet’s care</p>
+            <label class="form-field">Email<input value="you@example.com" readonly></label>
+            <label class="form-field">Password<input type="password" value="secret12" readonly></label>
+            <button class="primary-btn old-btn">Sign in</button>
+            <p class="microcopy">Forgot password and all current returning-client paths remain available.</p>
+          </div>
+        </article>
+        <article class="card mock-window">
+          <div class="window-bar"><span class="window-dot"></span><span class="window-dot"></span><span class="window-dot"></span></div>
+          <div class="mock-body">
+            <div class="mock-label"><h3>New-client account claim</h3><span class="badge green">Recommended</span></div>
+            <h4 class="form-title">Find your clinic record</h4><p class="muted">Enter the email or phone number you gave the clinic.</p>
+            <label class="form-field">Email or phone<input value="you@example.com" readonly></label>
+            <button class="primary-btn">Find and verify my record</button>
+            <div class="benefits">
+              <div class="benefit"><i>✓</i><span>Checks the configured PIMS or clinic record source before portal access.</span></div>
+              <div class="benefit"><i>✓</i><span>Sends verification only to a matched clinic contact.</span></div>
+              <div class="benefit"><i>✓</i><span>SMS consent is separate from account verification.</span></div>
+            </div>
+            <p class="microcopy">Use the same neutral response whether a record matches or not. Unmatched clients go to staff review.</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section id="messages">
+      <div class="section-head">
+        <div><p class="section-kicker">Customer-facing UI</p><h2>Warm, useful, and short</h2></div>
+        <p class="section-note">Clients see clear next steps, never internal task language. These are message directions, not final medical templates. Clinical instructions remain doctor-approved and visit-specific.</p>
+      </div>
+      <div class="messages-grid">
+        <article class="card message-card">
+          <div class="message-head"><strong>Welcome email</strong><span class="badge blue">Email</span></div>
+          <div class="message-body">
+            <h3>Welcome to the Tri-City family</h3>
+            <p>We’re excited to welcome you and your pet to the Tri-City family. Family-run since 1986, three generations have served our community. Here is how we work together to make your visit pleasant and easy.</p>
+            <ol class="step-list">
+              <li><b>1</b><span>Check in when you arrive. We make sure your questions are answered.</span></li>
+              <li><b>2</b><span>A technician or veterinary assistant asks clarifying questions and reviews your concerns.</span></li>
+              <li><b>3</b><span>Your pet goes to the treatment room, where another assistant supports the doctor during the exam. We explain the care plan, keep you updated, and make checkout and follow-up easy.</span></li>
+            </ol>
+            <a class="small-link" href="#">Open your pet portal →</a>
+          </div>
+        </article>
+        <article class="card message-card">
+          <div class="message-head"><strong>Appointment preparation</strong><span class="badge green">Email + SMS</span></div>
+          <div class="message-body">
+            <h3>Help us prepare for Biscuit</h3>
+            <p>Please arrive on time. If you are transferring care, upload previous medical and vaccine records before the visit. Complete the pre-check-in questions so our technician can focus on what matters most. After check-in, a technician or veterinary assistant will ask clarifying questions, then bring your pet to the treatment room where another assistant supports the doctor’s exam.</p>
+            <div class="sms"><b>Tri-City:</b> Biscuit’s visit is Tue at 10:30 AM. Please arrive on time, answer pre-check-in questions, and upload transfer records: [secure link]</div>
+            <a class="small-link" href="#">Upload records and check in →</a>
+          </div>
+        </article>
+        <article class="card message-card">
+          <div class="message-head"><strong>Ready + payment</strong><span class="badge green">SMS first</span></div>
+          <div class="message-body">
+            <h3>Biscuit is ready for pickup</h3>
+            <div class="sms">Good news, Biscuit is ready. Your balance is $184.50. Pay securely before arrival or at the front desk. Discharge instructions will be available after checkout: [secure link]</div>
+            <p>Never put sensitive clinical detail or a full account number in the text. The secure portal holds the invoice and care documents.</p>
+          </div>
+        </article>
+        <article class="card message-card">
+          <div class="message-head"><strong>Discharge</strong><span class="badge blue">Email + SMS link</span></div>
+          <div class="message-body">
+            <h3>Biscuit’s care instructions</h3>
+            <p>Your doctor-approved plan is ready. It includes medications, food and activity guidance, what is normal, warning signs, and when to schedule a recheck.</p>
+            <a class="small-link" href="#">View and acknowledge instructions →</a>
+            <p class="microcopy">Urgent symptoms always direct the client to call the hospital or seek emergency care.</p>
+          </div>
+        </article>
+        <article class="card message-card">
+          <div class="message-head"><strong>Visit experience</strong><span class="badge amber">60-90 minutes later</span></div>
+          <div class="message-body">
+            <h3>How was your visit?</h3>
+            <p>Your feedback helps our family care for yours. Was today’s visit a good experience?</p>
+            <div class="thumbs"><div class="thumb">👍 Yes</div><div class="thumb">👎 Not quite</div></div>
+            <p class="microcopy"><b>Customer confirmation:</b> Thanks for letting us know. A member of our team will follow up with you.</p>
+          </div>
+        </article>
+        <article class="card message-card">
+          <div class="message-head"><strong>Pet health check</strong><span class="badge amber">Next day</span></div>
+          <div class="message-body">
+            <h3>How is Biscuit doing today?</h3>
+            <p>Tap below to let us know. If you have urgent concerns, call us now rather than waiting for a message reply.</p>
+            <div class="thumbs"><div class="thumb">👍 Doing well</div><div class="thumb">👎 Needs help</div></div>
+            <p class="microcopy">“Needs help” opens a clinical callback task with the visit and discharge context attached.</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section id="staff">
+      <div class="section-head">
+        <div><p class="section-kicker">Roles + settings</p><h2>Settings where they belong</h2></div>
+        <p class="section-note">Admin settings is the primary new UI. Staff and veterinarians keep focused task views instead of receiving another all-purpose dashboard.</p>
+      </div>
+      <div class="phase-grid">
+        <article class="card phase"><span class="phase-num">1</span><h3>Staff</h3><p>Front desk and cashier work only.</p><ul><li>Tasks, arrivals, and payments</li><li>Room controls open on demand</li><li>No clinic-wide settings</li><li>Cannot delete or archive veterinarian-owned clinical tasks</li></ul></article>
+        <article class="card phase"><span class="phase-num">2</span><h3>Veterinarian</h3><p>Separate clinical role with a familiar task flow.</p><ul><li>Clinical callbacks</li><li>Discharge approval</li><li>Clinical task ownership</li><li>Staff cannot delete or archive owned work</li></ul></article>
+        <article class="card phase"><span class="phase-num">3</span><h3>Admin</h3><p>Hospital owner or manager.</p><ul><li>Outreach and notification settings</li><li>Templates and delivery modes</li><li>Integration status</li><li>Reporting and audit</li></ul></article>
+      </div>
+      <div class="card staff-shell">
+        <aside class="staff-nav">
+          <h3>Admin settings</h3>
+          <div class="staff-nav-item">General</div><div class="staff-nav-item active">Communications</div><div class="staff-nav-item">Automations</div><div class="staff-nav-item">Integrations</div><div class="staff-nav-item">Audit</div>
+        </aside>
+        <div class="staff-main">
+          <div class="staff-title">
+            <div><h3>Client communication</h3><span class="badge green">Admin only</span></div>
+            <div class="staff-actions"><button class="action-btn primary">Save settings</button></div>
+          </div>
+          <div class="staff-summary">
+            <div class="stat"><small>Delivery mode</small><strong>Test</strong></div>
+            <div class="stat"><small>Email</small><strong>Configured</strong></div>
+            <div class="stat"><small>SMS</small><strong>Consent only</strong></div>
+            <div class="stat"><small>PIMS adapter</small><strong>Pending</strong></div>
+          </div>
+          <div class="staff-content">
+            <div class="panel">
+              <h4>Outreach automations</h4>
+              <div class="profile-row"><strong>Welcome</strong><span>Active · email</span></div>
+              <div class="profile-row"><strong>48-hour preparation</strong><span>Active · email</span></div>
+              <div class="profile-row"><strong>24-hour reminder</strong><span>Active · consented SMS</span></div>
+              <div class="profile-row"><strong>After checkout</strong><span>Visit feedback, then conditional pet check</span></div>
+            </div>
+            <div class="panel">
+              <h4>Integration readiness</h4>
+              <div class="profile-row"><strong>Clinic source</strong><span>Replaceable adapter</span></div>
+              <div class="profile-row"><strong>Cornerstone / AVImark</strong><span>Approval pending</span></div>
+              <div class="profile-row"><strong>Production sends</strong><span>Explicitly gated</span></div>
+              <div class="profile-row"><strong>Delivery proof</strong><span>Attempts, outcomes, retries, audit</span></div>
+            </div>
+          </div>
+          <div class="alert-card"><strong>Minimal role surfaces</strong><p>Staff receives ordinary exception tasks. Veterinarians receive owned clinical tasks. Room controls appear only when needed, such as when two of three rooms are occupied.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="build">
+      <div class="section-head">
+        <div><p class="section-kicker">Technical approach</p><h2>Extend the system’s existing seams</h2></div>
+        <p class="section-note">The repo already plans delivery, respects notification mode, records attempts, and de-duplicates sends. This proposal adds customer events, schedules, admin configuration, and role-safe task projections.</p>
+      </div>
+      <div class="architecture-grid">
+        <div class="card mermaid-wrap">
+          <pre class="mermaid">
+flowchart TD
+  A["Portal / PIMS / staff action"] --> B["Tenant-scoped client event"]
+  B --> C["Journey policy engine"]
+  C --> D["Scheduled notification outbox"]
+  D --> E["Consent + quiet hours + dedupe"]
+  E --> F["Notification package"]
+  F --> G["Email"]
+  F --> H["SMS"]
+  G --> I["Delivery attempt + audit"]
+  H --> I
+  J["Thumb / client response"] --> K["Response route"]
+  K --> L{"Positive?"}
+  L -->|Yes| M["Close touchpoint"]
+  L -->|No| N["Staff task + alert"]
+  I --> O["Admin delivery status + role-safe tasks"]
+  N --> O
+  classDef existing fill:#dceefe,stroke:#1d5f91,color:#172033;
+  classDef add fill:#e8f2ed,stroke:#16834a,color:#172033;
+  classDef risk fill:#ffe7a3,stroke:#a77900,color:#172033;
+  class A,F,G,H,I existing;
+  class B,C,D,J,K,L,M,N,O add;
+  class E risk;
+          </pre>
+        </div>
+        <aside class="card pad">
+          <h3 style="margin-top:0;font-family:var(--serif);font-size:23px">Non-negotiable rules</h3>
+          <div class="rule-list">
+            <div class="rule"><b>1</b><div><strong>Consent first</strong><span>Transactional and optional communication categories stay separate. SMS requires explicit consent and opt-out handling.</span></div></div>
+            <div class="rule"><b>2</b><div><strong>Clinical review</strong><span>Discharge instructions come from approved visit content. Automation never invents medical advice.</span></div></div>
+            <div class="rule"><b>3</b><div><strong>Secure links</strong><span>No diagnoses, full account numbers, policy numbers, or detailed records in SMS.</span></div></div>
+            <div class="rule"><b>4</b><div><strong>Reliable scheduling</strong><span>Database-backed outbox, idempotency keys, retries, quiet hours, cancellation on state change.</span></div></div>
+            <div class="rule"><b>5</b><div><strong>Human escalation</strong><span>Negative response opens owned work with priority, deadline, context, and completion audit.</span></div></div>
+            <div class="rule"><b>6</b><div><strong>Safe rollout</strong><span>Keep production sends disabled. Test first with the provided QA email, then approved phones, then a small live cohort.</span></div></div>
+            <div class="rule"><b>7</b><div><strong>PIMS-ready boundary</strong><span>Clinic, provider, branding, and workflow settings stay configurable for Cornerstone, AVImark, and other PIMS adapters.</span></div></div>
+            <div class="rule"><b>8</b><div><strong>Role ownership</strong><span>Admin owns clinic settings, veterinarians own clinical tasks, and staff owns front-desk work. Enforce this server-side.</span></div></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <div><p class="section-kicker">Delivery plan</p><h2>Three focused releases</h2></div>
+        <p class="section-note">Start with access and the core journey. Put clinic-wide controls in Admin settings; add only the task states each operational role needs.</p>
+      </div>
+      <div class="phase-grid">
+        <article class="card phase"><span class="phase-num">1</span><h3>Foundation</h3><ul><li>New-client account claim by email or phone</li><li>Existing sign-in unchanged</li><li>Welcome and appointment preparation</li><li>Records upload</li><li>Consent and preferences</li><li>Customer event + outbox model</li><li>Test-mode proof</li></ul></article>
+        <article class="card phase"><span class="phase-num">2</span><h3>Visit loop</h3><ul><li>Check-in and visit updates</li><li>Hospitalized update schedule</li><li>Ready, payment, checkout</li><li>Discharge delivery</li><li>Visit and next-day feedback</li><li>Negative-response tasks</li></ul></article>
+        <article class="card phase"><span class="phase-num">3</span><h3>Admin controls + role safety</h3><ul><li>Admin communication settings</li><li>Delivery and response status</li><li>Staff exception tasks</li><li>Veterinarian clinical ownership</li><li>Server-enforced task permissions</li><li>PIMS adapter health and reporting</li></ul></article>
+      </div>
+    </section>
+
+    <section id="decisions">
+      <div class="card review">
+        <div class="section-head">
+          <div><p class="section-kicker">Your decisions</p><h2>Confirm the few choices that change the build</h2></div>
+          <p class="section-note">Choose an option, queue it, then press “Send to Agent” in the Lavish conversation panel. You can also annotate any sentence or mockup directly.</p>
+        </div>
+        <div class="review-grid">
+          <form class="question" data-lavish-question="clinic-name" onsubmit="queueChoice(event, 'clinic-name', 'Clinic name')">
+            <h3>1. Brand configuration</h3><p>The product stays clinic-agnostic. This review uses the current design-partner profile.</p>
+            <label class="option"><input type="radio" name="clinic-name" value="Tri-City profile on tricityvet.eepish.com" checked><span><strong>Tri-City profile</strong><small>Current copy, history, sender identity, and tenant domain.</small></span></label>
+            <label class="option"><input type="radio" name="clinic-name" value="Configure another tenant profile"><span><strong>Another clinic profile</strong><small>Same product, with tenant-specific branding and workflow settings.</small></span></label>
+            <button class="queue-btn" type="submit">Queue brand profile</button><p class="queued" aria-live="polite"></p>
+          </form>
+          <form class="question" data-lavish-question="email-auth" onsubmit="queueChoice(event, 'email-auth', 'Customer email sign-in')">
+            <h3>2. New-client account claim</h3><p>Returning-client sign-in and forgot password stay unchanged.</p>
+            <label class="option"><input type="radio" name="email-auth" value="Match email or phone to clinic record, then verify" checked><span><strong>Email or phone match</strong><small>Check the PIMS or clinic record, then verify the matched contact.</small></span></label>
+            <label class="option"><input type="radio" name="email-auth" value="Send unmatched clients to staff review"><span><strong>Staff review fallback</strong><small>Never create portal access from an unverified client claim.</small></span></label>
+            <button class="queue-btn" type="submit">Queue account-claim choice</button><p class="queued" aria-live="polite"></p>
+          </form>
+          <form class="question" data-lavish-question="followup-timing" onsubmit="queueChoice(event, 'followup-timing', 'Follow-up timing')">
+            <h3>3. Reminder default</h3><p>Every SMS-consented client receives the 24-hour reminder unless the appointment changes or they opt out.</p>
+            <label class="option"><input type="radio" name="followup-timing" value="48-hour email; guaranteed 24-hour SMS when opted in" checked><span><strong>48h email + guaranteed 24h SMS</strong><small>Default for SMS-consented clients. Quiet hours and state-change cancellation apply.</small></span></label>
+            <label class="option"><input type="radio" name="followup-timing" value="Clinic-configured custom cadence"><span><strong>Custom clinic cadence</strong><small>Change timing and channels without changing product code.</small></span></label>
+            <button class="queue-btn" type="submit">Queue timing</button><p class="queued" aria-live="polite"></p>
+          </form>
+          <form class="question" data-lavish-question="push-scope" onsubmit="queueChoice(event, 'push-scope', 'Notification channel scope')">
+            <h3>4. Channel default</h3><p>Email carries detail. SMS is optional, concise, and consent-based.</p>
+            <label class="option"><input type="radio" name="push-scope" value="Email default; SMS optional by consent and clinic setting" checked><span><strong>Email default + optional SMS</strong><small>Useful reach without sending both channels for every touchpoint.</small></span></label>
+            <label class="option"><input type="radio" name="push-scope" value="Add browser or mobile device push"><span><strong>Add device push</strong><small>Requires notification permission, device tokens, and a separate delivery path.</small></span></label>
+            <button class="queue-btn" type="submit">Queue channel scope</button><p class="queued" aria-live="polite"></p>
+          </form>
+          <form class="question" data-lavish-question="ui-approval" onsubmit="queueChoice(event, 'ui-approval', 'UI screen inventory')">
+            <h3>5. UI release gate</h3><p>This covers only the four disclosed surfaces in the Screens section. It does not approve hidden or broader UI.</p>
+            <label class="option"><input type="radio" name="ui-approval" value="Needs changes before implementation" checked><span><strong>Needs changes first</strong><small>Annotate the exact screen card, then queue this answer.</small></span></label>
+            <label class="option"><input type="radio" name="ui-approval" value="Approve only the four disclosed screen changes"><span><strong>Approve disclosed screens</strong><small>Customer, staff, veterinarian, and Admin settings exactly as shown.</small></span></label>
+            <button class="queue-btn" type="submit">Queue UI gate</button><p class="queued" aria-live="polite"></p>
+          </form>
+        </div>
+        <p class="source-note"><b>Resolved UI placement:</b> communication automation lives primarily in Admin settings. Staff and veterinarians receive minimal role-specific tasks, not a new unified journey dashboard.</p>
+        <p class="source-note"><b>Approval boundary:</b> previous approval is withdrawn for UI implementation. No build or deployment approval exists until the UI release gate is explicitly approved after reviewing the Screens section.</p>
+        <p class="source-note"><b>Grounded in current repo and messaging guidance:</b> current customer sign-in remains in <code>CustomerAuthForms.tsx</code>. The notification package already supports disabled/test/production modes, email/SMS planning, idempotent attempts, and recorded outcomes. Reminder defaults reflect evidence that SMS improves attendance without one uniquely superior 24/48/72-hour timing, plus Twilio consent, opt-out, quiet-hours, and scheduled-message cancellation guidance.</p>
+        <p class="source-note"><b>Complete review record:</b> every substantive annotation, resolution, and control message is preserved in <code>.lavish/customer-journey-review-decisions.md</code>.</p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    function queueChoice(event, name, label) {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const choice = new FormData(form).get(name);
+      if (!choice) return;
+      const text = label + ': ' + choice;
+      if (window.lavish && window.lavish.queuePrompt) {
+        window.lavish.queuePrompt(text, {
+          tag: 'choice',
+          text,
+          element: form,
+          queueKey: name,
+          data: { question: name, answer: choice }
+        });
+        form.querySelector('.queued').textContent = 'Queued for the agent: ' + choice;
+      } else {
+        form.querySelector('.queued').textContent = 'Selected: ' + choice + '. Open in Lavish to send.';
+      }
+    }
+  </script>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.esm.min.mjs";
+    const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const paint = document.createElement("canvas").getContext("2d");
+    function toRgba(color) {
+      paint.clearRect(0, 0, 1, 1);
+      paint.fillStyle = "#000";
+      paint.fillStyle = color;
+      paint.fillRect(0, 0, 1, 1);
+      return paint.getImageData(0, 0, 1, 1).data;
+    }
+    function compositeRgba(foreground, background) {
+      const fa = foreground[3] / 255, ba = background[3] / 255;
+      const alpha = fa + ba * (1 - fa);
+      if (alpha === 0) return [0, 0, 0, 0];
+      return [(foreground[0]*fa + background[0]*ba*(1-fa))/alpha,(foreground[1]*fa + background[1]*ba*(1-fa))/alpha,(foreground[2]*fa + background[2]*ba*(1-fa))/alpha,alpha*255];
+    }
+    function pageIsDark() {
+      const root = document.documentElement;
+      const rb = toRgba(getComputedStyle(root).backgroundColor);
+      const bb = document.body ? toRgba(getComputedStyle(document.body).backgroundColor) : [0,0,0,0];
+      const [r,g,b,a] = compositeRgba(bb, rb);
+      if (a > 0) return (0.2126*r + 0.7152*g + 0.0722*b)/255 < .5;
+      return darkQuery.matches;
+    }
+    const diagrams = [...document.querySelectorAll('.mermaid')].map(el => ({el, src: el.textContent}));
+    let applied, rendering = false, queued = false;
+    function queueRender(){ queued = true; if (!rendering) void render(); }
+    async function render(){ rendering = true; try { while(queued){ queued=false; const theme=pageIsDark()?'dark':'default'; if(theme===applied) continue; mermaid.initialize({startOnLoad:false,theme,securityLevel:'strict'}); for(const {el,src} of diagrams){el.removeAttribute('data-processed');el.textContent=src;} try{await mermaid.run({nodes:diagrams.map(d=>d.el)});}catch(error){console.error(error);return;} applied=theme; }} finally { rendering=false; if(queued) queueRender(); } }
+    if(document.readyState==='complete') queueRender(); else window.addEventListener('load',queueRender,{once:true});
+    darkQuery.addEventListener('change',queueRender);
+  </script>
+</body>
+</html>

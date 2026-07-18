@@ -554,6 +554,8 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(noMistakes, /-f pr-number="\$PR_NUMBER"/);
   assert.match(noMistakes, /-f expected-head-sha="\$head_sha"/);
   assert.match(noMistakes, /review_state/);
+  assert.match(noMistakes, /commits\/\$head_sha\/statuses\?per_page=100/);
+  assert.doesNotMatch(noMistakes, /commits\/\$head_sha\/status"/);
   assert.match(noMistakes, /required_checks=\(quality build scenarios audit dependency-review\)/);
   assert.doesNotMatch(noMistakes, /needs\.apply-review\.result == 'failure'/);
   assert.doesNotMatch(noMistakes, /uses: \.\/\.github\/workflows\/agent-no-mistakes\.yml/);

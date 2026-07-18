@@ -19,6 +19,29 @@ import type {
   FieldErrors
 } from "./clientRequestTypes";
 
+export async function guardPublicRequest(
+  request: Request,
+  options: {
+    clinicId: string;
+    content: unknown;
+    maxTrackedClients?: number;
+    rejectDuplicate?: boolean;
+  }
+) {
+  const clientHash = hashValue(clientKey(request));
+  const requestHash = contentHash(options.content);
+  if (rateLimited(clientHash, options.maxTrackedClients ?? 2000)) {
+    return { allowed: false as const, error: "Too many requests. Please try again later." };
+  }
+  const guard = await persistentGuard(options.clinicId, clientHash, requestHash);
+  if (guard.rateLimited || (options.rejectDuplicate !== false && guard.duplicate)) {
+    await recordGuard(options.clinicId, clientHash, requestHash, guard.duplicate ? "duplicate" : "rate_limited");
+    return { allowed: false as const, error: "Too many requests. Please try again later." };
+  }
+  await recordGuard(options.clinicId, clientHash, requestHash, "accepted");
+  return { allowed: true as const };
+}
+
 export async function handleClientRequest(
   request: Request,
   options: ClientRequestOptions = {}

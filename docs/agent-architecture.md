@@ -1,118 +1,72 @@
+---
+summary: "External and internal agent ownership, runtime boundaries, and safety invariants."
+read_when:
+  - Changing agent runtimes, tools, permissions, or persistence
+  - Adding an agent capability or workflow
+  - Reviewing client-facing medical or data-access safety
+---
+
 # Agent Architecture
 
-Date: 2026-07-03
+## Identities
 
-Status: current external/internal agent reference.
+Vet has two top-level agent identities:
 
-## Core Rules
+- `ExternalAgent`: client-facing workflows only.
+- `InternalAgent`: manager-authenticated staff workflows only.
 
-- External agent is client-facing only.
-- Internal agent is manager-authenticated only.
-- There are two top-level agent identities: `ExternalAgent` and `InternalAgent`.
-- Booking, records, email, pricing, invoices, labs, memory, and decisions are capabilities/tools, not worker agents.
-- Prompts are not the security model. Routes, auth, tool allowlists, persistence, and scenario tests enforce behavior.
-- Normal demo routes do not create unnecessary pending-review work; workflows either act safely, record an audit/report, or return a clear blocker.
-- Medical safety is a guardrail around client text. The product must not provide diagnosis or treatment advice.
+Booking, records, email, pricing, invoices, labs, memory, and decisions are capabilities or tools, not independent worker agents.
 
-## Current Shape
+## Enforcement
 
-- One deployed app: `apps/internal`.
-- Public flows call `POST /api/agent/[workflow]` for external workflows.
-- Staff/admin flows call manager-authenticated internal routes.
-- `_workflowRoutes.ts` owns route slug mapping, auth mode, and route-intent normalization.
-- `_runner.ts` owns runtime execution, persistence, response contracts, and fallback behavior.
-- `email/_emailWorkflow.ts` owns the dedicated manager email workflow lifecycle; `email/route.ts` is only auth, guard, delegate.
-- `@central-vet/agents` exposes deterministic workflow contracts plus external/internal runners; tool registry and adapters stay package-local.
-- `@central-vet/agents/adk-runtime` isolates Google ADK imports from the app bundle.
-- ADK tool allowlists are split into shared safe, external, and internal sets and are checked by `npm run test:scenarios`.
-- `@central-vet/db` owns Postgres persistence and row projection.
-- `@central-vet/notifications` owns notification content, planning, attempts, and transport.
+Prompts are not the security boundary. Routes, actor authentication, tenant resolution, tool allowlists, persistence rules, and scenario tests enforce access and behavior.
 
-## Route Table
+- Public workflows cannot read staff tasks, approvals, reports, pricing, invoices, lab results, memory, bulk email, or staff-only notes.
+- Internal workflows require manager authentication before staff data or mutations are available.
+- Client-facing text must not diagnose or recommend treatment.
+- Destructive or production-send behavior cannot happen silently.
+- Tool calls and stored JSON are redacted and bounded before persistence.
 
-Public/external:
+## Runtime Boundary
 
-- `POST /api/agent/checkin`
-- `POST /api/agent/booking`
-- `POST /api/agent/pickup`
-- `POST /api/agent/records`
-- `POST /api/agent/followup`
-- `POST /api/agent/call`
-- `POST /api/agent/external`
+`@central-vet/agents` exposes workflow contracts and the external/internal runners. The deterministic runtime remains usable without Google credentials. Google ADK code is exported only through `@central-vet/agents/adk-runtime` and loaded from server code.
 
-Manager/internal:
+The app owns HTTP concerns and persistence orchestration:
 
-- `POST /api/agent/internal`
-- `POST /api/agent/daily-ops`
-- `POST /api/agent/pricing`
-- `POST /api/agent/invoice`
-- `POST /api/agent/email`
-- `GET /api/agent/decisions`
-- `GET /api/agent/memory`
-- `POST /api/agent/memory`
-- `PATCH /api/agent/memory`
-- `DELETE /api/agent/memory`
-- `GET /api/agent/runs/[id]`
+- workflow/auth selection and request guards
+- normalized clinic-data projection
+- run, event, decision, memory, report, approval, and tool-call persistence
+- operational mutations produced by successful tools
+- stable HTTP response mapping
 
-Supporting manager routes:
+The package owns agent behavior:
 
-- `GET /api/approvals`
-- `PATCH /api/approvals/[id]`
-- `GET /api/reports/pricing`
-- `GET /api/reports/invoices`
-- `GET /api/reports/followups`
+- workflow schemas and result contracts
+- runtime selection inputs and model policy
+- domain tool groups and allowlists
+- runtime adapters and deterministic mock behavior
 
-## External Agent
+## HTTP Boundary
 
-Allowed outcomes:
+- Public routes never accept manager credentials or expose staff-only workflows and data.
+- Manager reads use `X-Central-Vet-Passcode`; writes carry actor credentials in JSON. Credentials never belong in URLs, logs, examples, or tool traces.
+- Routes authenticate, validate, delegate to request modules or packages, then map a stable role-safe response.
+- Missing live-runtime credentials may fall back to deterministic execution only when the response and timeline expose that fallback.
+- Workflow names, route lists, payload fields, and response fields are implementation contracts owned by source, schemas, and scenario tests. Do not mirror them here.
 
-- Match or exception an arrival intake.
-- Book mock appointment slots.
-- Send mock pickup/follow-up/status updates.
-- Prepare and audit records transfer.
-- Create a safe client request or clinic inbox message.
-- Dispatch urgent clinical handoff without giving medical advice.
+## External Outcomes
 
-Denied outcomes:
+External workflows may match or exception an arrival, book mock slots, send mock status updates, prepare audited records transfer, create a safe request or clinic message, and dispatch urgent clinical handoff without medical advice.
 
-- Internal task list, approvals, reports, pricing, invoices, lab results, bulk email, or staff-only notes.
-- Diagnosis, treatment advice, or silent destructive changes.
+## Internal Outcomes
 
-## Internal Agent
+Internal workflows may produce daily operations, pricing, invoice, records, decision, memory, report, task, run-timeline, and confirmation-gated email outcomes. Reports do not silently mutate invoices or pricing. Abnormal mock lab results are held from automatic client delivery.
 
-Allowed outcomes:
+## Verification
 
-- Daily ops digest.
-- Pricing report.
-- Invoice report.
-- Records/admin workflow help.
-- Staff-visible decisions, memory, reports, tasks, and run timelines.
-- Monthly example email through the dedicated manager route with disabled/test/production modes.
+- `npm run test:scenarios` checks deterministic workflows and tool boundaries.
+- `npm run scenarios:local` exercises local HTTP routes, including denied external access to manager capabilities.
+- `npm run verify:agents` proves the fallback-safe local path against a running app.
+- `npm run verify:agents:google` requires Google credentials and a Google ADK server runtime.
 
-Denied outcomes:
-
-- Silent destructive actions.
-- Medical advice.
-- Client-facing disclosures that have not passed the workflow guardrails.
-
-## Tool Locality
-
-- Route-to-agent mapping: `apps/internal/app/api/agent/_workflowRoutes.ts`.
-- Route execution: `apps/internal/app/api/agent/_runner.ts`.
-- Runtime mode/model policy: `packages/agents/src/runtimeConfig.ts`.
-- Public guard/rate-limit/dedupe: `apps/internal/app/api/agent/_publicAgentGuard.ts`.
-- Manager auth: `apps/internal/app/api/_shared.ts` via manager query/body helpers.
-- Agent data projection: `apps/internal/app/api/agent/_clinicData.ts`.
-- Agent effect persistence: `apps/internal/app/api/agent/_effectPersistence.ts`.
-- Operational tool-call persistence: `apps/internal/app/api/agent/_operationalMutations.ts`.
-- Agent email workflow: `apps/internal/app/api/agent/email/_emailWorkflow.ts`.
-- Agent memory requests: `apps/internal/app/api/agent/memory/_memoryRequest.ts`.
-- Agent tool groups: `packages/agents/src/toolGroups/`.
-- Browser agent adapter: `apps/internal/app/lib/agentClient.ts`.
-
-## Open Checks
-
-- Keep route-level negative scenarios for denied external access to internal reports, pricing, invoices, labs, memory, and email in `npm run scenarios:local`.
-- Keep PIMS/lab adapters behind the mock clinic and database seams; do not leak vendor details into route/UI code.
-- Expand memory/decision lifecycle UI only through browser adapters (`agentClient.ts` or `agentAuditClient.ts`), not direct component fetches.
-- Keep generated verification proof local-only outside `docs/` by default.
+Keep future external-system adapters behind normalized package/database contracts. Browser agent features must use browser adapters instead of direct component fetches.

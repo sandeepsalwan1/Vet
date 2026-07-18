@@ -114,6 +114,51 @@ export function updateBranchArgs(prNumber, config, headSha) {
   ];
 }
 
+export function isUpdateBranchMergeConflict(error) {
+  const detail = `${error?.details?.stdout ?? ""}\n${error?.details?.stderr ?? ""}`;
+  return /merge conflict between base and head/i.test(detail) && /(?:"status"\s*:\s*422|HTTP 422)/i.test(detail);
+}
+
+export function trustedConflictRecoveryCommands(config, headRef, oldHead, baseHead) {
+  const refs = [headRef, config.repo.defaultBranch];
+  if (
+    refs.some((ref) => !/^[A-Za-z0-9._/-]+$/.test(String(ref ?? "")) || String(ref).includes("..")) ||
+    !/^[a-f0-9]{40}$/.test(String(oldHead ?? "")) ||
+    !/^[a-f0-9]{40}$/.test(String(baseHead ?? ""))
+  ) {
+    throw new AgentError("trusted conflict recovery inputs are invalid", 1);
+  }
+  return [
+    ["gh", ["auth", "setup-git", "--hostname", "github.com"]],
+    [
+      "git",
+      [
+        "fetch",
+        "--no-tags",
+        "origin",
+        `+refs/heads/${headRef}:refs/remotes/origin/${headRef}`,
+        `+refs/heads/${config.repo.defaultBranch}:refs/remotes/origin/${config.repo.defaultBranch}`
+      ]
+    ],
+    ["git", ["switch", "--detach", oldHead]],
+    ["git", ["config", "user.name", "github-actions[bot]"]],
+    ["git", ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]],
+    [
+      "git",
+      [
+        "merge",
+        "--no-ff",
+        "-X",
+        "theirs",
+        "-m",
+        `Merge branch '${config.repo.defaultBranch}' into ${headRef}`,
+        baseHead
+      ]
+    ],
+    ["git", ["push", "origin", `HEAD:refs/heads/${headRef}`]]
+  ];
+}
+
 export function recoveryDispatchArgs(prNumber, config, headSha, proofRequested = false) {
   const repo = repoSlug(config);
   const common = ["--repo", repo, "--ref", config.repo.defaultBranch];
@@ -317,7 +362,16 @@ export async function recoverStaleBase(
     throw new AgentError("pull request head already contains the current base", 1);
   }
 
-  execute("gh", updateBranchArgs(prNumber, config, oldHead));
+  let updateStrategy = "github-update";
+  try {
+    execute("gh", updateBranchArgs(prNumber, config, oldHead));
+  } catch (error) {
+    if (!isUpdateBranchMergeConflict(error)) throw error;
+    updateStrategy = "trusted-base-preferred-merge";
+    for (const [command, args] of trustedConflictRecoveryCommands(config, headRef, oldHead, baseHead)) {
+      execute(command, args);
+    }
+  }
 
   let updatedPull = null;
   const pollAttempts = 60;
@@ -368,6 +422,7 @@ export async function recoverStaleBase(
         oldHead,
         newHead,
         baseHead,
+        updateStrategy,
         proofRequested: decision.proofRequested,
         nativeAutomerge,
         dispatches,

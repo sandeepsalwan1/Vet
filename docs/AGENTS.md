@@ -1,12 +1,10 @@
-# AGENTS.md
+# Documentation
 
-Active architecture and operations docs.
-
-## Rules
-
-- Active docs stay flat in `docs/`.
-- Delete stale plans/handoffs instead of archiving them in-repo.
-- Generated proof stays outside `docs/` by default; use `VERIFY_AGENTS_PROOF_PATH` only for explicit local files.
-- Keep docs factual and current; remove superseded behavior instead of adding caveats.
-- Do not commit credentials, tokens, live secrets, or private internal names.
-- Update `docs/README.md` when adding/removing docs.
+- Run `npm run docs:list` before broad documentation or architecture work.
+- Maintained content docs require non-empty `summary`; task-specific docs require concrete `read_when` hints.
+- `AGENTS.md` files are scoped instruction and stay outside content metadata.
+- Keep docs factual and source-backed. Remove superseded behavior instead of adding historical caveats.
+- Keep stable architecture, contracts, and runbooks here; put task plans, handoffs, research, and generated proof in ignored local state.
+- Keep public docs generic: no credentials, personal account notes, resource ids, named contacts, tickets, or private operational details.
+- Update the owning doc when behavior or a public contract changes; do not maintain a manual inventory in this directory.
+- Run `npm run docs:check` after changes.
