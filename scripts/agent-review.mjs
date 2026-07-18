@@ -498,7 +498,6 @@ export function reviewCycleLabelChanges(
   }
   if (cycle.state === "ready" || cycle.state === "retry") {
     if (automergeEligible) add.push(config.labels.automerge);
-    remove.push(config.labels.blocked);
   } else {
     add.push(config.labels.blocked);
     remove.push(config.labels.automerge);

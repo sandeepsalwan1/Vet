@@ -400,10 +400,10 @@ test("a clean exact-head review continues to no-mistakes", () => {
   assert.equal(decision.state, "ready");
   assert.equal(decision.continueToNoMistakes, true);
   assert.ok(labels.add.includes(config.labels.automerge));
-  assert.ok(labels.remove.includes(config.labels.blocked));
+  assert.ok(!labels.remove.includes(config.labels.blocked));
 });
 
-test("repair cycles restore automerge while exhausted cycles fail closed", () => {
+test("repair cycles preserve shared blockers while exhausted cycles fail closed", () => {
   const retry = reviewCycleDecision(
     review({ mergeRecommendation: "blocked", bugsFound: ["Fix me"] }),
     { repairAttempt: 0, patchApplied: false, ciPassed: true }
@@ -424,7 +424,7 @@ test("repair cycles restore automerge while exhausted cycles fail closed", () =>
   });
 
   assert.ok(retryLabels.add.includes(config.labels.automerge));
-  assert.ok(retryLabels.remove.includes(config.labels.blocked));
+  assert.ok(!retryLabels.remove.includes(config.labels.blocked));
   assert.ok(exhaustedLabels.add.includes(config.labels.blocked));
   assert.ok(exhaustedLabels.remove.includes(config.labels.automerge));
 });
