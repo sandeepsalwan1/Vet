@@ -630,6 +630,36 @@ function verifyValidatedTree(manifest, cwd = repoRoot()) {
   return tree;
 }
 
+export function alignRecoveredAgentBranch(manifest, cwd = repoRoot()) {
+  const head = gitOutput(["rev-parse", "HEAD"], { cwd });
+  const tree = gitOutput(["write-tree"], { cwd });
+  const baseTree = gitOutput(["rev-parse", `${manifest.baseSha}^{tree}`], { cwd });
+  const basedOnValidatedBase = runCommand("git", ["merge-base", "--is-ancestor", manifest.baseSha, "HEAD"], {
+    cwd,
+    check: false
+  });
+  if (basedOnValidatedBase.status === 0) {
+    if (tree === baseTree || tree === manifest.resultTree) return { action: "ready", head };
+    throw new AgentError("agent branch does not match the validated base or result tree", 1);
+  }
+
+  const mergeBase = runCommand("git", ["merge-base", "HEAD", manifest.baseSha], { cwd, check: false });
+  const mergeBaseSha = mergeBase.stdout.trim();
+  if (mergeBase.status !== 0 || !/^[a-f0-9]{40,64}$/.test(mergeBaseSha)) {
+    throw new AgentError("agent branch has no common validated base", 1);
+  }
+  const mergeBaseTree = gitOutput(["rev-parse", `${mergeBaseSha}^{tree}`], { cwd });
+  if (tree !== mergeBaseTree) {
+    throw new AgentError("agent branch does not match the validated base or result tree", 1);
+  }
+
+  runCommand("git", ["merge", "--no-edit", manifest.baseSha], { cwd });
+  if (gitOutput(["write-tree"], { cwd }) !== baseTree) {
+    throw new AgentError("recovered agent branch did not align with the validated base", 1);
+  }
+  return { action: "merged-validated-base", head };
+}
+
 export function privilegedPatchPaths(paths) {
   return privilegedCandidatePaths(paths);
 }
@@ -756,22 +786,18 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
   }
 
   checkoutAgentBranch(config, branch, remoteExists);
-  const branchHead = gitOutput(["rev-parse", "HEAD"]);
-  const branchTree = gitOutput(["write-tree"]);
-  if (branchHead !== manifest.baseSha && branchTree !== manifest.resultTree) {
-    throw new AgentError("agent branch does not match the validated base or result tree", 1);
-  }
+  runCommand("git", ["config", "user.name", "github-actions[bot]"]);
+  runCommand("git", ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
+  const branchAlignment = alignRecoveredAgentBranch(manifest);
   const patchAction = applyPatchIdempotently(patchPath);
   verifyValidatedTree(manifest);
   let committed = false;
   const staged = gitOutput(["diff", "--cached", "--name-only"]);
   if (staged) {
-    runCommand("git", ["config", "user.name", "github-actions[bot]"]);
-    runCommand("git", ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
     runCommand("git", ["commit", "-m", `chore: implement agent issue #${issueNumber}`]);
     committed = true;
   }
-  if (committed || !remoteExists) {
+  if (committed || branchAlignment.action === "merged-validated-base" || !remoteExists) {
     runCommand("git", ["push", "origin", `HEAD:refs/heads/${branch}`]);
   }
   const candidateSha = gitOutput(["rev-parse", "HEAD"]);

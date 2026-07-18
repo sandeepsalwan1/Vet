@@ -9,6 +9,7 @@ import {
   checkState,
   closeAgentLoop,
   closeIssueArgs,
+  conflictRecoveryDispatchArgs,
   dispatchPostMergeChecks,
   disableNativeAutomergeArgs,
   evaluate,
@@ -408,7 +409,7 @@ test("stale base recovery uses the authorized head and reruns head-bound gates",
   assert.equal(commands.some(([, args]) => args[0] === "pr" && args[1] === "merge"), false);
 });
 
-test("stale conflict recovery prefers trusted base hunks and reruns every exact-head gate", async () => {
+test("stale conflict recovery prefers trusted base hunks and reruns implementation", async () => {
   const value = fixture();
   value.pull.mergeable_state = "dirty";
   const commands = [];
@@ -445,7 +446,7 @@ test("stale conflict recovery prefers trusted base hunks and reruns every exact-
   assert.deepEqual(commands, [
     ["gh", updateBranchArgs(18, config, sha)],
     ...trustedConflictRecoveryCommands(config, value.pull.head.ref, sha, baseSha),
-    ...recoveryDispatchArgs(18, config, updatedSha).map((args) => ["gh", args])
+    ["gh", conflictRecoveryDispatchArgs(17, config)]
   ]);
 });
 
