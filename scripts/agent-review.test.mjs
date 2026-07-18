@@ -7,9 +7,11 @@ import {
   MAX_REVIEW_REPAIR_ATTEMPTS,
   assertReviewedHead,
   assertReviewDiffFits,
+  blankLineAtEofPaths,
   buildReviewPrompt,
   dispatchPullSecurity,
   normalizeReviewPolicy,
+  normalizeTrailingBlankLines,
   privilegedPatchPaths,
   requireManagedTriageComment,
   resolveSourceIssueNumber,
@@ -114,6 +116,7 @@ test("review prompt contains source issue, managed triage, CI state, and complet
   assert.match(prompt, /Structured triage context/);
   assert.match(prompt, /quality: success/);
   assert.match(prompt, /build: failure/);
+  assert.match(prompt, /build: `npm run build`/);
   assert.ok(prompt.includes(diff));
 });
 
@@ -162,6 +165,19 @@ test("required check summaries use the newest exact-head GitHub Actions result",
     { name: "quality", state: "success" },
     { name: "build", state: "in_progress" }
   ]);
+});
+
+test("deterministic whitespace repair recognizes only extra blank lines at EOF", () => {
+  const output = [
+    "README.md:78: new blank line at EOF.",
+    "src/example.ts:9: trailing whitespace.",
+    "README.md:79: new blank line at EOF."
+  ].join("\n");
+
+  assert.deepEqual(blankLineAtEofPaths(output), ["README.md"]);
+  assert.equal(normalizeTrailingBlankLines("hello\n\n"), "hello\n");
+  assert.equal(normalizeTrailingBlankLines("hello\r\n\r\n"), "hello\r\n");
+  assert.equal(normalizeTrailingBlankLines("hello\n"), "hello\n");
 });
 
 test("nonterminal CI times out without consuming a review repair attempt", async () => {
@@ -487,6 +503,7 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(prepare, /--expected-head-sha "\$REVIEWED_HEAD_SHA"/);
   assert.match(prepare, /-f state=pending/);
   assert.match(prepare, /--dispatch-pr-security/);
+  assert.match(prepare, /reviewed-base-sha: \$\{\{ steps\.mark-pending\.outputs\.base-sha \}\}/);
   assert.match(reviewScript, /dispatchPullSecurity/);
   assert.match(codeqlWorkflow, /workflow_dispatch:/);
   assert.match(codeqlWorkflow, /candidate-sha:/);
@@ -510,6 +527,10 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(generate, /permissions:\n      contents: read\n      pull-requests: read\n      issues: read/);
   assert.doesNotMatch(generate, /(?:actions|contents|issues|pull-requests|statuses): write/);
   assert.match(generate, /sandbox: workspace-write/);
+  assert.match(generate, /--base-sha "\$\{\{ needs\.prepare-review\.outputs\.reviewed-base-sha \}\}"/);
+  assert.match(generate, /--repair-whitespace/);
+  assert.ok(generate.indexOf("--repair-whitespace") > generate.indexOf("Run Codex reviewer"));
+  assert.ok(generate.indexOf("--repair-whitespace") < generate.indexOf("--create-patch"));
   assert.match(generate, /--create-patch \.agent-output\/review\.patch/);
   assert.match(generate, /path: \|\n\s+\.agent-output\/review\.json\n\s+\.agent-output\/review\.patch/);
   assert.match(generate, /model: \$\{\{ needs\.prepare-review\.outputs\.backend-model \}\}/);

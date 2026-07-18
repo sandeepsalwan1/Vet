@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
@@ -34,6 +34,25 @@ import {
 
 export const MAX_REVIEW_DIFF_BYTES = 50000;
 export const MAX_REVIEW_REPAIR_ATTEMPTS = 2;
+
+function ciReproductionCommands(pull, ciChecks) {
+  const commands = {
+    quality: [
+      `git diff --check ${pull.base.sha}...${pull.head.sha}`,
+      "npm run typecheck",
+      "npm run lint",
+      "npm run lint:dead",
+      "npm run lint:duplicates",
+      "node --test scripts/agent-*.test.mjs",
+    ],
+    build: ["npm run build"],
+    scenarios: ["npm run test:scenarios"],
+    audit: ["npm audit --omit=dev"],
+  };
+  return ciChecks
+    .filter((check) => check.state !== "success")
+    .flatMap((check) => (commands[check.name] ?? []).map((command) => `- ${check.name}: \`${command}\``));
+}
 
 function newestCheck(checks) {
   return [...checks].sort((left, right) => {
@@ -205,6 +224,10 @@ ${triageComment.body}
 
 ${ciChecks.map((check) => `- ${check.name}: ${check.state}${check.detailsUrl ? ` (${check.detailsUrl})` : ""}`).join("\n") || "- unavailable"}
 
+## Failed CI Reproduction
+
+${ciReproductionCommands(pull, ciChecks).join("\n") || "- none"}
+
 ## Diff
 
 \`\`\`diff
@@ -272,6 +295,93 @@ function createPatch(outputPath) {
   ]).stdout;
   writeFileSync(outputPath, diff);
   return { outputPath, bytes: Buffer.byteLength(diff), hasPatch: Boolean(diff.trim()) };
+}
+
+export function blankLineAtEofPaths(output) {
+  return [
+    ...new Set(
+      String(output ?? "")
+        .split("\n")
+        .map((line) => line.match(/^(.+?):\d+: new blank line at EOF\.$/)?.[1])
+        .filter(Boolean)
+    )
+  ];
+}
+
+export function normalizeTrailingBlankLines(text) {
+  const trailingNewlines = String(text).match(/(?:(?:\r\n)|\n)+$/)?.[0] ?? "";
+  if (!trailingNewlines || !/(?:(?:\r\n)|\n){2,}/.test(trailingNewlines)) return String(text);
+  const newline = trailingNewlines.includes("\r\n") ? "\r\n" : "\n";
+  return String(text).slice(0, -trailingNewlines.length) + newline;
+}
+
+function safeWhitespaceRepairPath(candidate) {
+  const path = String(candidate ?? "");
+  if (
+    !path ||
+    isAbsolute(path) ||
+    path.includes("\\") ||
+    path.split("/").includes("..") ||
+    path === ".git" ||
+    path.startsWith(".git/") ||
+    privilegedPatchPaths([path]).length
+  ) {
+    throw new AgentError("deterministic whitespace repair rejected an unsafe path", 1, { path });
+  }
+  const root = repoRoot();
+  const absolute = resolve(root, path);
+  const fromRoot = relative(root, absolute);
+  if (!fromRoot || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+    throw new AgentError("deterministic whitespace repair escaped the repository", 1, { path });
+  }
+  if (!lstatSync(absolute).isFile()) {
+    throw new AgentError("deterministic whitespace repair requires a regular file", 1, { path });
+  }
+  return absolute;
+}
+
+export function repairWhitespaceFailures(baseSha, expectedHeadSha) {
+  const base = String(baseSha ?? "").trim();
+  const expected = String(expectedHeadSha ?? "").trim();
+  if (!/^[0-9a-f]{40}$/.test(base)) throw new AgentError("invalid review base SHA", 2);
+  if (!/^[0-9a-f]{40}$/.test(expected)) throw new AgentError("invalid reviewed head SHA", 2);
+  const actual = gitOutput(["rev-parse", "HEAD"]);
+  if (actual !== expected) {
+    throw new AgentError("review checkout does not match the prepared head", 1, {
+      expectedHeadSha: expected,
+      currentHeadSha: actual
+    });
+  }
+  const mergeBase = gitOutput(["merge-base", base, expected]);
+  const before = runCommand("git", ["diff", "--no-ext-diff", "--check", mergeBase, "--", "."], {
+    check: false
+  });
+  const paths = blankLineAtEofPaths(`${before.stdout}\n${before.stderr}`);
+  const fixed = [];
+  for (const path of paths) {
+    const absolute = safeWhitespaceRepairPath(path);
+    const bytes = readFileSync(absolute);
+    if (bytes.includes(0)) {
+      throw new AgentError("deterministic whitespace repair rejected a binary file", 1, { path });
+    }
+    const text = bytes.toString("utf8");
+    if (!Buffer.from(text, "utf8").equals(bytes)) {
+      throw new AgentError("deterministic whitespace repair requires UTF-8 text", 1, { path });
+    }
+    const normalized = normalizeTrailingBlankLines(text);
+    if (normalized !== text) {
+      writeFileSync(absolute, normalized);
+      fixed.push(path);
+    }
+  }
+  const after = runCommand("git", ["diff", "--no-ext-diff", "--check", mergeBase, "--", "."], {
+    check: false
+  });
+  const unresolved = blankLineAtEofPaths(`${after.stdout}\n${after.stderr}`);
+  if (unresolved.length) {
+    throw new AgentError("deterministic blank-line repair did not converge", 1, { paths: unresolved });
+  }
+  return { mergeBase, detected: paths, fixed };
 }
 
 function checkoutPullHead(pull) {
@@ -713,6 +823,17 @@ async function main() {
     finish({ ok: true, message: `created review patch for #${prNumber}`, ...createPatch(args["create-patch"]) }, Boolean(args.json));
     return;
   }
+  if (args["repair-whitespace"]) {
+    finish(
+      {
+        ok: true,
+        message: `repaired deterministic whitespace failures for #${prNumber}`,
+        result: repairWhitespaceFailures(args["base-sha"], args["expected-head-sha"])
+      },
+      Boolean(args.json)
+    );
+    return;
+  }
   if (args["dispatch-pr-security"]) {
     finish(
       {
@@ -745,7 +866,7 @@ async function main() {
     return;
   }
   throw new AgentError(
-    "missing --wait-for-ci, --write-prompt, --create-patch, --dispatch-pr-security, or --from-file",
+    "missing --wait-for-ci, --write-prompt, --create-patch, --repair-whitespace, --dispatch-pr-security, or --from-file",
     2,
   );
 }
