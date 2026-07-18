@@ -17,6 +17,10 @@ on:
         required: false
         type: boolean
         default: false
+      infrastructure-retry:
+        required: false
+        type: number
+        default: 0
     secrets:
       OPENAI_API_KEY:
         required: true
@@ -37,6 +41,11 @@ on:
         required: false
         type: boolean
         default: false
+      infrastructure-retry:
+        description: Bounded retry for malformed evaluator output
+        required: false
+        type: number
+        default: 0
 
 permissions:
   contents: read
@@ -365,7 +374,53 @@ jobs:
           --finalize
           --expected-head "$HEAD_SHA"
           --result-file "$RUNNER_TEMP/no-mistakes-result/result.json"
+          --infrastructure-retry "${{ inputs.infrastructure-retry }}"
           --json
+
+  retry-infrastructure:
+    name: retry no-mistakes infrastructure
+    needs:
+      - prepare
+      - finalize
+    if: >-
+      always() &&
+      needs.prepare.result == 'success' &&
+      needs.finalize.result == 'failure' &&
+      inputs.infrastructure-retry == 0
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Download sanitized gate result
+        uses: actions/download-artifact@v4
+        with:
+          name: no-mistakes-result-${{ inputs.pr-number }}
+          path: ${{ runner.temp }}/no-mistakes-result
+      - name: Retry malformed evaluator output on the exact head
+        env:
+          APPROVAL: ${{ inputs.approval }}
+          GATE_INTENT: ${{ inputs.intent }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+        run: |
+          set -euo pipefail
+          artifact_outcome="$(jq -r '.outcome // ""' "$RUNNER_TEMP/no-mistakes-result/result.json")"
+          if [ "$artifact_outcome" != "invalid-output" ]; then
+            exit 0
+          fi
+          current_head="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)"
+          test "$current_head" = "$HEAD_SHA"
+          gh workflow run agent-no-mistakes.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f pr-number="$PR_NUMBER" \
+            -f expected-head-sha="$HEAD_SHA" \
+            -f intent="$GATE_INTENT" \
+            -f approval="$APPROVAL" \
+            -f infrastructure-retry=1
 
   dispatch-automerge:
     name: dispatch automerge

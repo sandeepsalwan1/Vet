@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
   AgentError,
@@ -32,6 +33,68 @@ import {
 } from "./agent-lib.mjs";
 
 export const MAX_REVIEW_DIFF_BYTES = 50000;
+export const MAX_REVIEW_REPAIR_ATTEMPTS = 2;
+
+function newestCheck(checks) {
+  return [...checks].sort((left, right) => {
+    const timestamp = (check) =>
+      Date.parse(check?.started_at ?? check?.created_at ?? check?.completed_at ?? "") || 0;
+    return timestamp(right) - timestamp(left);
+  })[0];
+}
+
+export function summarizeRequiredChecks(config, headSha, checkRuns) {
+  const repo = `${config.repo.owner}/${config.repo.name}`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const trustedUrl = new RegExp(
+    `^https://github\\.com/${repo}/(?:actions/runs/\\d+(?:/job/\\d+)?|runs/\\d+)$`,
+    "i"
+  );
+  return config.automerge.requiredChecks.map((name) => {
+    const check = newestCheck(
+      (checkRuns ?? []).filter(
+        (candidate) =>
+          candidate?.name === name &&
+          candidate?.head_sha === headSha &&
+          candidate?.app?.slug === "github-actions" &&
+          trustedUrl.test(String(candidate?.details_url ?? ""))
+      )
+    );
+    return {
+      name,
+      state: check?.conclusion ?? check?.status ?? "missing",
+      detailsUrl: check?.details_url ?? ""
+    };
+  });
+}
+
+function fetchRequiredChecks(config, headSha) {
+  const response = ghApiJson(
+    `repos/${config.repo.owner}/${config.repo.name}/commits/${headSha}/check-runs?per_page=100`
+  );
+  return summarizeRequiredChecks(config, headSha, response?.check_runs ?? []);
+}
+
+export async function waitForRequiredChecks(config, prNumber, expectedHeadSha, dependencies = {}) {
+  const fetchSnapshot = dependencies.fetchSnapshot ?? fetchPull;
+  const fetchChecks = dependencies.fetchChecks ?? fetchRequiredChecks;
+  const wait = dependencies.wait ?? delay;
+  const maxAttempts = dependencies.maxAttempts ?? 120;
+  const intervalMs = dependencies.intervalMs ?? 15000;
+  let checks = [];
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const { pull } = fetchSnapshot(config, prNumber);
+    assertReviewedHead(pull, expectedHeadSha);
+    checks = fetchChecks(config, expectedHeadSha);
+    if (checks.every((check) => !["missing", "queued", "in_progress", "pending", "requested", "waiting"].includes(check.state))) {
+      return { complete: true, attempts: attempt, checks };
+    }
+    if (attempt < maxAttempts) await wait(intervalMs);
+  }
+  throw new AgentError("required exact-head CI did not reach a terminal state", 1, {
+    attempts: maxAttempts,
+    checks,
+  });
+}
 
 function fetchPull(config, prNumber) {
   const { pull, files } = getPullSnapshot(config, prNumber);
@@ -95,7 +158,16 @@ export function assertReviewDiffFits(diff) {
   return bytes;
 }
 
-export function buildReviewPrompt({ template, pull, pullIssue, pullComments, sourceIssue, triageComment, diff }) {
+export function buildReviewPrompt({
+  template,
+  pull,
+  pullIssue,
+  pullComments,
+  sourceIssue,
+  triageComment,
+  ciChecks = [],
+  diff
+}) {
   assertReviewDiffFits(diff);
   return `${template}
 
@@ -128,6 +200,10 @@ ${sourceIssue.body ?? ""}
 ## Managed Agent Triage
 
 ${triageComment.body}
+
+## Exact-Head CI
+
+${ciChecks.map((check) => `- ${check.name}: ${check.state}${check.detailsUrl ? ` (${check.detailsUrl})` : ""}`).join("\n") || "- unavailable"}
 
 ## Diff
 
@@ -166,6 +242,7 @@ function writePrompt(config, prNumber, outputPath, expectedHeadSha) {
     config.repo.owner
   );
   const diff = getPullDiff(config, pull);
+  const ciChecks = fetchRequiredChecks(config, pull.head.sha);
   const prompt = buildReviewPrompt({
     template: readText(join(repoRoot(), ".agent/prompts/review.md")),
     pull,
@@ -173,6 +250,7 @@ function writePrompt(config, prNumber, outputPath, expectedHeadSha) {
     pullComments: comments,
     sourceIssue,
     triageComment,
+    ciChecks,
     diff
   });
   mkdirSync(join(repoRoot(), ".agent-output"), { recursive: true });
@@ -253,7 +331,7 @@ export function dispatchPullSecurity(
   );
 }
 
-function reviewBody(review) {
+function reviewBody(review, cycle) {
   return `## Agent Review
 
 Findings:
@@ -271,6 +349,7 @@ ${review.checksRun.length ? review.checksRun.map((item) => `- ${item}`).join("\n
 Remaining risk: ${review.remainingRisk}
 Proof needed: ${review.proofNeeded}
 Recommendation: ${review.mergeRecommendation}
+Cycle: ${cycle.state}${cycle.state === "retry" ? ` ${cycle.nextAttempt}/${MAX_REVIEW_REPAIR_ATTEMPTS}` : ""}
 
 ${review.humanQuestion ? `Human question:\n\n${review.humanQuestion}\n` : ""}
 
@@ -355,7 +434,90 @@ export function reviewLabelChanges(config, review) {
   };
 }
 
-function applyReview(config, prNumber, reviewPath, patchPath, dryRun, expectedHeadSha) {
+function repairAttempt(value) {
+  const attempt = Number(value ?? 0);
+  if (!Number.isInteger(attempt) || attempt < 0 || attempt > MAX_REVIEW_REPAIR_ATTEMPTS) {
+    throw new AgentError("review repair attempt is invalid", 2);
+  }
+  return attempt;
+}
+
+export function reviewCycleDecision(
+  review,
+  { repairAttempt: attemptValue = 0, patchApplied = false, ciPassed = true } = {}
+) {
+  const attempt = repairAttempt(attemptValue);
+  const humanBlocked =
+    review.mergeRecommendation === "ready-human-review" ||
+    review.remainingRisk === "high" ||
+    Boolean(review.humanQuestion.trim());
+  if (humanBlocked) {
+    return {
+      state: "human-blocked",
+      nextAttempt: null,
+      continueToNoMistakes: false,
+      statusState: "failure",
+      statusDescription: "agent review needs human review"
+    };
+  }
+  const technicalRepairNeeded =
+    patchApplied || review.mergeRecommendation === "blocked" || !ciPassed;
+  if (technicalRepairNeeded && attempt < MAX_REVIEW_REPAIR_ATTEMPTS) {
+    return {
+      state: "retry",
+      nextAttempt: attempt + 1,
+      continueToNoMistakes: false,
+      statusState: "pending",
+      statusDescription: `agent review repairing (${attempt + 1}/${MAX_REVIEW_REPAIR_ATTEMPTS})`
+    };
+  }
+  if (technicalRepairNeeded) {
+    return {
+      state: "repair-exhausted",
+      nextAttempt: null,
+      continueToNoMistakes: false,
+      statusState: "failure",
+      statusDescription: "agent review repair limit exhausted"
+    };
+  }
+  return {
+    state: "ready",
+    nextAttempt: null,
+    continueToNoMistakes: true,
+    statusState: "success",
+    statusDescription: "agent review passed"
+  };
+}
+
+export function reviewCycleLabelChanges(
+  config,
+  review,
+  cycle,
+  { automergeEligible = false } = {}
+) {
+  const add = [];
+  const remove = [];
+  if (cycle.state === "ready" && (review.proofNeeded === "UI" || review.proofNeeded === "GIF")) {
+    add.push(config.labels.proof);
+  }
+  if (cycle.state === "ready" || cycle.state === "retry") {
+    if (automergeEligible) add.push(config.labels.automerge);
+  } else {
+    add.push(config.labels.blocked);
+    remove.push(config.labels.automerge);
+  }
+  return { add: [...new Set(add)], remove: [...new Set(remove)] };
+}
+
+function applyReview(
+  config,
+  prNumber,
+  reviewPath,
+  patchPath,
+  dryRun,
+  expectedHeadSha,
+  repairAttemptValue = 0
+) {
   const { pull, files } = fetchPull(config, prNumber);
   assertReviewedHead(pull, expectedHeadSha);
   const closing = ghReadJson([
@@ -370,6 +532,11 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun, expectedHe
   const sourceIssueNumber = resolveSourceIssueNumber(pull, closing?.closingIssuesReferences, config);
   const sourceIssue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${sourceIssueNumber}`);
   assertTrustedAgentPull(pull, config, { files, sourceIssue, rejectPrivilegedPaths: true });
+  const automergeEligible =
+    implementationMetadata(pull.body).automergeEligible === true &&
+    issueLabels(sourceIssue).includes(config.labels.automerge);
+  const ciChecks = fetchRequiredChecks(config, pull.head.sha);
+  const ciPassed = ciChecks.every((check) => check.state === "success");
   let review = readAgentJson(reviewPath);
   validateReviewResult(review);
   let effectivePatchPath = patchPath;
@@ -386,6 +553,7 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun, expectedHe
   let privilegedPaths = [];
   let ciDispatch = null;
   let codeqlDispatch = null;
+  let patchApplied = false;
 
   if (!dryRun && hasPatch) {
     checkoutPullHead(pull);
@@ -405,6 +573,7 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun, expectedHe
         statusSha = gitOutput(["rev-parse", "HEAD"]);
         runCommand("gh", ["auth", "setup-git", "--hostname", "github.com"]);
         runCommand("git", ["push", "origin", `HEAD:${pull.head.ref}`]);
+        patchApplied = true;
         ciDispatch = dispatchWorkflow(
           config,
           "ci.yml",
@@ -427,13 +596,31 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun, expectedHe
   }
 
   review = normalizeReviewPolicy(review);
-  const policy = reviewLabelChanges(config, review);
+  if (
+    !patchApplied &&
+    !ciPassed &&
+    review.mergeRecommendation === "ready" &&
+    !review.humanQuestion.trim()
+  ) {
+    const failures = ciChecks
+      .filter((check) => check.state !== "success")
+      .map((check) => `${check.name}=${check.state}`)
+      .join(", ");
+    review.bugsFound.push(`Required exact-head CI is not passing: ${failures}`);
+    review.mergeRecommendation = "blocked";
+  }
+  const cycle = reviewCycleDecision(review, {
+    repairAttempt: repairAttemptValue,
+    patchApplied,
+    ciPassed: patchApplied ? false : ciPassed
+  });
+  const policy = reviewCycleLabelChanges(config, review, cycle, { automergeEligible });
 
   const comment = upsertManagedComment({
     config,
     number: prNumber,
     marker: config.comments.review,
-    body: reviewBody(review),
+    body: reviewBody(review, cycle),
     dryRun
   });
 
@@ -454,21 +641,42 @@ function applyReview(config, prNumber, reviewPath, patchPath, dryRun, expectedHe
   const status = setCommitStatus({
     config,
     sha: statusSha,
-    state: policy.statusState,
+    state: cycle.statusState,
     context: "agent-review",
-    description: policy.statusDescription,
+    description: cycle.statusDescription,
     dryRun
   });
+  const repairDispatch =
+    cycle.state === "retry" && !dryRun
+      ? dispatchWorkflow(
+          config,
+          "agent-review.yml",
+          {
+            "pr-number": prNumber,
+            "expected-head-sha": statusSha,
+            "repair-attempt": cycle.nextAttempt
+          },
+          false,
+          config.repo.defaultBranch
+        )
+      : null;
   return {
     review,
+    cycle,
+    ciChecks,
     comment,
     labels,
-    dispatch: { ci: ciDispatch, codeql: codeqlDispatch, proof: proofDispatch },
+    dispatch: {
+      ci: ciDispatch,
+      codeql: codeqlDispatch,
+      proof: proofDispatch,
+      repair: repairDispatch
+    },
     status,
-    patchApplied: Boolean(hasPatch && !privilegedPaths.length),
+    patchApplied,
     privilegedPaths,
-    technicalSuccess: policy.technicalSuccess,
-    manualBlock: policy.manualBlock
+    continueToNoMistakes: cycle.continueToNoMistakes,
+    manualBlock: cycle.state === "human-blocked" || cycle.state === "repair-exhausted"
   };
 }
 
@@ -485,6 +693,17 @@ async function main() {
         ok: true,
         message: `wrote review prompt for #${prNumber}`,
         ...writePrompt(config, prNumber, args["write-prompt"], args["expected-head-sha"])
+      },
+      Boolean(args.json)
+    );
+    return;
+  }
+  if (args["wait-for-ci"]) {
+    finish(
+      {
+        ok: true,
+        message: `waited for exact-head CI for #${prNumber}`,
+        result: await waitForRequiredChecks(config, prNumber, args["expected-head-sha"])
       },
       Boolean(args.json)
     );
@@ -516,17 +735,17 @@ async function main() {
       args["from-file"],
       args["apply-patch"],
       dryRun,
-      args["expected-head-sha"]
+      args["expected-head-sha"],
+      args["repair-attempt"]
     );
     finish(
-      { ok: result.technicalSuccess, message: `${dryRun ? "would apply" : "applied"} review for #${prNumber}`, result },
-      Boolean(args.json),
-      result.technicalSuccess ? 0 : 1
+      { ok: true, message: `${dryRun ? "would apply" : "applied"} review for #${prNumber}`, result },
+      Boolean(args.json)
     );
     return;
   }
   throw new AgentError(
-    "missing --write-prompt, --create-patch, --dispatch-pr-security, or --from-file",
+    "missing --wait-for-ci, --write-prompt, --create-patch, --dispatch-pr-security, or --from-file",
     2,
   );
 }

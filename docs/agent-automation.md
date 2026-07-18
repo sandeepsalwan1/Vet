@@ -30,15 +30,17 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 4. Expensive proposer, triage, implementation, review, no-mistakes, and proof jobs share deterministic slot groups from `.agent/config.json`.
 5. Implementation selects its allowed backend from `.agent/config.json`, runs without write credentials, uploads a patch, then applies it in a separate write-token job and opens a draft PR.
 6. The current installed worker adapter is Codex; unsupported or unimplemented backend selections fail before model execution.
-7. Review repeats the read/patch separation, publishes `agent-review`, and invokes no-mistakes.
+7. Review repeats the credential-free read/patch separation, applies safe fixes to the agent branch, waits for exact-head CI, and re-reviews for at most two repair cycles before invoking no-mistakes.
    If the no-mistakes client times out while its daemon is still reviewing, the gate reattaches to that exact active run instead of starting another model run.
+   Malformed evaluator output gets one automatic exact-head workflow retry; a second malformed result blocks instead of looping or pretending the gate passed.
 8. Proof runs configured commands and records provider/artifact evidence when remote visual proof is required.
 9. Automerge updates an eligible stale branch, reruns head-bound CI and review, and merges only after every gate passes on the new head.
 10. After a trusted merge, automerge resolves the exact merge commit, dispatches baseline CI and CodeQL for it, removes agent workflow labels, and closes the linked source issue while preserving priority labels.
 Trusted recovery dispatches main-defined workflows with an expected head SHA, and CI publishes required check runs on that exact candidate.
 
 Cost-sensitive routing lives in `.agent/config.json`.
-All model lanes use GPT-5.4 mini with low reasoning because GPT-5.4 nano does not support the Codex action's required tool transport.
+All model lanes use GPT-5.4 mini because GPT-5.4 nano does not support the Codex action's required tool transport.
+Implementation, review, proposal, and triage use low reasoning; no-mistakes uses medium reasoning after measured low-effort structured-output failures.
 Increase a lane's model or reasoning only after measured contract failures.
 
 Model upgrades require config changes only:
@@ -93,7 +95,8 @@ That one label starts cheap trusted triage before any implementation model runs.
 Triage reads root and applicable nested `AGENTS.md` files, `VISION.md`, repository policy, current issue state, architecture docs, and any repository plan/spec linked by the issue.
 An aligned low-risk result adds `agent:implement` and `agent:automerge`, then dispatches implementation automatically.
 Implementation creates `agent/issue-<number>-<slug>`, validates the patch, opens or updates a draft PR, starts exact-head CI, and starts review.
-Review can apply a safe patch, requests proof when needed, publishes `agent-review`, then starts no-mistakes.
+Review can apply a safe patch, reruns exact-head CI and review until clean within its bounded repair budget, requests proof when needed, publishes `agent-review`, then starts no-mistakes.
+Malformed no-mistakes output retries once automatically on the unchanged head.
 Automerge waits for every configured gate, updates a stale branch from `main`, reruns head-bound gates, merges, dispatches baseline CI and CodeQL for the exact merge commit, closes the source issue, and removes workflow labels.
 
 For an existing issue, start the same path with:
@@ -184,8 +187,8 @@ Successful low-risk completion has these observable results:
 - the linked issue is closed;
 - temporary `agent:*` labels are removed while priority labels remain.
 
-`agent:blocked` means stop and read the newest managed agent comment.
-Fix technical failures, answer real product questions, or use the exact-head approval path only for the specific approved no-mistakes decision.
+`agent:blocked` means the bounded repair or infrastructure retries are exhausted, required proof failed, or a real human decision remains.
+Read the newest managed agent comment, answer the decision, or use the exact-head approval path only for the specific approved no-mistakes decision.
 
 ## Plan Acceptance Map
 

@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   MAX_REVIEW_DIFF_BYTES,
+  MAX_REVIEW_REPAIR_ATTEMPTS,
   assertReviewedHead,
   assertReviewDiffFits,
   buildReviewPrompt,
@@ -12,8 +13,12 @@ import {
   privilegedPatchPaths,
   requireManagedTriageComment,
   resolveSourceIssueNumber,
+  reviewCycleDecision,
+  reviewCycleLabelChanges,
   reviewLabelChanges,
   reviewPolicyOutcome,
+  summarizeRequiredChecks,
+  waitForRequiredChecks,
   validateReviewResult
 } from "./agent-review.mjs";
 import { issueSnapshotSha256 } from "./agent-lib.mjs";
@@ -24,7 +29,8 @@ const config = {
     proof: "agent:proof",
     automerge: "agent:automerge",
     blocked: "agent:blocked"
-  }
+  },
+  automerge: { requiredChecks: ["quality", "build"] }
 };
 
 function review(overrides = {}) {
@@ -76,7 +82,7 @@ test("only the same-repository closing reference enters source authorization", (
   assert.equal(resolveSourceIssueNumber(pull, references, config), 17);
 });
 
-test("review prompt contains source issue, managed triage, and complete diff", () => {
+test("review prompt contains source issue, managed triage, CI state, and complete diff", () => {
   const diff = "diff --git a/example.js b/example.js\n+const fixed = true;";
   const prompt = buildReviewPrompt({
     template: "Review policy",
@@ -96,13 +102,81 @@ test("review prompt contains source issue, managed triage, and complete diff", (
       labels: [{ name: "agent:implement" }]
     },
     triageComment: { body: "<!-- agent-triage:v1 -->\nStructured triage context" },
+    ciChecks: [
+      { name: "quality", state: "success", detailsUrl: "https://github.com/sandeepsalwan1/Vet/actions/runs/1" },
+      { name: "build", state: "failure", detailsUrl: "https://github.com/sandeepsalwan1/Vet/actions/runs/2" }
+    ],
     diff
   });
 
   assert.match(prompt, /## Source Issue/);
   assert.match(prompt, /Fix the flow/);
   assert.match(prompt, /Structured triage context/);
+  assert.match(prompt, /quality: success/);
+  assert.match(prompt, /build: failure/);
   assert.ok(prompt.includes(diff));
+});
+
+test("required check summaries use the newest exact-head GitHub Actions result", () => {
+  const head = "a".repeat(40);
+  const checks = summarizeRequiredChecks(config, head, [
+    {
+      name: "quality",
+      head_sha: head,
+      status: "completed",
+      conclusion: "failure",
+      started_at: "2026-07-17T00:00:00Z",
+      details_url: "https://github.com/sandeepsalwan1/Vet/actions/runs/1",
+      app: { slug: "github-actions" }
+    },
+    {
+      name: "quality",
+      head_sha: head,
+      status: "completed",
+      conclusion: "success",
+      started_at: "2026-07-17T00:01:00Z",
+      details_url: "https://github.com/sandeepsalwan1/Vet/actions/runs/2/job/20",
+      app: { slug: "github-actions" }
+    },
+    {
+      name: "quality",
+      head_sha: head,
+      status: "completed",
+      conclusion: "failure",
+      started_at: "2026-07-17T00:02:00Z",
+      details_url: "https://github.com/sandeepsalwan1/Vet/actions/runs/2evil",
+      app: { slug: "github-actions" }
+    },
+    {
+      name: "build",
+      head_sha: head,
+      status: "in_progress",
+      conclusion: null,
+      started_at: "2026-07-17T00:01:00Z",
+      details_url: "https://github.com/sandeepsalwan1/Vet/actions/runs/3",
+      app: { slug: "github-actions" }
+    }
+  ]);
+
+  assert.deepEqual(checks.map(({ name, state }) => ({ name, state })), [
+    { name: "quality", state: "success" },
+    { name: "build", state: "in_progress" }
+  ]);
+});
+
+test("nonterminal CI times out without consuming a review repair attempt", async () => {
+  await assert.rejects(
+    waitForRequiredChecks(config, 20, "a".repeat(40), {
+      fetchSnapshot: () => ({ pull: { head: { sha: "a".repeat(40) } } }),
+      fetchChecks: () => [
+        { name: "quality", state: "in_progress" },
+        { name: "build", state: "missing" },
+      ],
+      maxAttempts: 1,
+      wait: async () => {},
+    }),
+    /required exact-head CI did not reach a terminal state/,
+  );
 });
 
 test("missing managed triage context blocks prompt construction", () => {
@@ -299,6 +373,87 @@ test("human review adds blocked and removes automerge", () => {
   assert.ok(changes.remove.includes(config.labels.automerge));
 });
 
+test("technical review findings retry while real decisions block", () => {
+  const technical = reviewCycleDecision(
+    review({ bugsFound: ["Fix formatting"], mergeRecommendation: "blocked" }),
+    { repairAttempt: 0, patchApplied: false, ciPassed: true }
+  );
+  const patched = reviewCycleDecision(review(), {
+    repairAttempt: 0,
+    patchApplied: true,
+    ciPassed: true
+  });
+  const failedCi = reviewCycleDecision(review(), {
+    repairAttempt: 0,
+    patchApplied: false,
+    ciPassed: false
+  });
+  const exhausted = reviewCycleDecision(
+    review({ bugsFound: ["Still broken"], mergeRecommendation: "blocked" }),
+    {
+      repairAttempt: MAX_REVIEW_REPAIR_ATTEMPTS,
+      patchApplied: false,
+      ciPassed: true
+    }
+  );
+  const human = reviewCycleDecision(
+    review({
+      mergeRecommendation: "ready-human-review",
+      humanQuestion: "Choose the product behavior?"
+    }),
+    { repairAttempt: 0, patchApplied: false, ciPassed: true }
+  );
+
+  assert.equal(technical.state, "retry");
+  assert.equal(technical.nextAttempt, 1);
+  assert.equal(patched.state, "retry");
+  assert.equal(failedCi.state, "retry");
+  assert.equal(exhausted.state, "repair-exhausted");
+  assert.equal(human.state, "human-blocked");
+});
+
+test("a clean exact-head review continues to no-mistakes", () => {
+  const decision = reviewCycleDecision(review(), {
+    repairAttempt: 1,
+    patchApplied: false,
+    ciPassed: true
+  });
+  const labels = reviewCycleLabelChanges(config, review(), decision, {
+    automergeEligible: true
+  });
+
+  assert.equal(decision.state, "ready");
+  assert.equal(decision.continueToNoMistakes, true);
+  assert.ok(labels.add.includes(config.labels.automerge));
+  assert.ok(!labels.remove.includes(config.labels.blocked));
+});
+
+test("repair cycles preserve shared blockers while exhausted cycles fail closed", () => {
+  const retry = reviewCycleDecision(
+    review({ mergeRecommendation: "blocked", bugsFound: ["Fix me"] }),
+    { repairAttempt: 0, patchApplied: false, ciPassed: true }
+  );
+  const retryLabels = reviewCycleLabelChanges(config, review(), retry, {
+    automergeEligible: true
+  });
+  const exhausted = reviewCycleDecision(
+    review({ mergeRecommendation: "blocked", bugsFound: ["Fix me"] }),
+    {
+      repairAttempt: MAX_REVIEW_REPAIR_ATTEMPTS,
+      patchApplied: false,
+      ciPassed: true
+    }
+  );
+  const exhaustedLabels = reviewCycleLabelChanges(config, review(), exhausted, {
+    automergeEligible: true
+  });
+
+  assert.ok(retryLabels.add.includes(config.labels.automerge));
+  assert.ok(!retryLabels.remove.includes(config.labels.blocked));
+  assert.ok(exhaustedLabels.add.includes(config.labels.blocked));
+  assert.ok(exhaustedLabels.remove.includes(config.labels.automerge));
+});
+
 test("review schema and unresolved questions fail closed", () => {
   assert.throws(
     () => validateReviewResult(review({ remainingRisk: "unknown" })),
@@ -312,7 +467,7 @@ test("review schema and unresolved questions fail closed", () => {
   assert.equal(normalized.mergeRecommendation, "ready-human-review");
 });
 
-test("review generation is read-only and bound to the prepared head", () => {
+test("review fixes stay credential-free and bound to the prepared head", () => {
   const workflow = readFileSync(new URL("../.github/workflows/agent-review.yml", import.meta.url), "utf8");
   const reviewScript = readFileSync(new URL("./agent-review.mjs", import.meta.url), "utf8");
   const ciWorkflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
@@ -326,6 +481,7 @@ test("review generation is read-only and bound to the prepared head", () => {
 
   assert.match(prepare, /statuses: write/);
   assert.match(prepare, /actions: write/);
+  assert.match(prepare, /checks: read/);
   assert.match(prepare, /--validate-backend --lane review --json/);
   assert.match(prepare, /ref: main\n          persist-credentials: false/);
   assert.match(prepare, /--expected-head-sha "\$REVIEWED_HEAD_SHA"/);
@@ -353,20 +509,32 @@ test("review generation is read-only and bound to the prepared head", () => {
   assert.match(generate, /ref: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
   assert.match(generate, /permissions:\n      contents: read\n      pull-requests: read\n      issues: read/);
   assert.doesNotMatch(generate, /(?:actions|contents|issues|pull-requests|statuses): write/);
-  assert.match(generate, /sandbox: read-only/);
+  assert.match(generate, /sandbox: workspace-write/);
+  assert.match(generate, /--create-patch \.agent-output\/review\.patch/);
+  assert.match(generate, /path: \|\n\s+\.agent-output\/review\.json\n\s+\.agent-output\/review\.patch/);
   assert.match(generate, /model: \$\{\{ needs\.prepare-review\.outputs\.backend-model \}\}/);
   assert.match(generate, /effort: \$\{\{ needs\.prepare-review\.outputs\.backend-effort \}\}/);
   assert.match(generate, /codex-version: "0\.144\.1"/);
   assert.match(prompt, /do not gate your recommendation on CI, proof, or no-mistakes status/);
+  assert.match(prompt, /Apply every clearly safe, in-scope fix directly/);
+  assert.match(prompt, /post-fix checkout/);
 
   assert.match(apply, /REVIEWED_HEAD_SHA: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
+  assert.match(apply, /--apply-patch \.agent-output\/review\.patch/);
+  assert.match(apply, /--repair-attempt "\$\{\{ inputs\.repair-attempt \}\}"/);
+  assert.match(apply, /checks: read/);
   assert.match(apply, /ref: main\n          fetch-depth: 0\n          persist-credentials: false/);
   assert.match(noMistakes, /actions: write/);
+  assert.match(noMistakes, /checks: read/);
+  assert.match(noMistakes, /statuses: read/);
   assert.match(noMistakes, /gh workflow run agent-no-mistakes\.yml/);
   assert.match(noMistakes, /--repo "\$GITHUB_REPOSITORY"/);
   assert.match(noMistakes, /--ref main/);
   assert.match(noMistakes, /-f pr-number="\$PR_NUMBER"/);
   assert.match(noMistakes, /-f expected-head-sha="\$head_sha"/);
+  assert.match(noMistakes, /review_state/);
+  assert.match(noMistakes, /required_checks=\(quality build scenarios audit dependency-review\)/);
+  assert.doesNotMatch(noMistakes, /needs\.apply-review\.result == 'failure'/);
   assert.doesNotMatch(noMistakes, /uses: \.\/\.github\/workflows\/agent-no-mistakes\.yml/);
   assert.match(failure, /REVIEWED_HEAD_SHA: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
   assert.match(failure, /statuses\/\$REVIEWED_HEAD_SHA/);
