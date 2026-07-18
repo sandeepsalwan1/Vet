@@ -201,6 +201,23 @@ export function recoveryDispatchArgs(prNumber, config, headSha, proofRequested =
   return dispatches;
 }
 
+export function conflictRecoveryDispatchArgs(issueNumber, config) {
+  if (!Number.isInteger(Number(issueNumber)) || Number(issueNumber) <= 0) {
+    throw new AgentError("conflict recovery source issue is invalid", 1);
+  }
+  return [
+    "workflow",
+    "run",
+    "agent-implement.yml",
+    "--repo",
+    repoSlug(config),
+    "--ref",
+    config.repo.defaultBranch,
+    "-f",
+    `issue-number=${issueNumber}`
+  ];
+}
+
 export function postMergeDispatchArgs(config, mergeSha) {
   if (!/^[a-f0-9]{40}$/.test(String(mergeSha ?? ""))) {
     throw new AgentError("post-merge commit SHA is invalid", 1);
@@ -401,7 +418,9 @@ export async function recoverStaleBase(
     throw new AgentError("updated PR head does not contain the authorized head and base", 1);
   }
 
-  const dispatches = recoveryDispatchArgs(prNumber, config, newHead, decision.proofRequested);
+  const dispatches = updateStrategy === "trusted-base-preferred-merge"
+    ? [conflictRecoveryDispatchArgs(decision.metadata?.sourceIssue, config)]
+    : recoveryDispatchArgs(prNumber, config, newHead, decision.proofRequested);
   const dispatchErrors = [];
   for (const args of dispatches) {
     try {
