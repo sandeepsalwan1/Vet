@@ -146,7 +146,7 @@ These messages controlled the review loop or approved the plan; they did not add
 Resolution: Applied to the shared skill. Every poll now uses a local receipt wrapper that saves the complete returned batch before printing it, then requires an exact prompt-count reconciliation against this decision log.
 
 34. Deploy the current complete implementation to Render so it can be inspected and changed.
-Resolution: In progress. This authorizes a preview deployment for review; it does not approve the current UI as the final design.
+Resolution: Applied. Vet commit `de479b2` is live at `https://vetagent-internal.onrender.com`. Render, tenant, and authorization API proof passed. Visual Chrome proof remains pending until the locked Mac can accept Chrome's remote-debugging prompt. This is an inspection preview, not final UI approval.
 
 35. Add the intended complete change set to git.
 Resolution: Applied. The Vet product and review files are one change set. The shared Lavish skill is committed separately in `agent-scripts` so unrelated changes in that repository are not swept in.
