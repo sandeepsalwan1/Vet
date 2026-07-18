@@ -772,6 +772,18 @@ test("trusted agent pull requires exact bot-authored implementation provenance",
     { metadata, sourceIssue: 42 }
   );
   assert.deepEqual(parseImplementationMetadata(pull.body), metadata);
+  assert.deepEqual(
+    assertTrustedAgentPull(
+      { ...pull, changed_files: 0 },
+      trustConfig,
+      { files: [], sourceIssue, allowEmptyFiles: true }
+    ),
+    { metadata, sourceIssue: 42 }
+  );
+  assert.throws(
+    () => assertTrustedAgentPull({ ...pull, changed_files: 0 }, trustConfig, { files: [] }),
+    /no complete changed-file inventory/
+  );
   assert.throws(
     () => assertTrustedAgentPull({ ...pull, user: { login: "contributor" } }, trustConfig),
     /author must be github-actions\[bot\]/
