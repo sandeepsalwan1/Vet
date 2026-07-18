@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { AgentError } from "./agent-lib.mjs";
 import {
+  alignRecoveredAgentBranch,
   applyPatchIdempotently,
   assertImplementationSource,
   assertIssueMatchesTriageSnapshot,
@@ -528,6 +529,61 @@ test("applyPatchIdempotently applies once and recognizes the same committed inte
   assert.equal(applyPatchIdempotently(patchPath, cwd), "applied");
   assert.equal(readFileSync(join(cwd, "file.txt"), "utf8"), "after\n");
   assert.equal(applyPatchIdempotently(patchPath, cwd), "already-applied");
+});
+
+test("alignRecoveredAgentBranch advances only a recovered zero-diff branch", (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "vet-agent-align-test-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+
+  git("init", "-q", "-b", "main");
+  git("config", "user.name", "Test");
+  git("config", "user.email", "test@example.test");
+  writeFileSync(join(cwd, "README.md"), "base\n");
+  git("add", ".");
+  git("commit", "-qm", "base");
+  git("switch", "-qc", "agent/issue-42-test");
+  git("commit", "--allow-empty", "-qm", "recovered agent head");
+  git("switch", "-q", "main");
+  writeFileSync(join(cwd, "automation.txt"), "new base\n");
+  git("add", ".");
+  git("commit", "-qm", "advance base");
+  const baseSha = git("rev-parse", "HEAD");
+  const baseTree = git("rev-parse", "HEAD^{tree}");
+  git("switch", "-q", "agent/issue-42-test");
+
+  const result = alignRecoveredAgentBranch({ baseSha, resultTree: "0".repeat(40) }, cwd);
+
+  assert.equal(result.action, "merged-validated-base");
+  assert.equal(git("rev-parse", "HEAD^{tree}"), baseTree);
+  assert.doesNotThrow(() => git("merge-base", "--is-ancestor", baseSha, "HEAD"));
+});
+
+test("alignRecoveredAgentBranch rejects a divergent implementation tree", (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "vet-agent-align-reject-test-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+
+  git("init", "-q", "-b", "main");
+  git("config", "user.name", "Test");
+  git("config", "user.email", "test@example.test");
+  writeFileSync(join(cwd, "README.md"), "base\n");
+  git("add", ".");
+  git("commit", "-qm", "base");
+  git("switch", "-qc", "agent/issue-42-test");
+  writeFileSync(join(cwd, "README.md"), "unvalidated\n");
+  git("commit", "-qam", "divergent agent change");
+  git("switch", "-q", "main");
+  writeFileSync(join(cwd, "automation.txt"), "new base\n");
+  git("add", ".");
+  git("commit", "-qm", "advance base");
+  const baseSha = git("rev-parse", "HEAD");
+  git("switch", "-q", "agent/issue-42-test");
+
+  assert.throws(
+    () => alignRecoveredAgentBranch({ baseSha, resultTree: "0".repeat(40) }, cwd),
+    /does not match the validated base or result tree/
+  );
 });
 
 test("prepared validation checks both sides of a privileged rename", (t) => {

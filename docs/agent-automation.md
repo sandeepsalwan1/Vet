@@ -100,6 +100,7 @@ After model review, a credential-free deterministic repair removes extra blank l
 Malformed no-mistakes output retries once automatically on the unchanged head.
 Automerge waits for every configured gate, updates a stale branch from `main`, reruns head-bound gates, merges, dispatches baseline CI and CodeQL for the exact merge commit, closes the source issue, and removes workflow labels.
 If GitHub reports a stale-branch merge conflict, trusted automation creates a merge commit that preserves `main` in conflicting hunks, then sends the linked issue back through implementation, CI, review, proof when required, and no-mistakes so the issue behavior must be restored and verified before merge.
+Implementation advances a conflict-recovered zero-diff branch to its validated base only when the branch tree exactly matches the common-base tree, then applies the validated patch without discarding divergent work.
 
 For an existing issue, start the same path with:
 
