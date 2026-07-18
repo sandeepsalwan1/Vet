@@ -580,6 +580,7 @@ test("trusted workflows reject mutable dispatch targets and publish exact-head C
   for (const workflow of [review, proof, noMistakes, automerge]) {
     assert.match(workflow, /expected-head-sha:/);
   }
+  assert.match(automerge, /ref: main\n          fetch-depth: 0\n          persist-credentials: false/);
   assert.match(review, /test "\$sha" = "\$REQUESTED_HEAD_SHA"/);
   assert.match(proof, /test "\$sha" = "\$REQUESTED_HEAD_SHA"/);
   assert.match(noMistakes, /"\$head_sha" != "\$REQUESTED_HEAD_SHA"/);
