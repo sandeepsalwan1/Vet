@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@central-vet/db": "*",
-    "resend": "^6.17.1"
+    "resend": "^6.17.2"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",
