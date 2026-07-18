@@ -284,6 +284,7 @@ jobs:
             --ref main \
             -f pr-number="$PR_NUMBER" \
             -f expected-head-sha="$head_sha" \
+            -f repair-attempt="${{ inputs.repair-attempt }}" \
             -f intent='Validate the agent-created PR after automated review. The PR must satisfy its linked issue, preserve repo architecture, pass CI, and remain blocked rather than auto-merged if no-mistakes finds ask-user or high-risk issues.'
 
   report-review-failure:

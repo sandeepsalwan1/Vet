@@ -28,6 +28,7 @@ const ARTIFACT_VERSION = 4;
 const NO_MISTAKES_COMMENT_MARKER = "<!-- agent-gate-no-mistakes:v1 -->";
 const STATUS_CONTEXT = "no-mistakes";
 export const MAX_INFRASTRUCTURE_RETRIES = 1;
+export const MAX_GATE_REPAIR_ATTEMPTS = 2;
 const PASSING_OUTCOMES = new Set(["checks-passed", "passed"]);
 const ALLOWED_OUTCOMES = new Set([
   ...PASSING_OUTCOMES,
@@ -159,16 +160,18 @@ function parseCsvRow(line) {
 export function parseGateFindings(output) {
   const lines = String(output ?? "").split(/\r?\n/);
   const headerIndex = lines.findIndex((line) =>
-    /^\s{2}findings\[\d+\]\{[^}]+\}:\s*$/.test(line),
+    /^\s*findings\[\d+\]\{[^}]+\}:\s*$/.test(line),
   );
   if (headerIndex === -1) return [];
+  const headerIndent = lines[headerIndex].match(/^\s*/)?.[0].length ?? 0;
   const columnsMatch = lines[headerIndex].match(/\{([^}]+)\}/);
   const columns =
     columnsMatch?.[1].split(",").map((column) => column.trim()) ?? [];
   const findings = [];
   for (const line of lines.slice(headerIndex + 1)) {
-    if (!/^\s{4}\S/.test(line)) break;
-    const values = parseCsvRow(line.slice(4));
+    const rowIndent = line.match(/^\s*/)?.[0].length ?? 0;
+    if (!line.trim() || rowIndent <= headerIndent) break;
+    const values = parseCsvRow(line.trimStart());
     const row = Object.fromEntries(
       columns.map((column, index) => [column, values[index] ?? ""]),
     );
@@ -185,15 +188,17 @@ export function parseGateFindings(output) {
 function parseFailureStage(output) {
   const lines = String(output ?? "").split(/\r?\n/);
   const headerIndex = lines.findIndex((line) =>
-    /^\s{2}steps\[\d+\]\{[^}]+\}:\s*$/.test(line),
+    /^\s*steps\[\d+\]\{[^}]+\}:\s*$/.test(line),
   );
   if (headerIndex === -1) return "";
+  const headerIndent = lines[headerIndex].match(/^\s*/)?.[0].length ?? 0;
   const columnsMatch = lines[headerIndex].match(/\{([^}]+)\}/);
   const columns =
     columnsMatch?.[1].split(",").map((column) => column.trim()) ?? [];
   for (const line of lines.slice(headerIndex + 1)) {
-    if (!/^\s{4}\S/.test(line)) break;
-    const values = parseCsvRow(line.slice(4));
+    const rowIndent = line.match(/^\s*/)?.[0].length ?? 0;
+    if (!line.trim() || rowIndent <= headerIndent) break;
+    const values = parseCsvRow(line.trimStart());
     const row = Object.fromEntries(
       columns.map((column, index) => [column, values[index] ?? ""]),
     );
@@ -231,8 +236,10 @@ function parseRunFields(output) {
 
 function parseGateStep(output) {
   const lines = String(output ?? "").split(/\r?\n/);
-  const gateIndex = lines.findIndex((line) => line === "gate:");
+  const gateIndex = lines.findIndex((line) => /^gate:(?:\s+\S+)?\s*$/.test(line));
   if (gateIndex === -1) return "";
+  const inline = lines[gateIndex].match(/^gate:\s+(\S+)\s*$/);
+  if (inline) return inline[1];
   for (const line of lines.slice(gateIndex + 1)) {
     if (!line.startsWith("  ")) break;
     const match = line.match(/^\s{2}step:\s*(\S+)\s*$/);
@@ -260,7 +267,7 @@ export function parseAxiResult(output, exitStatus) {
     }
     return { status: "failed", outcome, run, findings, failureStage };
   }
-  if (/^gate:\s*$/m.test(text)) {
+  if (/^gate:(?:\s+\S+)?\s*$/m.test(text)) {
     return {
       status: "blocked",
       outcome: findings.some((finding) => finding.action === "ask-user")
@@ -503,12 +510,35 @@ function markPending(config, pull, dryRun) {
   });
 }
 
-function artifactBlocker(artifact, infrastructureRetry = 0) {
+export function gateRepairDecision(artifact, repairAttempt = 0) {
+  const attempt = readRepairAttempt(repairAttempt);
+  const exactHeadBound =
+    /^[0-9a-f]{40}$/.test(String(artifact?.expectedHead ?? "")) &&
+    artifact?.validatedHead === artifact.expectedHead;
+  const actionable =
+    exactHeadBound &&
+    ["decision-gate", "failed"].includes(artifact?.outcome) &&
+    Array.isArray(artifact?.findings) &&
+    artifact.findings.length > 0 &&
+    artifact.findings.every((finding) => finding?.action === "auto-fix");
+  if (!actionable) return { state: "none", nextAttempt: null };
+  if (attempt < MAX_GATE_REPAIR_ATTEMPTS) {
+    return { state: "retry", nextAttempt: attempt + 1 };
+  }
+  return { state: "exhausted", nextAttempt: null };
+}
+
+function artifactBlocker(artifact, repairAttempt = 0) {
   if (artifact.status === "passed") return "";
+  const repair = gateRepairDecision(artifact, repairAttempt);
+  if (repair.state === "retry") {
+    return `automatic reviewer repair pending (${repair.nextAttempt}/${MAX_GATE_REPAIR_ATTEMPTS})`;
+  }
+  if (repair.state === "exhausted") {
+    return "automatic reviewer repair limit exhausted";
+  }
   if (artifact.outcome === "invalid-output") {
-    return infrastructureRetry < MAX_INFRASTRUCTURE_RETRIES
-      ? "automatic infrastructure retry pending"
-      : "no-mistakes infrastructure retry exhausted";
+    return "no-mistakes output remained invalid after its bounded internal retry";
   }
   if (artifact.outcome === "ask-user") {
     return "no-mistakes requires a product or user decision";
@@ -525,7 +555,7 @@ function artifactBlocker(artifact, infrastructureRetry = 0) {
   return "no-mistakes did not return a passing terminal outcome";
 }
 
-export function gateCommentBody({ artifact, branch, sha, runUrl, infrastructureRetry = 0 }) {
+export function gateCommentBody({ artifact, branch, sha, runUrl, repairAttempt = 0 }) {
   return `## no-mistakes Gate
 
 Status: ${artifact.status}
@@ -547,27 +577,19 @@ ${markdownJsonBlock({
     `no-mistakes axi run${artifact.userApproved ? " --yes" : ""} --skip rebase,test,push,pr,ci`,
   ],
   findings: artifact.findings,
-  blocker: artifactBlocker(artifact, infrastructureRetry),
+  blocker: artifactBlocker(artifact, repairAttempt),
 })}`;
 }
 
-export function gateLabelChanges(config, artifact, { infrastructureRetry = 0 } = {}) {
+export function gateLabelChanges(config, artifact, { repairAttempt = 0 } = {}) {
   if (artifact?.status === "passed" && artifact?.userApproved) {
     return {
       add: [config.labels.automerge],
       remove: [config.labels.blocked],
     };
   }
-  if (artifact?.outcome !== "ask-user") {
-    if (
-      artifact?.outcome === "invalid-output" &&
-      infrastructureRetry >= MAX_INFRASTRUCTURE_RETRIES
-    ) {
-      return {
-        add: [config.labels.blocked],
-        remove: [config.labels.automerge],
-      };
-    }
+  if (artifact?.status === "passed") return { add: [], remove: [] };
+  if (gateRepairDecision(artifact, repairAttempt).state === "retry") {
     return { add: [], remove: [] };
   }
   return {
@@ -592,7 +614,7 @@ function recordTerminal({
   artifact,
   statusSha = pull.head.sha,
   mutatePull = true,
-  infrastructureRetry = 0,
+  repairAttempt = 0,
   dryRun = false,
 }) {
   const failed = artifact.status !== "passed";
@@ -615,7 +637,7 @@ function recordTerminal({
       status: commitStatus,
     };
   }
-  const labelChanges = gateLabelChanges(config, artifact, { infrastructureRetry });
+  const labelChanges = gateLabelChanges(config, artifact, { repairAttempt });
   const labels = {
     added: addLabels(config, pull.number, labelChanges.add, dryRun),
     removed: removeLabels(config, pull.number, labelChanges.remove, dryRun),
@@ -629,7 +651,7 @@ function recordTerminal({
       branch: pull.head.ref,
       sha: pull.head.sha,
       runUrl,
-      infrastructureRetry,
+      repairAttempt,
     }),
     dryRun,
   });
@@ -756,6 +778,14 @@ function readInfrastructureRetry(value) {
     throw new AgentError("no-mistakes infrastructure retry is invalid", 2);
   }
   return retry;
+}
+
+function readRepairAttempt(value) {
+  const attempt = Number(value ?? 0);
+  if (!Number.isInteger(attempt) || attempt < 0 || attempt > MAX_GATE_REPAIR_ATTEMPTS) {
+    throw new AgentError("no-mistakes repair attempt is invalid", 2);
+  }
+  return attempt;
 }
 
 function setupFailureArtifact(expectedHead) {
@@ -910,7 +940,8 @@ async function main() {
       throw new AgentError("missing --pr-number", 2);
     }
     const expectedHead = readExpectedHead(args["expected-head"]);
-    const infrastructureRetry = readInfrastructureRetry(args["infrastructure-retry"]);
+    readInfrastructureRetry(args["infrastructure-retry"]);
+    const repairAttempt = readRepairAttempt(args["repair-attempt"]);
     const snapshot = fetchTrustedPull(config, prNumber);
     const { pull, trust } = snapshot;
     const context = fetchIntentContext(config, trust.sourceIssue);
@@ -932,12 +963,17 @@ async function main() {
       }
     }
     const binding = terminalHeadBinding(expectedHead, pull.head.sha);
+    const repair = gateRepairDecision(artifact, repairAttempt);
+    setGitHubOutput({
+      "repair-action": repair.state,
+      "next-repair-attempt": repair.nextAttempt ?? "",
+    });
     const result = recordTerminal({
       config,
       pull,
       artifact,
       ...binding,
-      infrastructureRetry,
+      repairAttempt,
       dryRun,
     });
     const exitCode = artifact.status === "passed" ? 0 : 1;
@@ -946,6 +982,7 @@ async function main() {
         ok: exitCode === 0,
         message: `no-mistakes ${artifact.status} for PR #${prNumber}`,
         outcome: artifact.outcome,
+        repair,
         result,
       },
       Boolean(args.json),

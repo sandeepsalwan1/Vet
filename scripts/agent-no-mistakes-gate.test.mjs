@@ -7,6 +7,7 @@ import {
   composeEffectiveIntent,
   gateEnvironment,
   gateLabelChanges,
+  gateRepairDecision,
   gateCommentBody,
   isRetryableInvalidOutput,
   isReattachableAxiError,
@@ -92,11 +93,14 @@ test("authenticated reviewer is read-only while trusted checks and source seals 
   assert.match(workflow, /-f pr-number="\$\{\{ inputs\.pr-number \}\}"/);
   assert.match(workflow, /-f expected-head-sha="\$\{\{ needs\.prepare\.outputs\.head_sha \}\}"/);
   assert.match(workflow, /dispatch-automerge:\n[\s\S]*?needs:\n\s+- prepare\n\s+- finalize/);
-  assert.match(workflow, /infrastructure-retry:/);
-  assert.match(workflow, /retry-infrastructure:\n[\s\S]*?artifact_outcome.*invalid-output/);
-  assert.match(workflow, /-f infrastructure-retry=1/);
+  assert.match(workflow, /repair-attempt:/);
+  assert.match(workflow, /dispatch-repair:\n[\s\S]*?gh workflow run agent-review\.yml/);
+  assert.match(workflow, /needs\.finalize\.outputs\.repair-action == 'retry'/);
+  assert.doesNotMatch(workflow, /retry-infrastructure:/);
+  assert.doesNotMatch(workflow, /-f infrastructure-retry=1/);
   assert.match(workflow, /test "\$current_head" = "\$HEAD_SHA"/);
   assert.match(workflow, /--expected-head "\$\{\{ inputs\.expected-head-sha \}\}"/);
+  assert.match(workflow, /--repair-attempt "\$\{\{ inputs\.repair-attempt \}\}"/);
   assert.doesNotMatch(automergeWorkflow, /- Agent no-mistakes/);
   assert.equal(packageJson.scripts["lint:dead"], "knip --treat-config-hints-as-errors");
   assert.equal(packageJson.scripts["lint:duplicates"], "jscpd");
@@ -367,6 +371,42 @@ gate:
   assert.doesNotMatch(comment, new RegExp(secret));
   assert.match(comment, /Arbitrary finding descriptions/);
   assert.doesNotMatch(comment, /requires a decision/);
+});
+
+test("current no-mistakes flat gate output preserves auto-fix findings", () => {
+  const output = `run:
+  id: run-flat
+  head: abcdef12
+gate: review
+note: Review auto-fix is disabled by default.
+findings[1]{id,severity,file,line,action,description}:
+  review-1,error,README.md,74,auto-fix,Add the missing blank separator
+help[1]:
+  no-mistakes axi respond --fix review-1`;
+
+  const parsed = parseAxiResult(output, 0);
+  const artifact = sanitizedGateArtifact(parsed, HEAD);
+
+  assert.equal(parsed.step, "review");
+  assert.equal(artifact.status, "blocked");
+  assert.equal(artifact.outcome, "decision-gate");
+  assert.deepEqual(artifact.findings, [
+    {
+      id: "review-1",
+      severity: "error",
+      file: "README.md",
+      action: "auto-fix",
+      summary: "",
+    },
+  ]);
+  assert.deepEqual(gateRepairDecision(artifact, 0), {
+    state: "retry",
+    nextAttempt: 1,
+  });
+  assert.deepEqual(gateRepairDecision(artifact, 2), {
+    state: "exhausted",
+    nextAttempt: null,
+  });
 });
 
 test("known infrastructure findings expose only allowlisted summaries", () => {
@@ -741,7 +781,7 @@ outcome: failed`,
   );
 });
 
-test("only ask-user outcomes or passing approved reruns change policy labels", () => {
+test("terminal failures block while exact-head auto-fix findings receive bounded repair", () => {
   const labelConfig = {
     labels: { blocked: "agent:blocked", automerge: "agent:automerge" },
   };
@@ -757,25 +797,24 @@ test("only ask-user outcomes or passing approved reruns change policy labels", (
     }),
     { add: ["agent:automerge"], remove: ["agent:blocked"] },
   );
+  assert.deepEqual(
+    gateLabelChanges(labelConfig, { status: "passed", outcome: "passed", userApproved: false }),
+    { add: [], remove: [] },
+  );
   for (const artifact of [
-    { status: "passed", outcome: "passed", userApproved: false },
     { status: "failed", outcome: "failed" },
     { status: "failed", outcome: "cancelled" },
     { status: "failed", outcome: "setup-failed" },
   ]) {
     assert.deepEqual(gateLabelChanges(labelConfig, artifact), {
-      add: [],
-      remove: [],
+      add: ["agent:blocked"],
+      remove: ["agent:automerge"],
     });
   }
 
   const infrastructureFailure = { status: "failed", outcome: "invalid-output" };
   assert.deepEqual(
-    gateLabelChanges(labelConfig, infrastructureFailure, { infrastructureRetry: 0 }),
-    { add: [], remove: [] },
-  );
-  assert.deepEqual(
-    gateLabelChanges(labelConfig, infrastructureFailure, { infrastructureRetry: 1 }),
+    gateLabelChanges(labelConfig, infrastructureFailure),
     { add: ["agent:blocked"], remove: ["agent:automerge"] },
   );
   assert.match(
@@ -784,20 +823,25 @@ test("only ask-user outcomes or passing approved reruns change policy labels", (
       branch: "agent/issue-19",
       sha: HEAD,
       runUrl: "",
-      infrastructureRetry: 0,
     }),
-    /automatic infrastructure retry pending/,
+    /bounded internal retry/,
   );
-  assert.match(
-    gateCommentBody({
-      artifact: infrastructureFailure,
-      branch: "agent/issue-19",
-      sha: HEAD,
-      runUrl: "",
-      infrastructureRetry: 1,
-    }),
-    /infrastructure retry exhausted/,
-  );
+
+  const repairable = {
+    status: "blocked",
+    outcome: "decision-gate",
+    expectedHead: HEAD,
+    validatedHead: HEAD,
+    findings: [{ action: "auto-fix" }],
+  };
+  assert.deepEqual(gateLabelChanges(labelConfig, repairable, { repairAttempt: 0 }), {
+    add: [],
+    remove: [],
+  });
+  assert.deepEqual(gateLabelChanges(labelConfig, repairable, { repairAttempt: 2 }), {
+    add: ["agent:blocked"],
+    remove: ["agent:automerge"],
+  });
 });
 
 test("trusted gate scope rejects forks, manual branches, and policy changes", () => {

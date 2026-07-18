@@ -21,6 +21,10 @@ on:
         required: false
         type: number
         default: 0
+      repair-attempt:
+        required: false
+        type: number
+        default: 0
     secrets:
       OPENAI_API_KEY:
         required: true
@@ -42,7 +46,12 @@ on:
         type: boolean
         default: false
       infrastructure-retry:
-        description: Bounded retry for malformed evaluator output
+        description: Deprecated compatibility input
+        required: false
+        type: number
+        default: 0
+      repair-attempt:
+        description: Bounded automated reviewer repair attempt
         required: false
         type: number
         default: 0
@@ -343,6 +352,9 @@ jobs:
     needs: [prepare, gate]
     if: ${{ always() && needs.prepare.result == 'success' }}
     runs-on: ubuntu-latest
+    outputs:
+      next-repair-attempt: ${{ steps.finalize.outputs.next-repair-attempt }}
+      repair-action: ${{ steps.finalize.outputs.repair-action }}
     permissions:
       actions: read
       contents: read
@@ -365,6 +377,7 @@ jobs:
           name: no-mistakes-result-${{ inputs.pr-number }}
           path: ${{ runner.temp }}/no-mistakes-result
       - name: Publish terminal gate state
+        id: finalize
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
@@ -375,52 +388,40 @@ jobs:
           --expected-head "$HEAD_SHA"
           --result-file "$RUNNER_TEMP/no-mistakes-result/result.json"
           --infrastructure-retry "${{ inputs.infrastructure-retry }}"
+          --repair-attempt "${{ inputs.repair-attempt }}"
           --json
 
-  retry-infrastructure:
-    name: retry no-mistakes infrastructure
+  dispatch-repair:
+    name: dispatch reviewer repair
     needs:
       - prepare
       - finalize
     if: >-
       always() &&
       needs.prepare.result == 'success' &&
-      needs.finalize.result == 'failure' &&
-      inputs.infrastructure-retry == 0
+      needs.finalize.outputs.repair-action == 'retry'
     runs-on: ubuntu-latest
     permissions:
       actions: write
       contents: read
       pull-requests: read
     steps:
-      - name: Download sanitized gate result
-        uses: actions/download-artifact@v4
-        with:
-          name: no-mistakes-result-${{ inputs.pr-number }}
-          path: ${{ runner.temp }}/no-mistakes-result
-      - name: Retry malformed evaluator output on the exact head
+      - name: Dispatch exact-head reviewer repair
         env:
-          APPROVAL: ${{ inputs.approval }}
-          GATE_INTENT: ${{ inputs.intent }}
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
+          NEXT_REPAIR_ATTEMPT: ${{ needs.finalize.outputs.next-repair-attempt }}
           PR_NUMBER: ${{ inputs.pr-number }}
         run: |
           set -euo pipefail
-          artifact_outcome="$(jq -r '.outcome // ""' "$RUNNER_TEMP/no-mistakes-result/result.json")"
-          if [ "$artifact_outcome" != "invalid-output" ]; then
-            exit 0
-          fi
           current_head="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)"
           test "$current_head" = "$HEAD_SHA"
-          gh workflow run agent-no-mistakes.yml \
+          gh workflow run agent-review.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
             -f pr-number="$PR_NUMBER" \
             -f expected-head-sha="$HEAD_SHA" \
-            -f intent="$GATE_INTENT" \
-            -f approval="$APPROVAL" \
-            -f infrastructure-retry=1
+            -f repair-attempt="$NEXT_REPAIR_ATTEMPT"
 
   dispatch-automerge:
     name: dispatch automerge

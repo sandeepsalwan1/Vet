@@ -32,7 +32,8 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 6. The current installed worker adapter is Codex; unsupported or unimplemented backend selections fail before model execution.
 7. Review repeats the credential-free read/patch separation, applies safe fixes to the agent branch, waits for exact-head CI, and re-reviews for at most two repair cycles before invoking no-mistakes.
    If the no-mistakes client times out while its daemon is still reviewing, the gate reattaches to that exact active run instead of starting another model run.
-   Malformed evaluator output gets one automatic exact-head workflow retry; a second malformed result blocks instead of looping or pretending the gate passed.
+   The no-mistakes client retries one malformed evaluator result inside the same isolated run; another malformed result blocks without starting a redundant full workflow.
+   Exact-head no-mistakes findings marked `auto-fix` return to the reviewer for at most two shared repair cycles, while `ask-user` findings and exhausted repair budgets block.
 8. Proof runs configured commands and records provider/artifact evidence when remote visual proof is required.
 9. Automerge updates an eligible stale branch, reruns head-bound CI and review, and merges only after every gate passes on the new head.
 10. After a trusted merge, automerge resolves the exact merge commit, dispatches baseline CI and CodeQL for it, removes agent workflow labels, and closes the linked source issue while preserving priority labels.
@@ -97,7 +98,8 @@ An aligned low-risk result adds `agent:implement` and `agent:automerge`, then di
 Implementation creates `agent/issue-<number>-<slug>`, validates the patch, opens or updates a draft PR, starts exact-head CI, and starts review.
 Review can apply a safe patch, reruns exact-head CI and review until clean within its bounded repair budget, requests proof when needed, publishes `agent-review`, then starts no-mistakes.
 After model review, a credential-free deterministic repair removes extra blank lines at EOF only when `git diff --check` identifies them in a safe, non-privileged text file.
-Malformed no-mistakes output retries once automatically on the unchanged head.
+Malformed no-mistakes output retries once inside the same isolated run on the unchanged head.
+Actionable no-mistakes findings return to exact-head reviewer repair within the same two-cycle budget.
 Automerge waits for every configured gate, updates a stale branch from `main`, reruns head-bound gates, merges, dispatches baseline CI and CodeQL for the exact merge commit, closes the source issue, and removes workflow labels.
 If GitHub reports a stale-branch merge conflict, trusted automation creates a merge commit that preserves `main` in conflicting hunks, then sends the linked issue back through implementation, CI, review, proof when required, and no-mistakes so the issue behavior must be restored and verified before merge.
 Implementation advances a conflict-recovered zero-diff branch to its validated base only when the branch tree exactly matches the common-base tree, then applies the validated patch without discarding divergent work.

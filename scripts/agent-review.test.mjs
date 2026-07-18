@@ -540,6 +540,8 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(prompt, /do not gate your recommendation on CI, proof, or no-mistakes status/);
   assert.match(prompt, /Apply every clearly safe, in-scope fix directly/);
   assert.match(prompt, /post-fix checkout/);
+  assert.match(prompt, /every source-issue acceptance criterion into an explicit checklist/);
+  assert.match(prompt, /literal text, line counts, blank lines, ordering, and file placement/);
 
   assert.match(apply, /REVIEWED_HEAD_SHA: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
   assert.match(apply, /--apply-patch \.agent-output\/review\.patch/);
@@ -554,6 +556,7 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(noMistakes, /--ref main/);
   assert.match(noMistakes, /-f pr-number="\$PR_NUMBER"/);
   assert.match(noMistakes, /-f expected-head-sha="\$head_sha"/);
+  assert.match(noMistakes, /-f repair-attempt="\$\{\{ inputs\.repair-attempt \}\}"/);
   assert.match(noMistakes, /review_state/);
   assert.match(noMistakes, /commits\/\$head_sha\/statuses\?per_page=100/);
   assert.doesNotMatch(noMistakes, /commits\/\$head_sha\/status"/);
