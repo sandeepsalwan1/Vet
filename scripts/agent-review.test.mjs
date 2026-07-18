@@ -498,7 +498,8 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(prepare, /statuses: write/);
   assert.match(prepare, /actions: write/);
   assert.match(prepare, /checks: read/);
-  assert.match(prepare, /--validate-backend --lane review --json/);
+  assert.match(prepare, /BACKEND_LANE: \$\{\{ inputs\.repair-attempt > 0 && 'no-mistakes' \|\| 'review' \}\}/);
+  assert.match(prepare, /--validate-backend --lane "\$BACKEND_LANE" --json/);
   assert.match(prepare, /ref: main\n          persist-credentials: false/);
   assert.match(prepare, /--expected-head-sha "\$REVIEWED_HEAD_SHA"/);
   assert.match(prepare, /-f state=pending/);
@@ -541,7 +542,9 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(prompt, /Apply every clearly safe, in-scope fix directly/);
   assert.match(prompt, /post-fix checkout/);
   assert.match(prompt, /every source-issue acceptance criterion into an explicit checklist/);
+  assert.match(prompt, /one separate concrete verification in `checksRun` for every acceptance criterion/);
   assert.match(prompt, /literal text, line counts, blank lines, ordering, and file placement/);
+  assert.match(prompt, /terminal newline is not an empty line/);
 
   assert.match(apply, /REVIEWED_HEAD_SHA: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
   assert.match(apply, /--apply-patch \.agent-output\/review\.patch/);

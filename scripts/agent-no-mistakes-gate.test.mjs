@@ -74,7 +74,7 @@ test("authenticated reviewer is read-only while trusted checks and source seals 
     workflow,
     /trusted credential-free steps provide deterministic validation/,
   );
-  assert.match(gate, /"--skip",\s+"rebase,test,push,pr,ci"/);
+  assert.match(gate, /"--skip",\s+"rebase,test,document,lint,push,pr,ci"/);
   assert.doesNotMatch(workflow, /git config --global user\./);
   assert.match(workflow, /if: \$\{\{ always\(\) \}\}\n\s+continue-on-error: true\n[\s\S]*?run: no-mistakes daemon stop --force/);
   assert.doesNotMatch(workflow, /- workspace-write/);
@@ -463,7 +463,10 @@ test("sanitized output records exact-head user approval", () => {
     comment,
     /Gate mode: user-approved unattended run for this exact head/,
   );
-  assert.match(comment, /no-mistakes axi run --yes --skip/);
+  assert.match(
+    comment,
+    /no-mistakes axi run --yes --skip rebase,test,document,lint,push,pr,ci/,
+  );
 });
 
 test("unknown decision gate fails closed", () => {

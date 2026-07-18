@@ -574,7 +574,7 @@ ${markdownJsonBlock({
   failureStage: artifact.failureStage || "",
   checksRun: [
     "trusted offline typecheck, build, and scenarios baseline",
-    `no-mistakes axi run${artifact.userApproved ? " --yes" : ""} --skip rebase,test,push,pr,ci`,
+    `no-mistakes axi run${artifact.userApproved ? " --yes" : ""} --skip rebase,test,document,lint,push,pr,ci`,
   ],
   findings: artifact.findings,
   blocker: artifactBlocker(artifact, repairAttempt),
@@ -704,7 +704,7 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
       "--intent",
       intent,
       "--skip",
-      "rebase,test,push,pr,ci",
+      "rebase,test,document,lint,push,pr,ci",
     ];
     let run;
     let parsed;

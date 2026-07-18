@@ -218,8 +218,9 @@ Read the newest managed agent comment, answer the decision, or use the exact-hea
 - A missing provider, artifact, or lease blocks required visual proof; it does not fake success.
 - Credentialed Crabbox providers require readiness proof; built-in `local-container` receives no provider credentials and must pass the same route, lease, desktop, and media checks.
 - no-mistakes and proof statuses must reflect real execution.
-- The credentialless no-mistakes gate never rebases or publishes changes; deterministic scenario, API, and CLI checks may provide direct non-visual evidence when the trusted request calls for it.
-- A credential-free step runs the trusted typecheck, build, and scenario baseline inside a pinned networkless container before no-mistakes model auth; its Codex process stays read-only, performs each model stage directly without nested review or validation tools, and unpublished source changes fail closed.
+- The credentialless no-mistakes gate runs only semantic review and never rebases, edits documentation, lints, or publishes changes; deterministic scenario, API, and CLI checks may provide direct non-visual evidence when the trusted request calls for it.
+- Trusted exact-head CI owns typecheck, build, scenarios, lint, dead-code, duplicate-code, audit, and dependency validation before semantic review.
+- A credential-free step also runs the trusted typecheck, build, and scenario baseline inside a pinned networkless container before no-mistakes model auth; its Codex process stays read-only, performs each model stage directly without nested review or validation tools, and unpublished source changes fail closed.
 - Browser, visual, and live-provider evidence remains the Agent Proof workflow's responsibility and is required only by trusted issue or triage policy.
 
 ## Gates
