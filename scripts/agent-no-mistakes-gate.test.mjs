@@ -92,6 +92,10 @@ test("authenticated reviewer is read-only while trusted checks and source seals 
   assert.match(workflow, /-f pr-number="\$\{\{ inputs\.pr-number \}\}"/);
   assert.match(workflow, /-f expected-head-sha="\$\{\{ needs\.prepare\.outputs\.head_sha \}\}"/);
   assert.match(workflow, /dispatch-automerge:\n[\s\S]*?needs:\n\s+- prepare\n\s+- finalize/);
+  assert.match(workflow, /infrastructure-retry:/);
+  assert.match(workflow, /retry-infrastructure:\n[\s\S]*?artifact_outcome.*invalid-output/);
+  assert.match(workflow, /-f infrastructure-retry=1/);
+  assert.match(workflow, /test "\$current_head" = "\$HEAD_SHA"/);
   assert.match(workflow, /--expected-head "\$\{\{ inputs\.expected-head-sha \}\}"/);
   assert.doesNotMatch(automergeWorkflow, /- Agent no-mistakes/);
   assert.equal(packageJson.scripts["lint:dead"], "knip --treat-config-hints-as-errors");
@@ -764,6 +768,36 @@ test("only ask-user outcomes or passing approved reruns change policy labels", (
       remove: [],
     });
   }
+
+  const infrastructureFailure = { status: "failed", outcome: "invalid-output" };
+  assert.deepEqual(
+    gateLabelChanges(labelConfig, infrastructureFailure, { infrastructureRetry: 0 }),
+    { add: [], remove: [] },
+  );
+  assert.deepEqual(
+    gateLabelChanges(labelConfig, infrastructureFailure, { infrastructureRetry: 1 }),
+    { add: ["agent:blocked"], remove: ["agent:automerge"] },
+  );
+  assert.match(
+    gateCommentBody({
+      artifact: infrastructureFailure,
+      branch: "agent/issue-19",
+      sha: HEAD,
+      runUrl: "",
+      infrastructureRetry: 0,
+    }),
+    /automatic infrastructure retry pending/,
+  );
+  assert.match(
+    gateCommentBody({
+      artifact: infrastructureFailure,
+      branch: "agent/issue-19",
+      sha: HEAD,
+      runUrl: "",
+      infrastructureRetry: 1,
+    }),
+    /infrastructure retry exhausted/,
+  );
 });
 
 test("trusted gate scope rejects forks, manual branches, and policy changes", () => {

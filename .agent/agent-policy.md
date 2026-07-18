@@ -56,7 +56,8 @@ Automerge is forbidden for high-priority or high-risk work even if all checks pa
 - A separate credential-free step runs the trusted offline test baseline before model auth; no-mistakes Codex stays read-only, runs each model stage directly without nested tools or validation commands, and unpublished source changes fail the gate.
 - Configured deterministic scenario, API, and CLI checks count as direct non-visual evidence when they exercise the trusted request.
 - Repository commands run without normal credential inheritance, but the shared runner identity is defense in depth rather than hostile-code isolation.
-- `ask-user`, malformed output, setup failure, or a stale validated head blocks automerge by default.
+- `ask-user`, setup failure, or a stale validated head blocks automerge by default.
+- Malformed evaluator output receives one exact-head infrastructure retry, then blocks if the retry also fails.
 - A manual rerun may carry explicit user approval only for its immutable expected head; later heads and ordinary runs still block on `ask-user`.
 - A passing approved rerun removes the blocked label and restores automerge for that head.
 - An eligible stale branch is updated by the trusted automerge workflow, then all head-bound CI and review gates run again before merge.

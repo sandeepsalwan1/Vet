@@ -26,10 +26,10 @@ Current checked state on 2026-07-16:
 
 Use in this repo:
 
-- reference implementation for label-driven AFK issue and PR automation
-- label-filtered issues as the worker's bounded source of truth
+- reference implementation for bounded AFK issue and PR workers
+- a configurable task-list command that can filter labeled issues as the worker's bounded source of truth
 - one issue per iteration with a dedicated branch and separate implement/review phases
-- examples for `agent:implement`, `agent:review`, `agent:blocked`, branch updates, label-triggered assignment, and safe transitions
+- implement/review examples where both agents work in the same sandbox and branch so reviewer fixes become mergeable commits
 - optional TypeScript orchestration adapter for AFK implementation/review runs
 - useful when raw GitHub Actions scripts become awkward for multi-agent planning, parallel execution, branch strategies, review pipelines, or session capture/resume
 - supports Codex as an agent provider
@@ -52,6 +52,7 @@ Do not use it for:
 Recommendation:
 
 - Keep GitHub Issues and Actions as the control plane, using Sandcastle's repository as the AFK label-workflow reference.
+- Sandcastle does not provide Vet's GitHub label event router; Vet's task-list command and Actions router own that integration.
 - Keep this repo's smaller state machine and trusted gate scripts instead of taking the upstream workflows wholesale.
 - Use Crabbox as the preferred remote worker host when provider auth exists.
 - Add Sandcastle only inside the worker if the implementation runner benefits from TypeScript orchestration, parallel issue planning, branch strategies, warm sandbox reuse, structured output, or session handling.
