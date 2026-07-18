@@ -32,7 +32,8 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 6. The current installed worker adapter is Codex; unsupported or unimplemented backend selections fail before model execution.
 7. Review repeats the credential-free read/patch separation, applies safe fixes to the agent branch, waits for exact-head CI, and re-reviews for at most two repair cycles before invoking no-mistakes.
    If the no-mistakes client times out while its daemon is still reviewing, the gate reattaches to that exact active run instead of starting another model run.
-   Malformed evaluator output gets one automatic exact-head workflow retry; a second malformed result blocks instead of looping or pretending the gate passed.
+   The no-mistakes client retries one malformed evaluator result inside the same isolated run; another malformed result blocks without starting a redundant full workflow.
+   Exact-head no-mistakes findings marked `auto-fix` return to the reviewer for at most two shared repair cycles, while `ask-user` findings and exhausted repair budgets block.
 8. Proof runs configured commands and records provider/artifact evidence when remote visual proof is required.
 9. Automerge updates an eligible stale branch, reruns head-bound CI and review, and merges only after every gate passes on the new head.
 10. After a trusted merge, automerge resolves the exact merge commit, dispatches baseline CI and CodeQL for it, removes agent workflow labels, and closes the linked source issue while preserving priority labels.
@@ -40,7 +41,7 @@ Trusted recovery dispatches main-defined workflows with an expected head SHA, an
 
 Cost-sensitive routing lives in `.agent/config.json`.
 All model lanes use GPT-5.4 mini because GPT-5.4 nano does not support the Codex action's required tool transport.
-Implementation, review, proposal, and triage use low reasoning; no-mistakes uses medium reasoning after measured low-effort structured-output failures.
+Implementation, first-pass review, proposal, and triage use low reasoning; no-mistakes and bounded reviewer repair use medium reasoning after measured low-effort acceptance and structured-output failures.
 Increase a lane's model or reasoning only after measured contract failures.
 
 Model upgrades require config changes only:
@@ -97,7 +98,8 @@ An aligned low-risk result adds `agent:implement` and `agent:automerge`, then di
 Implementation creates `agent/issue-<number>-<slug>`, validates the patch, opens or updates a draft PR, starts exact-head CI, and starts review.
 Review can apply a safe patch, reruns exact-head CI and review until clean within its bounded repair budget, requests proof when needed, publishes `agent-review`, then starts no-mistakes.
 After model review, a credential-free deterministic repair removes extra blank lines at EOF only when `git diff --check` identifies them in a safe, non-privileged text file.
-Malformed no-mistakes output retries once automatically on the unchanged head.
+Malformed no-mistakes output retries once inside the same isolated run on the unchanged head.
+Actionable no-mistakes findings return to exact-head reviewer repair within the same two-cycle budget.
 Automerge waits for every configured gate, updates a stale branch from `main`, reruns head-bound gates, merges, dispatches baseline CI and CodeQL for the exact merge commit, closes the source issue, and removes workflow labels.
 If GitHub reports a stale-branch merge conflict, trusted automation creates a merge commit that preserves `main` in conflicting hunks, then sends the linked issue back through implementation, CI, review, proof when required, and no-mistakes so the issue behavior must be restored and verified before merge.
 Implementation advances a conflict-recovered zero-diff branch to its validated base only when the branch tree exactly matches the common-base tree, then applies the validated patch without discarding divergent work.
@@ -216,8 +218,9 @@ Read the newest managed agent comment, answer the decision, or use the exact-hea
 - A missing provider, artifact, or lease blocks required visual proof; it does not fake success.
 - Credentialed Crabbox providers require readiness proof; built-in `local-container` receives no provider credentials and must pass the same route, lease, desktop, and media checks.
 - no-mistakes and proof statuses must reflect real execution.
-- The credentialless no-mistakes gate never rebases or publishes changes; deterministic scenario, API, and CLI checks may provide direct non-visual evidence when the trusted request calls for it.
-- A credential-free step runs the trusted typecheck, build, and scenario baseline inside a pinned networkless container before no-mistakes model auth; its Codex process stays read-only, performs each model stage directly without nested review or validation tools, and unpublished source changes fail closed.
+- The credentialless no-mistakes gate runs only semantic review and never rebases, edits documentation, lints, or publishes changes; deterministic scenario, API, and CLI checks may provide direct non-visual evidence when the trusted request calls for it.
+- Trusted exact-head CI owns typecheck, build, scenarios, lint, dead-code, duplicate-code, audit, and dependency validation before semantic review.
+- A credential-free step also runs the trusted typecheck, build, and scenario baseline inside a pinned networkless container before no-mistakes model auth; its Codex process stays read-only, performs each model stage directly without nested review or validation tools, and unpublished source changes fail closed.
 - Browser, visual, and live-provider evidence remains the Agent Proof workflow's responsibility and is required only by trusted issue or triage policy.
 
 ## Gates
