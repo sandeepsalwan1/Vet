@@ -330,7 +330,7 @@ export function parseImplementationMetadata(body) {
 }
 
 export function assertTrustedAgentPull(pull, config, options = {}) {
-  const { files, sourceIssue, rejectPrivilegedPaths = Boolean(files) } = Array.isArray(options)
+  const { files, sourceIssue, rejectPrivilegedPaths = Boolean(files), allowEmptyFiles = false } = Array.isArray(options)
     ? { files: options, rejectPrivilegedPaths: true }
     : options;
   const expectedRepo = repoSlug(config).toLowerCase();
@@ -360,9 +360,11 @@ export function assertTrustedAgentPull(pull, config, options = {}) {
   }
 
   if (files !== undefined) {
+    const allowedEmptyInventory =
+      allowEmptyFiles === true && Array.isArray(files) && files.length === 0 && pull.changed_files === 0;
     if (
       !Array.isArray(files) ||
-      files.length === 0 ||
+      (!allowedEmptyInventory && files.length === 0) ||
       (Number.isInteger(pull.changed_files) && pull.changed_files !== files.length)
     ) {
       throw new AgentError("agent PR has no complete changed-file inventory", 1);

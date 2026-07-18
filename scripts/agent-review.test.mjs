@@ -505,6 +505,7 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(prepare, /--dispatch-pr-security/);
   assert.match(prepare, /reviewed-base-sha: \$\{\{ steps\.mark-pending\.outputs\.base-sha \}\}/);
   assert.match(reviewScript, /dispatchPullSecurity/);
+  assert.match(reviewScript, /allowEmptyFiles: true/);
   assert.match(codeqlWorkflow, /workflow_dispatch:/);
   assert.match(codeqlWorkflow, /candidate-sha:/);
   assert.match(codeqlWorkflow, /candidate-ref:/);

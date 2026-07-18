@@ -117,7 +117,11 @@ export async function waitForRequiredChecks(config, prNumber, expectedHeadSha, d
 
 function fetchPull(config, prNumber) {
   const { pull, files } = getPullSnapshot(config, prNumber);
-  const trust = assertTrustedAgentPull(pull, config, { files, rejectPrivilegedPaths: true });
+  const trust = assertTrustedAgentPull(pull, config, {
+    files,
+    rejectPrivilegedPaths: true,
+    allowEmptyFiles: true
+  });
   const issue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${prNumber}`);
   const comments = getIssueComments(config, prNumber);
   return { pull, issue, comments, files, trust };
@@ -256,7 +260,12 @@ function writePrompt(config, prNumber, outputPath, expectedHeadSha) {
   ]);
   const sourceIssueNumber = resolveSourceIssueNumber(pull, closing?.closingIssuesReferences, config);
   const sourceIssue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${sourceIssueNumber}`);
-  assertTrustedAgentPull(pull, config, { files, sourceIssue, rejectPrivilegedPaths: true });
+  assertTrustedAgentPull(pull, config, {
+    files,
+    sourceIssue,
+    rejectPrivilegedPaths: true,
+    allowEmptyFiles: true
+  });
   const sourceComments = getIssueComments(config, sourceIssueNumber);
   const triageComment = requireManagedTriageComment(
     sourceComments,
@@ -428,6 +437,7 @@ export function dispatchPullSecurity(
     files: snapshot.files,
     sourceIssue,
     rejectPrivilegedPaths: true,
+    allowEmptyFiles: true,
   });
   return dispatch(
     config,
@@ -641,7 +651,12 @@ function applyReview(
   ]);
   const sourceIssueNumber = resolveSourceIssueNumber(pull, closing?.closingIssuesReferences, config);
   const sourceIssue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${sourceIssueNumber}`);
-  assertTrustedAgentPull(pull, config, { files, sourceIssue, rejectPrivilegedPaths: true });
+  assertTrustedAgentPull(pull, config, {
+    files,
+    sourceIssue,
+    rejectPrivilegedPaths: true,
+    allowEmptyFiles: true
+  });
   const automergeEligible =
     implementationMetadata(pull.body).automergeEligible === true &&
     issueLabels(sourceIssue).includes(config.labels.automerge);
