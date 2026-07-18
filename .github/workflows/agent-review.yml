@@ -258,8 +258,8 @@ jobs:
           head_sha="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)"
           [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
           review_state="$(
-            gh api "repos/$GITHUB_REPOSITORY/commits/$head_sha/status" \
-              --jq '[.statuses[] | select(.context == "agent-review" and .creator.login == "github-actions[bot]")] | sort_by(.created_at) | last | .state // "missing"'
+            gh api "repos/$GITHUB_REPOSITORY/commits/$head_sha/statuses?per_page=100" \
+              --jq '[.[] | select(.context == "agent-review" and .creator.login == "github-actions[bot]")] | sort_by(.created_at) | last | .state // "missing"'
           )"
           if [ "$review_state" != success ]; then
             echo "Agent review is $review_state; no-mistakes waits for the repair cycle."
