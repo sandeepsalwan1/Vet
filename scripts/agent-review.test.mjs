@@ -134,7 +134,16 @@ test("required check summaries use the newest exact-head GitHub Actions result",
       status: "completed",
       conclusion: "success",
       started_at: "2026-07-17T00:01:00Z",
-      details_url: "https://github.com/sandeepsalwan1/Vet/actions/runs/2",
+      details_url: "https://github.com/sandeepsalwan1/Vet/actions/runs/2/job/20",
+      app: { slug: "github-actions" }
+    },
+    {
+      name: "quality",
+      head_sha: head,
+      status: "completed",
+      conclusion: "failure",
+      started_at: "2026-07-17T00:02:00Z",
+      details_url: "https://github.com/sandeepsalwan1/Vet/actions/runs/2evil",
       app: { slug: "github-actions" }
     },
     {

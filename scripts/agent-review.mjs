@@ -44,8 +44,9 @@ function newestCheck(checks) {
 }
 
 export function summarizeRequiredChecks(config, headSha, checkRuns) {
+  const repo = `${config.repo.owner}/${config.repo.name}`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const trustedUrl = new RegExp(
-    `^https://github\\.com/${config.repo.owner}/${config.repo.name}/(?:actions/runs|runs)/\\d+`,
+    `^https://github\\.com/${repo}/(?:actions/runs/\\d+(?:/job/\\d+)?|runs/\\d+)$`,
     "i"
   );
   return config.automerge.requiredChecks.map((name) => {
