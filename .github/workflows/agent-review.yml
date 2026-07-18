@@ -51,6 +51,7 @@ jobs:
       reviewed-head-sha: ${{ steps.mark-pending.outputs.head-sha }}
     permissions:
       actions: write
+      checks: read
       contents: read
       pull-requests: read
       issues: read
@@ -192,6 +193,7 @@ jobs:
       - generate-review
     permissions:
       actions: write
+      checks: read
       contents: write
       pull-requests: write
       issues: write
@@ -229,6 +231,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: write
+      checks: read
       contents: read
       pull-requests: read
     steps:

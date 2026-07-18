@@ -481,6 +481,7 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
 
   assert.match(prepare, /statuses: write/);
   assert.match(prepare, /actions: write/);
+  assert.match(prepare, /checks: read/);
   assert.match(prepare, /--validate-backend --lane review --json/);
   assert.match(prepare, /ref: main\n          persist-credentials: false/);
   assert.match(prepare, /--expected-head-sha "\$REVIEWED_HEAD_SHA"/);
@@ -521,8 +522,10 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(apply, /REVIEWED_HEAD_SHA: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
   assert.match(apply, /--apply-patch \.agent-output\/review\.patch/);
   assert.match(apply, /--repair-attempt "\$\{\{ inputs\.repair-attempt \}\}"/);
+  assert.match(apply, /checks: read/);
   assert.match(apply, /ref: main\n          fetch-depth: 0\n          persist-credentials: false/);
   assert.match(noMistakes, /actions: write/);
+  assert.match(noMistakes, /checks: read/);
   assert.match(noMistakes, /gh workflow run agent-no-mistakes\.yml/);
   assert.match(noMistakes, /--repo "\$GITHUB_REPOSITORY"/);
   assert.match(noMistakes, /--ref main/);
