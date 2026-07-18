@@ -521,7 +521,11 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
   }
 
   try {
-    assertTrustedAgentPull(pull, config, { files, rejectPrivilegedPaths: true });
+    assertTrustedAgentPull(pull, config, {
+      files,
+      rejectPrivilegedPaths: true,
+      allowEmptyFiles: true
+    });
     trustedPull = true;
   } catch (error) {
     policyBlockers.push(error.message);
@@ -551,7 +555,12 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
     }
     if (!metadata.automergeEligible) policyBlockers.push("implementation metadata does not authorize automerge");
     try {
-      assertTrustedAgentPull(pull, config, { files, sourceIssue, rejectPrivilegedPaths: true });
+      assertTrustedAgentPull(pull, config, {
+        files,
+        sourceIssue,
+        rejectPrivilegedPaths: true,
+        allowEmptyFiles: true
+      });
     } catch (error) {
       policyBlockers.push(error.message);
     }
@@ -588,6 +597,10 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
   for (const label of config.automerge.blockedLabels) {
     if (prLabels.includes(label)) policyBlockers.push(`PR blocked by label ${label}`);
     if (sourceLabels.includes(label)) policyBlockers.push(`source issue blocked by label ${label}`);
+  }
+
+  if (Array.isArray(files) && files.length === 0 && pull.changed_files === 0) {
+    gateBlockers.push("agent PR has no effective changes");
   }
 
   if (combined?.sha !== pull.head?.sha) gateBlockers.push("commit statuses are not for the current PR head");

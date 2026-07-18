@@ -908,6 +908,19 @@ test("source issue and branch authorization fail closed", () => {
   assert.ok(result.blockers.includes("source issue blocked by label agent:blocked"));
 });
 
+test("zero-diff conflict recovery may refresh gates but cannot merge", () => {
+  const value = fixture();
+  value.pull.changed_files = 0;
+  value.files = [];
+
+  const result = evaluate(value);
+
+  assert.equal(result.trustedPull, true);
+  assert.equal(result.staleRecoveryAllowed, true);
+  assert.equal(result.allowed, false);
+  assert.ok(result.blockers.includes("agent PR has no effective changes"));
+});
+
 test("privileged automation changes cannot enter stale recovery", () => {
   const value = fixture({ files: [{ filename: ".github/workflows/ci.yml" }] });
   const result = evaluate(value);
