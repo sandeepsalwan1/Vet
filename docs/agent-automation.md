@@ -41,7 +41,7 @@ Trusted recovery dispatches main-defined workflows with an expected head SHA, an
 
 Cost-sensitive routing lives in `.agent/config.json`.
 All model lanes use GPT-5.4 mini because GPT-5.4 nano does not support the Codex action's required tool transport.
-Implementation, review, proposal, and triage use low reasoning; no-mistakes uses medium reasoning after measured low-effort structured-output failures.
+Implementation, first-pass review, proposal, and triage use low reasoning; no-mistakes and bounded reviewer repair use medium reasoning after measured low-effort acceptance and structured-output failures.
 Increase a lane's model or reasoning only after measured contract failures.
 
 Model upgrades require config changes only:

@@ -92,7 +92,9 @@ jobs:
           node-version: "22"
       - name: Select review model
         id: backend
-        run: node scripts/agent-worker.mjs --validate-backend --lane review --json
+        env:
+          BACKEND_LANE: ${{ inputs.repair-attempt > 0 && 'no-mistakes' || 'review' }}
+        run: node scripts/agent-worker.mjs --validate-backend --lane "$BACKEND_LANE" --json
       - name: Allocate review capacity
         id: concurrency
         env:
