@@ -526,6 +526,7 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(apply, /ref: main\n          fetch-depth: 0\n          persist-credentials: false/);
   assert.match(noMistakes, /actions: write/);
   assert.match(noMistakes, /checks: read/);
+  assert.match(noMistakes, /statuses: read/);
   assert.match(noMistakes, /gh workflow run agent-no-mistakes\.yml/);
   assert.match(noMistakes, /--repo "\$GITHUB_REPOSITORY"/);
   assert.match(noMistakes, /--ref main/);

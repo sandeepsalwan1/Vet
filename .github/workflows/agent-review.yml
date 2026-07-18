@@ -234,6 +234,7 @@ jobs:
       checks: read
       contents: read
       pull-requests: read
+      statuses: read
     steps:
       - name: Dispatch standalone no-mistakes gate
         env:
