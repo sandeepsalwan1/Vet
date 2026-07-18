@@ -1,17 +1,7 @@
-# AGENTS.md
+# Client Request Boundary
 
-Client request package.
-
-## Shape
-
-- `clientRequestValidation.ts`: public request schema and field validation.
-- `clientRequestGuard.ts`: rate-limit, duplicate detection, guard-event writes.
-- `clientRequestLogger.ts`: structured request logging.
-- `index.ts`: task-creation interface.
-
-## Rules
-
-- `/request` UI lives in `apps/internal`.
-- Keep guard, validation, and persistence orchestration behind this package interface.
-- Hash client/request identifiers in logs.
-- Preserve field-error shape consumed by `RequestForm`.
+- The `/request` UI stays in `apps/internal`; this package owns request handling behind its root interface.
+- Keep validation, rate-limit/duplicate guards, structured logging, and task creation inside the package.
+- Hash client and request identifiers before guard logs or persistence.
+- Preserve the `fieldErrors` contract consumed by the request form.
+- Do not import app routes or UI into this package.

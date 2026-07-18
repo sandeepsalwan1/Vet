@@ -93,6 +93,40 @@ export type {
   ClinicRoom,
   RoomState
 } from "./arrivalIntake";
+export {
+  beginClientAccountClaim,
+  cancelClientJourneyMessages,
+  completeClientAccountClaim,
+  createClientJourneyEvent,
+  createClientRecordRelease,
+  deferClientAccountClaim,
+  failClientAccountClaim,
+  getClientAccountClaimForVerification,
+  getClientClaimProfile,
+  getClientContactPreferences,
+  getClientJourneySettings,
+  getClientJourneySnapshot,
+  listDueClientJourneyMessages,
+  listStaffClientJourneys,
+  markClientJourneyMessageStatus,
+  planClientJourneyMessage,
+  recordClientJourneyResponse,
+  saveClientContactPreferences
+} from "./clientJourney";
+export type { DueClientJourneyMessage } from "./clientJourneyRows";
+export type {
+  ClientContactPreferences,
+  ClientJourneyAppointment,
+  ClientJourneyEvent,
+  ClientJourneyInvoice,
+  ClientJourneyMessage,
+  ClientJourneyProfile,
+  ClientJourneySettings,
+  ClientJourneySnapshot,
+  StaffClientJourneySnapshot,
+  StaffJourneyClient,
+  StaffJourneyItem
+} from "./clientJourneyRows";
 export type {
   MockAppointment,
   MockLabCatalogItem,

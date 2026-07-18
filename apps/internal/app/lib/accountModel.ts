@@ -10,6 +10,9 @@ export type Account = {
   email: string;
   phone?: string;
   petName?: string;
+  clientId?: string;
+  petId?: string;
+  accessToken?: string;
   passcode?: string;
   passwordHash: string;
   mustResetPassword?: boolean;
@@ -24,6 +27,9 @@ export type AccountSession = {
   email: string;
   phone?: string;
   petName?: string;
+  clientId?: string;
+  petId?: string;
+  accessToken?: string;
   passcode?: string;
   source: "account"; // discriminator: task-board passcode sessions lack this field
 };

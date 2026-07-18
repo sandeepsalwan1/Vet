@@ -1,5 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
+  "ignore": ["opensrc/**"],
   "workspaces": {
     ".": {
       "entry": ["scripts/*.mjs", "eslint.config.mjs"],

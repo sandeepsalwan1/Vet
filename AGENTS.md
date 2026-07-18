@@ -27,6 +27,15 @@ Central Veterinary Hospital MVP: one deployed Next.js app, Postgres-backed npm w
 - Scenarios: `npm run test:scenarios`
 - Local smoke: `npm run smoke:local` with dev server running.
 
+## AFK Issue Automation
+
+- New work: open `https://github.com/sandeepsalwan1/Vet/issues/new?template=afk-implementation.yml`; submission adds `agent:implement` automatically.
+- Existing issue: run `gh issue edit <number> --repo sandeepsalwan1/Vet --add-label agent:implement`.
+- Then leave it alone; automation triages, creates its branch and draft PR, runs CI, review, and no-mistakes, then safely merges and closes the issue.
+- No manual branch or push is required.
+- Return only when `agent:blocked` requests a decision or reports a failed gate.
+- Full operation, recovery, and exact-head approval steps: `docs/agent-automation.md`.
+
 ## Architecture Rules
 
 - Use `CONTEXT.md` names for domain concepts.
@@ -37,6 +46,8 @@ Central Veterinary Hospital MVP: one deployed Next.js app, Postgres-backed npm w
 - Dependency holds: keep `@google/genai` on v1 while `@google/adk` depends on v1; keep ESLint on v9 until Next/react lint stack supports v10; keep `@types/node` aligned with the minimum supported Node engine.
 - New shared behavior belongs in a package only when two callers need the seam.
 - Agent cost: use the cheapest model that reliably satisfies each lane contract; increase model or reasoning only after measured failure.
+- Treat clinic branding, messaging cadence/channels, and PIMS provider as tenant configuration; Tri-City is the current design-partner profile, not a product-wide hardcode.
+- Build for a real product, not a demo; mock and local proof paths must remain replaceable by tenant-scoped Cornerstone, AVImark, or other PIMS adapters.
 - No secrets in docs, logs, tests, screenshots, or proof files.
 
 ## Docs

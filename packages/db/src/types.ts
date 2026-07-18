@@ -82,6 +82,7 @@ export type TaskEvent = {
 
 export type CreateTaskInput = {
   clinicId?: string | null;
+  idempotencyKey?: string | null;
   status: TaskStatus;
   source: TaskSource;
   clientName?: string | null;

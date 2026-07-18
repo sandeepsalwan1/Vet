@@ -53,3 +53,20 @@ dist
 .zencoder/
 
 .claude/scheduled_tasks.lock
+
+# Local planning and agent working state
+/.agent/work/
+/.agent/active
+/.agent/PLANS.md
+/plan.md
+/docs/.local/
+/.artifacts/
+
+# Vendor outreach material (policy: outreach history stays out of repo)
+/pims-outreach.md
+/pims-outreach-drafts.md
+/whoop-drafts.md
+/idexx-form-answers.txt
+
+# Lavish raw poll receipts may contain full DOM snapshots; decisions stay in the tracked review log.
+/.lavish/.*-feedback-receipts/

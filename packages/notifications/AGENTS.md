@@ -1,17 +1,8 @@
-# AGENTS.md
+# Notification Boundary
 
-Notification package.
-
-## Shape
-
-- `notificationContent.ts`: HTML/text rendering.
-- `notificationDelivery.ts`: mode/channel/recipient planning.
-- `notificationSend.ts`: idempotent send pipeline and transport.
-- `index.ts`: package interface.
-
-## Rules
-
-- Keep content, delivery planning, and send side effects separate.
-- Honor profile opt-ins and test/disabled modes.
-- Use idempotency keys for repeatable notifications.
-- Do not log recipient secrets or transport credentials.
+- Keep content rendering, delivery planning, and send side effects separate.
+- Delivery planning owns mode, channel, recipient, timezone, and opt-in policy.
+- The send pipeline owns idempotency and attempt lifecycle before transport.
+- Disabled, test, and production modes remain explicit; production delivery requires approved configuration.
+- Do not log recipients, passcodes, API keys, or transport credentials.
+- Export the package interface through `src/index.ts`; do not import app routes or UI.

@@ -41,6 +41,7 @@ function timeOrDefault(value: unknown) {
 export function taskInsertRow(input: CreateTaskInput, actor: Actor, clinicId: string) {
   return {
     clinic_id: clinicId,
+    idempotency_key: cleanTaskText(input.idempotencyKey),
     hospital_name:
       input.hospitalName?.trim() ||
       process.env.HOSPITAL_NAME ||

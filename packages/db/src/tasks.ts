@@ -117,21 +117,39 @@ export async function createTask(input: CreateTaskInput, actor: Actor) {
     actor,
     clinicId
   );
-  const rows = await sql<TaskRow[]>`
-    insert into tasks ${sql(row)}
-    returning ${sql.unsafe(taskColumns)}
-  `;
+  const idempotencyKey = input.idempotencyKey?.trim() || null;
+  const insertedRows = idempotencyKey
+    ? await sql<TaskRow[]>`
+        insert into tasks ${sql(row)}
+        on conflict (clinic_id, idempotency_key) where idempotency_key is not null do nothing
+        returning ${sql.unsafe(taskColumns)}
+      `
+    : await sql<TaskRow[]>`
+        insert into tasks ${sql(row)}
+        returning ${sql.unsafe(taskColumns)}
+      `;
+  const rows = insertedRows.length > 0
+    ? insertedRows
+    : await sql<TaskRow[]>`
+        select ${sql.unsafe(taskColumns)}
+        from tasks
+        where clinic_id = ${clinicId}
+          and idempotency_key = ${idempotencyKey}
+        limit 1
+      `;
   const task = normalizeTask(rows[0]);
-  await logTaskEvent({
-    clinicId,
-    taskId: task.id,
-    actor,
-    eventType:
-      input.source === "client_form" ? "client_request_created" : "created",
-    previousStatus: null,
-    nextStatus: task.status,
-    metadata: { source: input.source }
-  });
+  if (insertedRows.length > 0) {
+    await logTaskEvent({
+      clinicId,
+      taskId: task.id,
+      actor,
+      eventType:
+        input.source === "client_form" ? "client_request_created" : "created",
+      previousStatus: null,
+      nextStatus: task.status,
+      metadata: { source: input.source }
+    });
+  }
   return task;
 }
 

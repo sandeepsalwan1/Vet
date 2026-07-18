@@ -1,5 +1,6 @@
 import {
   sendAgentExampleEmail,
+  sendDueClientJourneyMessages,
   sendDailyPrioritySummary,
   sendSmokeEmail
 } from "@central-vet/notifications";
@@ -96,6 +97,15 @@ export async function dailyPrioritySummaryResponse(request: Request) {
     taskCount: result.taskCount,
     resultCount: result.results.length
   });
+  return NextResponse.json(result);
+}
+
+export async function clientJourneyNotificationsResponse(request: Request) {
+  const unauthorized = requireCronAuthorization(request, "client_journey_notifications_rejected");
+  if (unauthorized) return unauthorized;
+  const clinic = await resolveClinicFromRequest(request);
+  const result = await sendDueClientJourneyMessages({ clinicId: clinic.clinicId });
+  logInfo("client_journey_notifications_checked", result);
   return NextResponse.json(result);
 }
 
