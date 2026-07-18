@@ -78,8 +78,8 @@ export async function waitForRequiredChecks(config, prNumber, expectedHeadSha, d
   const fetchSnapshot = dependencies.fetchSnapshot ?? fetchPull;
   const fetchChecks = dependencies.fetchChecks ?? fetchRequiredChecks;
   const wait = dependencies.wait ?? delay;
-  const maxAttempts = dependencies.maxAttempts ?? 60;
-  const intervalMs = dependencies.intervalMs ?? 5000;
+  const maxAttempts = dependencies.maxAttempts ?? 120;
+  const intervalMs = dependencies.intervalMs ?? 15000;
   let checks = [];
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const { pull } = fetchSnapshot(config, prNumber);
@@ -90,7 +90,10 @@ export async function waitForRequiredChecks(config, prNumber, expectedHeadSha, d
     }
     if (attempt < maxAttempts) await wait(intervalMs);
   }
-  return { complete: false, attempts: maxAttempts, checks };
+  throw new AgentError("required exact-head CI did not reach a terminal state", 1, {
+    attempts: maxAttempts,
+    checks,
+  });
 }
 
 function fetchPull(config, prNumber) {

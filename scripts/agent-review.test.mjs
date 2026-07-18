@@ -18,6 +18,7 @@ import {
   reviewLabelChanges,
   reviewPolicyOutcome,
   summarizeRequiredChecks,
+  waitForRequiredChecks,
   validateReviewResult
 } from "./agent-review.mjs";
 import { issueSnapshotSha256 } from "./agent-lib.mjs";
@@ -161,6 +162,21 @@ test("required check summaries use the newest exact-head GitHub Actions result",
     { name: "quality", state: "success" },
     { name: "build", state: "in_progress" }
   ]);
+});
+
+test("nonterminal CI times out without consuming a review repair attempt", async () => {
+  await assert.rejects(
+    waitForRequiredChecks(config, 20, "a".repeat(40), {
+      fetchSnapshot: () => ({ pull: { head: { sha: "a".repeat(40) } } }),
+      fetchChecks: () => [
+        { name: "quality", state: "in_progress" },
+        { name: "build", state: "missing" },
+      ],
+      maxAttempts: 1,
+      wait: async () => {},
+    }),
+    /required exact-head CI did not reach a terminal state/,
+  );
 });
 
 test("missing managed triage context blocks prompt construction", () => {
