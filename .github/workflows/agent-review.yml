@@ -48,6 +48,7 @@ jobs:
       backend-effort: ${{ steps.backend.outputs.effort }}
       backend-model: ${{ steps.backend.outputs.model }}
       concurrency-group: ${{ steps.concurrency.outputs.group }}
+      reviewed-base-sha: ${{ steps.mark-pending.outputs.base-sha }}
       reviewed-head-sha: ${{ steps.mark-pending.outputs.head-sha }}
     permissions:
       actions: write
@@ -65,12 +66,16 @@ jobs:
           REQUESTED_HEAD_SHA: ${{ inputs.expected-head-sha }}
         run: |
           set -euo pipefail
-          sha="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)"
+          pull="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json baseRefOid,headRefOid)"
+          sha="$(jq -r .headRefOid <<<"$pull")"
+          base_sha="$(jq -r .baseRefOid <<<"$pull")"
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]]
           if [ -n "$REQUESTED_HEAD_SHA" ]; then
             [[ "$REQUESTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
             test "$sha" = "$REQUESTED_HEAD_SHA"
           fi
+          printf 'base-sha=%s\n' "$base_sha" >> "$GITHUB_OUTPUT"
           printf 'head-sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
           gh api "repos/$GITHUB_REPOSITORY/statuses/$sha" \
             --method POST \
@@ -170,6 +175,14 @@ jobs:
           codex-version: "0.144.1"
           output-schema-file: .agent-output/review.schema.json
           output-file: .agent-output/review.json
+      - name: Repair deterministic whitespace failures
+        run: >-
+          node scripts/agent-review.mjs
+          --pr-number "${{ inputs.pr-number }}"
+          --base-sha "${{ needs.prepare-review.outputs.reviewed-base-sha }}"
+          --expected-head-sha "${{ needs.prepare-review.outputs.reviewed-head-sha }}"
+          --repair-whitespace
+          --json
       - name: Capture reviewer fixes
         run: >-
           node scripts/agent-review.mjs

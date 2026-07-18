@@ -96,6 +96,7 @@ Triage reads root and applicable nested `AGENTS.md` files, `VISION.md`, reposito
 An aligned low-risk result adds `agent:implement` and `agent:automerge`, then dispatches implementation automatically.
 Implementation creates `agent/issue-<number>-<slug>`, validates the patch, opens or updates a draft PR, starts exact-head CI, and starts review.
 Review can apply a safe patch, reruns exact-head CI and review until clean within its bounded repair budget, requests proof when needed, publishes `agent-review`, then starts no-mistakes.
+After model review, a credential-free deterministic repair removes extra blank lines at EOF only when `git diff --check` identifies them in a safe, non-privileged text file.
 Malformed no-mistakes output retries once automatically on the unchanged head.
 Automerge waits for every configured gate, updates a stale branch from `main`, reruns head-bound gates, merges, dispatches baseline CI and CodeQL for the exact merge commit, closes the source issue, and removes workflow labels.
 
