@@ -35,6 +35,25 @@ import {
 export const MAX_REVIEW_DIFF_BYTES = 50000;
 export const MAX_REVIEW_REPAIR_ATTEMPTS = 2;
 
+function ciReproductionCommands(pull, ciChecks) {
+  const commands = {
+    quality: [
+      `git diff --check ${pull.base.sha}...${pull.head.sha}`,
+      "npm run typecheck",
+      "npm run lint",
+      "npm run lint:dead",
+      "npm run lint:duplicates",
+      "node --test scripts/agent-*.test.mjs",
+    ],
+    build: ["npm run build"],
+    scenarios: ["npm run test:scenarios"],
+    audit: ["npm audit --omit=dev"],
+  };
+  return ciChecks
+    .filter((check) => check.state !== "success")
+    .flatMap((check) => (commands[check.name] ?? []).map((command) => `- ${check.name}: \`${command}\``));
+}
+
 function newestCheck(checks) {
   return [...checks].sort((left, right) => {
     const timestamp = (check) =>
@@ -204,6 +223,10 @@ ${triageComment.body}
 ## Exact-Head CI
 
 ${ciChecks.map((check) => `- ${check.name}: ${check.state}${check.detailsUrl ? ` (${check.detailsUrl})` : ""}`).join("\n") || "- unavailable"}
+
+## Failed CI Reproduction
+
+${ciReproductionCommands(pull, ciChecks).join("\n") || "- none"}
 
 ## Diff
 

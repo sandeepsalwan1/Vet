@@ -114,6 +114,7 @@ test("review prompt contains source issue, managed triage, CI state, and complet
   assert.match(prompt, /Structured triage context/);
   assert.match(prompt, /quality: success/);
   assert.match(prompt, /build: failure/);
+  assert.match(prompt, /build: `npm run build`/);
   assert.ok(prompt.includes(diff));
 });
 
