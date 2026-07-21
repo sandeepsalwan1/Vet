@@ -32,16 +32,17 @@ Current planned provider policy:
 - Current Vercel token exists but is not authorized by `vercel whoami`; do not treat Vercel Sandbox as verified yet.
 - Current Hetzner-compatible token is missing; paid Hetzner proof remains unavailable, but required visual proof can use `local-container` without the user's laptop.
 
-Current checked state on 2026-07-16:
+Current checked state, public upstream refreshed on 2026-07-20:
 
-- latest upstream release: `v0.38.4`
-- latest release time: `2026-07-16T15:25:13Z`
-- checked upstream commit: `318916277a00390c73419c6c354b7ae5d7abeb1c`
+- latest upstream release: `v0.40.0`
+- checked upstream `main`: `8b686531ece655d9096f6e0adb70f65f07c1db4d`
+- CI archive checksum: `3bcd7c48b9866e3ac05b35bb67afa3282e831d1b9f749c5998c102944c1a5cfe`
+- Vet implementation and proof workflow pin: `v0.40.0`
 - local binary: `/Users/sandeep/bin/crabbox`
 - local version: `0.38.4-16-g31891627`
 - local source checkout: `/Users/sandeep/projects/crabbox`
 - source state: `v0.38.4-16-g31891627`
-- status: updated from upstream and rebuilt with release-style version ldflags
+- local installation state is separate from the pinned GitHub worker archive
 - doctor: tools OK; provider check fails because `HCLOUD_TOKEN` or `HETZNER_TOKEN` is missing
 - Vercel Sandbox smoke: environment-blocked by HTTP 403 account scope before lease acquisition
 - license: MIT

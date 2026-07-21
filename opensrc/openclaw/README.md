@@ -2,10 +2,11 @@
 
 Source: https://github.com/openclaw/openclaw
 
-Current checked state on 2026-07-16:
+Current checked state, refreshed on 2026-07-20:
 
-- checked commit: `bd9a996b789239dd1607d203bcdb70b1a99adb28`
-- upstream last pushed: `2026-07-16T21:52:17Z`
+- checked upstream `main`: `3d841472bd0efebabfd0247a1509df396c1fa314`
+- latest public release at refresh time: `v2026.7.1`
+- upstream package state at refresh time: `2026.7.2`
 - license: MIT
 
 Use in this repo:

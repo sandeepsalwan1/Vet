@@ -46,6 +46,7 @@ const config = {
     proof: "agent:proof",
     blocked: "agent:blocked",
     priorityHigh: "priority:high",
+    priorityTrivial: "priority:trivial",
     priorityLow: "priority:low"
   },
   comments: { triage: "<!-- agent-triage:v1 -->" },
@@ -221,6 +222,36 @@ test("safe same-repository agent PR is eligible for immediate merge", () => {
   assert.ok(args.includes("--merge"));
   assert.ok(args.includes("--delete-branch"));
   assert.deepEqual(args.slice(-2), ["--match-head-commit", sha]);
+});
+
+test("trivial cost lane skips only the paid no-mistakes status", () => {
+  const value = fixture();
+  value.pullIssue.labels.push({ name: "priority:trivial" });
+  value.sourceIssue.labels.push({ name: "priority:trivial" });
+  value.pull.body = value.pull.body.replace(
+    '"sourceLabels":["agent:automerge"]',
+    '"sourceLabels":["agent:automerge","priority:trivial"]',
+  );
+  value.combined.statuses = [status("agent-review", "success", 1)];
+
+  const result = evaluate(value);
+
+  assert.equal(result.allowed, true);
+  assert.equal(result.skipNoMistakes, true);
+  assert.equal(result.blockers.some((blocker) => blocker.startsWith("no-mistakes status")), false);
+});
+
+test("trivial label added after implementation cannot bypass no-mistakes", () => {
+  const value = fixture();
+  value.pullIssue.labels.push({ name: "priority:trivial" });
+  value.sourceIssue.labels.push({ name: "priority:trivial" });
+  value.combined.statuses = [status("agent-review", "success", 1)];
+
+  const result = evaluate(value);
+
+  assert.equal(result.allowed, false);
+  assert.equal(result.skipNoMistakes, false);
+  assert.ok(result.blockers.includes("no-mistakes status missing"));
 });
 
 test("eligible PR is merged immediately after making a draft ready", () => {

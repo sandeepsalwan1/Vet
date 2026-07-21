@@ -549,12 +549,17 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(apply, /REVIEWED_HEAD_SHA: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
   assert.match(apply, /--apply-patch \.agent-output\/review\.patch/);
   assert.match(apply, /--repair-attempt "\$\{\{ inputs\.repair-attempt \}\}"/);
+  assert.match(apply, /outputs:\n\s+next-gate: \$\{\{ steps\.apply\.outputs\.next-gate \}\}/);
+  assert.match(apply, /id: apply/);
   assert.match(apply, /checks: read/);
   assert.match(apply, /ref: main\n          fetch-depth: 0\n          persist-credentials: false/);
   assert.match(noMistakes, /actions: write/);
   assert.match(noMistakes, /checks: read/);
   assert.match(noMistakes, /statuses: read/);
   assert.match(noMistakes, /gh workflow run agent-no-mistakes\.yml/);
+  assert.match(noMistakes, /NEXT_GATE: \$\{\{ needs\.apply-review\.outputs\.next-gate \}\}/);
+  assert.match(noMistakes, /case "\$NEXT_GATE" in/);
+  assert.match(noMistakes, /gh workflow run agent-automerge\.yml/);
   assert.match(noMistakes, /--repo "\$GITHUB_REPOSITORY"/);
   assert.match(noMistakes, /--ref main/);
   assert.match(noMistakes, /-f pr-number="\$PR_NUMBER"/);

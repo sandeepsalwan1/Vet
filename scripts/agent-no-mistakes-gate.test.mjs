@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import {
+  applyNativeFixPatch,
+  assertNativeFixPatchExcludesSecrets,
   assertTrustedAgentPull,
   composeEffectiveIntent,
+  createNativeFixPatch,
   gateEnvironment,
   gateLabelChanges,
   gateRepairDecision,
@@ -31,14 +37,56 @@ const config = {
 };
 const safeFiles = [{ filename: "apps/internal/src/app/page.tsx" }];
 
-test("authenticated reviewer is read-only while trusted checks and source seals remain enforced", () => {
+function gitAt(cwd, ...args) {
+  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
+}
+
+function nativeFixFixture(relativePath = "apps/internal/native-fix.txt") {
+  const root = mkdtempSync(join(tmpdir(), "vet-native-fix-"));
+  const source = join(root, "source");
+  const origin = join(root, "origin.git");
+  const nmHome = join(root, "nm-home");
+  const gate = join(nmHome, "repos", "vet.git");
+  const patchPath = join(root, "artifact", "fix.patch");
+  const branch = "agent/issue-42-native-fix";
+  mkdirSync(dirname(join(source, relativePath)), { recursive: true });
+  gitAt(root, "init", "-b", "main", source);
+  gitAt(source, "config", "user.name", "Test Bot");
+  gitAt(source, "config", "user.email", "test@example.com");
+  writeFileSync(join(source, relativePath), "before\n");
+  gitAt(source, "add", "-A");
+  gitAt(source, "commit", "-m", "test: base");
+  const baseHead = gitAt(source, "rev-parse", "HEAD");
+  gitAt(root, "clone", "--bare", source, origin);
+  gitAt(source, "branch", branch, baseHead);
+  gitAt(source, "remote", "add", "origin", origin);
+  gitAt(source, "push", "origin", `${branch}:refs/heads/${branch}`);
+  writeFileSync(join(source, relativePath), "after\n");
+  gitAt(source, "add", "-A");
+  gitAt(source, "commit", "-m", "fix: native review finding");
+  const fixedHead = gitAt(source, "rev-parse", "HEAD");
+  mkdirSync(dirname(gate), { recursive: true });
+  gitAt(root, "clone", "--bare", source, gate);
+  const parsed = {
+    status: "passed",
+    outcome: "passed",
+    run: { id: "native-run", head: fixedHead.slice(0, 12) },
+    findings: [],
+  };
+  const nativeFix = createNativeFixPatch(parsed, baseHead, patchPath, { nmHome });
+  const artifact = sanitizedGateArtifact(parsed, baseHead, { nativeFix });
+  return { artifact, baseHead, branch, fixedHead, gate, origin, patchPath, root };
+}
+
+test("authenticated reviewer auto-fixes only inside the credential-free sealed handoff", () => {
   const workflow = readFileSync(new URL("../.github/workflows/agent-no-mistakes.yml", import.meta.url), "utf8");
   const automergeWorkflow = readFileSync(new URL("../.github/workflows/agent-automerge.yml", import.meta.url), "utf8");
   const repoConfig = readFileSync(new URL("../.no-mistakes.yaml", import.meta.url), "utf8");
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const gate = readFileSync(new URL("./agent-no-mistakes-gate.mjs", import.meta.url), "utf8");
 
-  assert.match(workflow, /- --sandbox\s+- read-only/);
+  assert.match(workflow, /- --sandbox\s+- workspace-write/);
+  assert.match(workflow, /auto_fix:\n\s+review: 2/);
   assert.match(
     workflow,
     /Treat test-only assertion changes as documentation-complete/,
@@ -50,6 +98,10 @@ test("authenticated reviewer is read-only while trusted checks and source seals 
     /model_reasoning_effort="\$\{\{ needs\.prepare\.outputs\.backend_effort \}\}"/,
   );
   assert.match(workflow, /- 'approval_policy="never"'/);
+  assert.match(
+    workflow,
+    /shell_environment_policy\.exclude=\["\*KEY\*","\*SECRET\*","\*TOKEN\*","\*PASSWORD\*","\*CREDENTIAL\*"\]/,
+  );
   assert.doesNotMatch(workflow, /- --ask-for-approval/);
   assert.match(workflow, /codex exec \\\n\s+--sandbox read-only/);
   assert.match(workflow, /NM_TEST_START_DAEMON: "1"/);
@@ -77,7 +129,11 @@ test("authenticated reviewer is read-only while trusted checks and source seals 
   assert.match(gate, /"--skip",\s+"rebase,test,document,lint,push,pr,ci"/);
   assert.doesNotMatch(workflow, /git config --global user\./);
   assert.match(workflow, /if: \$\{\{ always\(\) \}\}\n\s+continue-on-error: true\n[\s\S]*?run: no-mistakes daemon stop --force/);
-  assert.doesNotMatch(workflow, /- workspace-write/);
+  assert.match(workflow, /Never modify AGENTS\.md, package manifests or lockfiles, agent scripts\/configuration/);
+  assert.match(workflow, /v1\.40\.0\/no-mistakes-v1\.40\.0-linux-amd64\.tar\.gz/);
+  assert.match(workflow, /--fix-patch "\$RUNNER_TEMP\/no-mistakes-result\/fix\.patch"/);
+  assert.match(gate, /--force-with-lease/);
+  assert.match(workflow, /dispatch-native-fix:/);
   const baseline = workflow.indexOf("- name: Run trusted offline test baseline before agent auth");
   const modelAuth = workflow.indexOf("CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}");
   assert.ok(baseline > 0 && modelAuth > baseline);
@@ -107,7 +163,168 @@ test("authenticated reviewer is read-only while trusted checks and source seals 
   assert.equal(packageJson.devDependencies.knip, "^6.26.0");
   assert.equal(packageJson.devDependencies.jscpd, "^5.0.12");
   assert.equal([...repoConfig.matchAll(/tar --no-same-owner -xf/g)].length, 2);
+  assert.match(repoConfig, /review: 2/);
   assert.match(gate, /"--untracked-files=all"/);
+  assert.match(gate, /createNativeFixPatch/);
+});
+
+test("native no-mistakes fixes become a sealed non-privileged patch", () => {
+  const fixture = nativeFixFixture();
+
+  assert.equal(fixture.artifact.status, "blocked");
+  assert.equal(fixture.artifact.outcome, "native-fix");
+  assert.equal(fixture.artifact.nativeFix.baseHead, fixture.baseHead);
+  assert.equal(fixture.artifact.nativeFix.fixedHead, fixture.fixedHead);
+  assert.deepEqual(fixture.artifact.nativeFix.paths, ["apps/internal/native-fix.txt"]);
+  assert.match(readFileSync(fixture.patchPath, "utf8"), /-before\n\+after/);
+  assert.deepEqual(gateRepairDecision(fixture.artifact, 0), {
+    state: "native-fix",
+    nextAttempt: 1,
+  });
+  assert.deepEqual(gateRepairDecision(fixture.artifact, 2), {
+    state: "exhausted",
+    nextAttempt: null,
+  });
+
+  const dirtyArtifact = sanitizedGateArtifact(
+    {
+      status: "passed",
+      outcome: "passed",
+      run: { id: "native-run", head: fixture.fixedHead.slice(0, 12) },
+      findings: [],
+    },
+    fixture.baseHead,
+    { nativeFix: fixture.artifact.nativeFix, unpublishedChanges: true },
+  );
+  assert.equal(dirtyArtifact.status, "failed");
+  assert.equal(dirtyArtifact.outcome, "unpublished-changes");
+  assert.equal(dirtyArtifact.nativeFix, null);
+  assert.equal(
+    normalizeGateArtifact(dirtyArtifact, fixture.baseHead).outcome,
+    "unpublished-changes",
+  );
+});
+
+test("trusted publication reapplies the sealed tree with an exact-head lease", () => {
+  const fixture = nativeFixFixture();
+  const checkout = join(fixture.root, "apply");
+  gitAt(fixture.root, "clone", fixture.origin, checkout);
+  const commands = [];
+  const execute = (command, args, options = {}) => {
+    commands.push([command, args]);
+    if (command === "gh") return { status: 0, stdout: "", stderr: "" };
+    const result = spawnSync(command, args, {
+      cwd: checkout,
+      encoding: "utf8",
+      stdio: "pipe",
+    });
+    if (result.status !== 0 && options.check !== false) {
+      throw new Error(`${command} ${args.join(" ")} failed: ${result.stderr}`);
+    }
+    return {
+      status: result.status ?? 1,
+      stdout: result.stdout ?? "",
+      stderr: result.stderr ?? "",
+    };
+  };
+
+  const published = applyNativeFixPatch(
+    {
+      artifact: fixture.artifact,
+      config,
+      patchPath: fixture.patchPath,
+      pull: { number: 42, head: { ref: fixture.branch, sha: fixture.baseHead } },
+      repairAttempt: 0,
+    },
+    { runCommand: execute },
+  );
+
+  const remoteTree = gitAt(
+    fixture.origin,
+    "rev-parse",
+    `refs/heads/${fixture.branch}^{tree}`,
+  );
+  assert.equal(remoteTree, fixture.artifact.nativeFix.fixedTree);
+  assert.equal(published.nextRepairAttempt, 1);
+  assert.match(published.nextHead, /^[0-9a-f]{40}$/);
+  assert.ok(
+    commands.some(
+      ([command, args]) =>
+        command === "git" &&
+        args.includes(
+          `--force-with-lease=refs/heads/${fixture.branch}:${fixture.baseHead}`,
+        ),
+    ),
+  );
+});
+
+test("native fix publication dry-run validates without mutating git or GitHub", () => {
+  const fixture = nativeFixFixture();
+  const commands = [];
+  const published = applyNativeFixPatch(
+    {
+      artifact: fixture.artifact,
+      config,
+      patchPath: fixture.patchPath,
+      pull: { number: 42, head: { ref: fixture.branch, sha: fixture.baseHead } },
+      repairAttempt: 0,
+      dryRun: true,
+    },
+    {
+      runCommand: (command, args) => {
+        commands.push([command, args]);
+        throw new Error("dry-run must not execute a mutating command");
+      },
+    },
+  );
+
+  assert.deepEqual(commands, []);
+  assert.deepEqual(published, {
+    nextHead: "",
+    nextRepairAttempt: 1,
+    paths: ["apps/internal/native-fix.txt"],
+    dryRun: true,
+  });
+  assert.equal(
+    gitAt(fixture.origin, "rev-parse", `refs/heads/${fixture.branch}`),
+    fixture.baseHead,
+  );
+});
+
+test("native no-mistakes patches cannot modify automation control files", () => {
+  assert.throws(
+    () => nativeFixFixture("scripts/agent-danger.mjs"),
+    /privileged candidate paths/,
+  );
+});
+
+test("native fix artifacts reject exact credentials without exposing their value", () => {
+  const credential = "sk-test-native-fix-credential-123456789";
+  assert.equal(
+    assertNativeFixPatchExcludesSecrets("+safe replacement\n", {
+      CODEX_API_KEY: credential,
+    }),
+    true,
+  );
+  assert.throws(
+    () =>
+      assertNativeFixPatchExcludesSecrets(`+${credential}\n`, {
+        CODEX_API_KEY: credential,
+      }),
+    (error) => {
+      assert.match(error.message, /contains a credential value/);
+      assert.doesNotMatch(error.message, new RegExp(credential));
+      return true;
+    },
+  );
+  assert.throws(
+    () =>
+      assertNativeFixPatchExcludesSecrets(
+        "diff --git a/image.png b/image.png\nGIT binary patch\nliteral 1\nA\n",
+        {},
+      ),
+    /cannot contain binary changes/,
+  );
 });
 
 test("application fonts are self-hosted for offline gates", () => {

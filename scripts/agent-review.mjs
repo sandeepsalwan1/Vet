@@ -29,6 +29,8 @@ import {
   repoRoot,
   runCommand,
   setCommitStatus,
+  setGitHubOutput,
+  skipsNoMistakesForCost,
   upsertManagedComment
 } from "./agent-lib.mjs";
 
@@ -638,7 +640,7 @@ function applyReview(
   expectedHeadSha,
   repairAttemptValue = 0
 ) {
-  const { pull, files } = fetchPull(config, prNumber);
+  const { pull, issue, files } = fetchPull(config, prNumber);
   assertReviewedHead(pull, expectedHeadSha);
   const closing = ghReadJson([
     "pr",
@@ -657,9 +659,16 @@ function applyReview(
     rejectPrivilegedPaths: true,
     allowEmptyFiles: true
   });
+  const metadata = implementationMetadata(pull.body);
+  const sourceLabels = issueLabels(sourceIssue);
   const automergeEligible =
-    implementationMetadata(pull.body).automergeEligible === true &&
-    issueLabels(sourceIssue).includes(config.labels.automerge);
+    metadata.automergeEligible === true &&
+    sourceLabels.includes(config.labels.automerge);
+  const skipNoMistakes = skipsNoMistakesForCost(config, {
+    metadata,
+    pullLabels: issueLabels(issue),
+    sourceLabels
+  });
   const ciChecks = fetchRequiredChecks(config, pull.head.sha);
   const ciPassed = ciChecks.every((check) => check.state === "success");
   let review = readAgentJson(reviewPath);
@@ -800,6 +809,7 @@ function applyReview(
     status,
     patchApplied,
     privilegedPaths,
+    skipNoMistakes,
     continueToNoMistakes: cycle.continueToNoMistakes,
     manualBlock: cycle.state === "human-blocked" || cycle.state === "repair-exhausted"
   };
@@ -874,6 +884,7 @@ async function main() {
       args["expected-head-sha"],
       args["repair-attempt"]
     );
+    setGitHubOutput({ "next-gate": result.skipNoMistakes ? "automerge" : "no-mistakes" });
     finish(
       { ok: true, message: `${dryRun ? "would apply" : "applied"} review for #${prNumber}`, result },
       Boolean(args.json)

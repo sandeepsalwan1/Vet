@@ -3,6 +3,7 @@
 ## Priority
 
 - `priority:high`: real clinic operation impact, user-visible workflow risk, security/auth/data changes, billing, migrations, production data, or product-policy decisions. Human review required.
+- `priority:trivial`: owner-selected trivial low-risk work. Add before `agent:implement`; skip only the paid no-mistakes model gate while retaining triage, exact-head CI, independent review, requested proof, and automerge policy.
 - `priority:low`: small cleanup, test coverage, docs, obvious UX copy, or low-risk maintenance. Cheapest automation path.
 - no priority label: medium.
 
@@ -23,7 +24,7 @@ Automerge is allowed only when all are true:
 - computed risk is low or medium.
 - CI required checks pass.
 - reviewer status is passing.
-- no-mistakes status is passing.
+- no-mistakes status is passing, unless immutable implementation metadata and the current source issue and PR all contain `priority:trivial`.
 - required proof is present.
 - no unresolved human question remains.
 
@@ -53,11 +54,17 @@ Automerge is forbidden for high-priority or high-risk work even if all checks pa
 
 - Hosted no-mistakes runs only for same-repository `agent/issue-*` branches with trusted implementation metadata and managed triage.
 - Hosted no-mistakes validates an immutable exact head and skips its private rebase, push, PR, and CI mutation stages.
-- A separate credential-free step runs the trusted offline test baseline before model auth; no-mistakes Codex stays read-only, runs each model stage directly without nested tools or validation commands, and unpublished source changes fail the gate.
+- A separate credential-free step runs the trusted offline test baseline before model auth.
+- no-mistakes Codex receives a writable isolated worktree without GitHub credentials and runs each model stage directly without nested tools or full repository validation commands.
+- Native safe fixes cross into the credentialed publisher only as a sealed patch whose digest, paths, exact base head, and fixed tree are verified before an exact force-with-lease.
+- The gate rejects binary native fixes and any patch containing an exact credential value from its environment.
+- Every published native fix starts fresh exact-head CI, independent review, and no-mistakes validation.
+- Unpublished candidate-checkout changes fail the gate.
 - Configured deterministic scenario, API, and CLI checks count as direct non-visual evidence when they exercise the trusted request.
 - Repository commands run without normal credential inheritance, but the shared runner identity is defense in depth rather than hostile-code isolation.
 - `ask-user`, setup failure, or a stale validated head blocks automerge by default.
 - Malformed evaluator output receives one exact-head infrastructure retry, then blocks if the retry also fails.
 - A manual rerun may carry explicit user approval only for its immutable expected head; later heads and ordinary runs still block on `ask-user`.
 - A passing approved rerun removes the blocked label and restores automerge for that head.
+- `priority:trivial` can bypass no-mistakes only when it was sealed before implementation and remains on the issue and PR.
 - An eligible stale branch is updated by the trusted automerge workflow, then all head-bound CI and review gates run again before merge.

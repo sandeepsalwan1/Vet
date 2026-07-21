@@ -14,7 +14,7 @@ Local cache:
 /Users/sandeep/.opensrc/repos/github.com/mattpocock/sandcastle/main
 ```
 
-Current checked state on 2026-07-16:
+Current checked state, refreshed on 2026-07-20:
 
 - latest release: `v0.12.0`
 - latest release time: `2026-06-29T20:16:27Z`
@@ -27,6 +27,8 @@ Current checked state on 2026-07-16:
 Use in this repo:
 
 - reference implementation for bounded AFK issue and PR workers
+- label-driven issue implementation with a dedicated branch and draft PR
+- Codex-backed implementation followed by a separate reviewer in the same sandbox
 - a configurable task-list command that can filter labeled issues as the worker's bounded source of truth
 - one issue per iteration with a dedicated branch and separate implement/review phases
 - implement/review examples where both agents work in the same sandbox and branch so reviewer fixes become mergeable commits

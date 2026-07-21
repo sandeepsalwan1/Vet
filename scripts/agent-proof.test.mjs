@@ -324,5 +324,8 @@ test("proof workflow dispatches automerge only after terminal success is publish
 
   assert.ok(statusIndex >= 0);
   assert.ok(dispatchIndex > statusIndex);
+  assert.match(workflow, /v0\.40\.0/);
+  assert.match(workflow, /crabbox_0\.40\.0_linux_amd64\.tar\.gz/);
+  assert.doesNotMatch(workflow, /0\.38\.4/);
   assert.match(workflow, /steps\.terminal\.outputs\.state == 'success'/);
 });

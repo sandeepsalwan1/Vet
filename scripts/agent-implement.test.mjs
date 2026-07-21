@@ -65,6 +65,8 @@ test("upsertPullRequest creates a draft PR through GraphQL", () => {
   assert.equal(payload.variables.headRefName, "agent/issue-42-fix-duplicate-intake");
   assert.equal(payload.variables.baseRefName, "main");
   assert.match(payload.variables.body, /Closes #42/);
+  assert.match(payload.variables.body, /priority:trivial/);
+  assert.match(payload.variables.body, /still requires CI, agent review, proof when requested/);
   assert.deepEqual(result, { action: "created", number: 9, url: "https://example.test/pull/9" });
 });
 
@@ -272,14 +274,15 @@ test("implementation PR inherits automerge and proof policy labels", () => {
       review: "agent:review",
       automerge: "agent:automerge",
       priorityHigh: "priority:high",
+      priorityTrivial: "priority:trivial",
       priorityLow: "priority:low",
       proof: "agent:proof"
     }
   };
 
   assert.deepEqual(
-    implementationPullLabels(policyConfig, ["agent:automerge", "agent:proof"]),
-    ["agent:review", "agent:automerge", "agent:proof"]
+    implementationPullLabels(policyConfig, ["agent:automerge", "priority:trivial", "agent:proof"]),
+    ["agent:review", "agent:automerge", "priority:trivial", "agent:proof"]
   );
 });
 
@@ -468,6 +471,8 @@ test("isolated validation command environment removes credentials and workflow c
 
 test("implementation workflow isolates candidate checks from credentials, artifacts, and command channels", () => {
   const workflow = readFileSync(join(process.cwd(), ".github/workflows/agent-implement.yml"), "utf8");
+  const labels = JSON.parse(readFileSync(join(process.cwd(), ".agent/labels.json"), "utf8"));
+  const policy = readFileSync(join(process.cwd(), ".agent/agent-policy.md"), "utf8");
   const prepare = workflow.slice(workflow.indexOf("  prepare-prompt:"), workflow.indexOf("  generate-patch-remote:"));
   const remote = workflow.slice(workflow.indexOf("  generate-patch-remote:"), workflow.indexOf("  generate-patch:"));
   const fallback = workflow.slice(workflow.indexOf("  generate-patch:"), workflow.indexOf("  validate-patch:"));
@@ -475,6 +480,12 @@ test("implementation workflow isolates candidate checks from credentials, artifa
   const openPr = workflow.slice(workflow.indexOf("  open-pr:"), workflow.indexOf("  report-failure:"));
 
   assert.match(workflow, /codex-version: "0\.144\.1"/);
+  assert.match(workflow, /v0\.40\.0/);
+  assert.match(workflow, /crabbox_0\.40\.0_linux_amd64\.tar\.gz/);
+  assert.doesNotMatch(workflow, /0\.38\.4/);
+  assert.equal(labels.some((label) => label.name === "priority:trivial"), true);
+  assert.match(policy, /priority:trivial/);
+  assert.match(policy, /Every published native fix starts fresh exact-head CI/);
   assert.match(prepare, /concurrency-group: \$\{\{ steps\.concurrency\.outputs\.group \}\}/);
   assert.match(prepare, /agent-concurrency-slot\.mjs --lane implement --key "\$CONCURRENCY_KEY" --json/);
   assert.match(prepare, /id: backend\n\s+run: node scripts\/agent-worker\.mjs --validate-backend --lane implement --json/);

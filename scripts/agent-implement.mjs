@@ -109,7 +109,8 @@ ${markdownJsonBlock(metadata)}
 
 - CI must pass.
 - Agent review must pass.
-- no-mistakes must pass before automerge.
+- no-mistakes must pass before automerge unless the source issue sealed the owner-selected \`priority:trivial\` cost lane before implementation.
+- The trivial lane still requires CI, agent review, proof when requested, and normal automerge policy.
 - High-priority or high-risk work remains manual.
 `;
 }
@@ -677,6 +678,7 @@ export function implementationPullLabels(config, sourceLabels) {
   for (const propagated of [
     config.labels.automerge,
     config.labels.priorityHigh,
+    config.labels.priorityTrivial,
     config.labels.priorityLow,
     config.labels.proof
   ]) {

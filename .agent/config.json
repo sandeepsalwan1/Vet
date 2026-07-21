@@ -38,6 +38,7 @@
     "automerge": "agent:automerge",
     "blocked": "agent:blocked",
     "priorityHigh": "priority:high",
+    "priorityTrivial": "priority:trivial",
     "priorityLow": "priority:low"
   },
   "comments": {

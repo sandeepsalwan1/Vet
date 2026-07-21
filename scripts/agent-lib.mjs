@@ -292,6 +292,18 @@ export function privilegedCandidatePaths(candidates) {
   });
 }
 
+export function skipsNoMistakesForCost(config, { metadata, pullLabels = [], sourceLabels = [] } = {}) {
+  const label = config?.labels?.priorityTrivial;
+  return Boolean(
+    label &&
+      metadata?.automergeEligible === true &&
+      Array.isArray(metadata?.sourceLabels) &&
+      metadata.sourceLabels.includes(label) &&
+      pullLabels.includes(label) &&
+      sourceLabels.includes(label)
+  );
+}
+
 export function issueSnapshotSha256(issue) {
   const snapshot = {
     number: Number(issue?.number),

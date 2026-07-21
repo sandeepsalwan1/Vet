@@ -28,7 +28,7 @@ commands:
 
 auto_fix:
   rebase: 0
-  review: 0
+  review: 2
   test: 0
   document: 0
   lint: 0

@@ -21,6 +21,7 @@ import {
   parseArgs,
   privilegedCandidatePaths,
   runCommand,
+  skipsNoMistakesForCost,
   upsertManagedComment
 } from "./agent-lib.mjs";
 
@@ -622,8 +623,15 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
     gateBlockers.push("agent PR has no effective changes");
   }
 
+  const skipNoMistakes = skipsNoMistakesForCost(config, {
+    metadata,
+    pullLabels: prLabels,
+    sourceLabels
+  });
   if (combined?.sha !== pull.head?.sha) gateBlockers.push("commit statuses are not for the current PR head");
-  for (const context of config.automerge.requiredStatuses) {
+  for (const context of config.automerge.requiredStatuses.filter(
+    (name) => !(skipNoMistakes && name === "no-mistakes")
+  )) {
     const state = statusState(combined?.statuses ?? [], context, config);
     if (state !== "success") gateBlockers.push(`${context} status ${state}`);
   }
@@ -650,6 +658,7 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
     blockers,
     metadata,
     triage,
+    skipNoMistakes,
     proofRequested,
     prLabels,
     sourceLabels

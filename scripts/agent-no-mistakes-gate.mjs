@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   AgentError,
@@ -17,6 +18,7 @@ import {
   newestManagedComment,
   parseImplementationMetadata,
   parseArgs,
+  privilegedCandidatePaths,
   removeLabels,
   runCommand,
   setCommitStatus,
@@ -24,7 +26,10 @@ import {
   upsertManagedComment,
 } from "./agent-lib.mjs";
 
-const ARTIFACT_VERSION = 4;
+const ARTIFACT_VERSION = 5;
+const MAX_NATIVE_FIX_PATCH_BYTES = 2_000_000;
+const SECRET_ENV_NAME = /(key|secret|token|password|credential)/i;
+const MIN_SCANNED_SECRET_LENGTH = 12;
 const NO_MISTAKES_COMMENT_MARKER = "<!-- agent-gate-no-mistakes:v1 -->";
 const STATUS_CONTEXT = "no-mistakes";
 export const MAX_INFRASTRUCTURE_RETRIES = 1;
@@ -38,6 +43,7 @@ const ALLOWED_OUTCOMES = new Set([
   "decision-gate",
   "invalid-output",
   "head-mismatch",
+  "native-fix",
   "unpublished-changes",
   "setup-failed",
 ]);
@@ -345,6 +351,160 @@ export function validatedHeadMatches(result, sha) {
   );
 }
 
+function gateGit(execute, gateDir, args, options = {}) {
+  return execute("git", ["--git-dir", gateDir, ...args], options);
+}
+
+export function assertNativeFixPatchExcludesSecrets(patch, environment = process.env) {
+  const content = Buffer.isBuffer(patch) ? patch : Buffer.from(String(patch ?? ""));
+  if (content.includes(Buffer.from("\nGIT binary patch\n"))) {
+    throw new AgentError("native no-mistakes fixes cannot contain binary changes", 1);
+  }
+  for (const [name, rawValue] of Object.entries(environment ?? {})) {
+    const value = String(rawValue ?? "");
+    if (
+      SECRET_ENV_NAME.test(name) &&
+      value.length >= MIN_SCANNED_SECRET_LENGTH &&
+      content.includes(Buffer.from(value))
+    ) {
+      throw new AgentError("native no-mistakes fix patch contains a credential value", 1);
+    }
+  }
+  return true;
+}
+
+export function createNativeFixPatch(
+  gate,
+  expectedHead,
+  patchPath,
+  {
+    nmHome = process.env.NM_HOME,
+    environment = process.env,
+    execute = runCommand,
+    readDirectory = readdirSync,
+  } = {},
+) {
+  if (gate?.status !== "passed" || !gate?.run?.head) return null;
+  const home = String(nmHome ?? "").trim();
+  if (!home) throw new AgentError("missing no-mistakes home for native fixes", 1);
+  const reposDir = resolve(home, "repos");
+  let entries;
+  try {
+    entries = readDirectory(reposDir, { withFileTypes: true });
+  } catch {
+    throw new AgentError("no-mistakes gate repository is unavailable", 1);
+  }
+  const matches = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.endsWith(".git")) continue;
+    const gateDir = join(reposDir, entry.name);
+    const base = gateGit(execute, gateDir, ["rev-parse", `${expectedHead}^{commit}`], {
+      check: false,
+    });
+    const fixed = gateGit(execute, gateDir, ["rev-parse", `${gate.run.head}^{commit}`], {
+      check: false,
+    });
+    if (base.status === 0 && fixed.status === 0) {
+      matches.push({
+        gateDir,
+        baseHead: base.stdout.trim(),
+        fixedHead: fixed.stdout.trim(),
+      });
+    }
+  }
+  if (matches.length !== 1) {
+    throw new AgentError("could not uniquely resolve the no-mistakes fix repository", 1);
+  }
+  const match = matches[0];
+  if (match.baseHead !== expectedHead) {
+    throw new AgentError("no-mistakes fix base does not match the prepared head", 1);
+  }
+  if (match.fixedHead === expectedHead) return null;
+  const ancestry = gateGit(
+    execute,
+    match.gateDir,
+    ["merge-base", "--is-ancestor", expectedHead, match.fixedHead],
+    { check: false },
+  );
+  if (ancestry.status !== 0) {
+    throw new AgentError("no-mistakes fixes are not based on the prepared head", 1);
+  }
+  const paths = gateGit(execute, match.gateDir, [
+    "diff",
+    "--name-only",
+    "--no-renames",
+    "-z",
+    expectedHead,
+    match.fixedHead,
+    "--",
+    ".",
+  ]).stdout
+    .split("\0")
+    .filter(Boolean);
+  if (!paths.length) throw new AgentError("no-mistakes fix commit has no effective changes", 1);
+  const privileged = privilegedCandidatePaths(paths);
+  if (privileged.length) {
+    throw new AgentError("no-mistakes fix touched privileged candidate paths", 1, {
+      paths: privileged,
+    });
+  }
+  const patch = gateGit(execute, match.gateDir, [
+    "diff",
+    "--binary",
+    "--no-ext-diff",
+    expectedHead,
+    match.fixedHead,
+    "--",
+    ".",
+  ]).stdout;
+  if (!patch.trim()) throw new AgentError("no-mistakes fix patch is empty", 1);
+  if (Buffer.byteLength(patch) > MAX_NATIVE_FIX_PATCH_BYTES) {
+    throw new AgentError("no-mistakes fix patch exceeds the trusted size limit", 1);
+  }
+  assertNativeFixPatchExcludesSecrets(patch, environment);
+  const fixedTree = gateGit(execute, match.gateDir, ["rev-parse", `${match.fixedHead}^{tree}`]).stdout.trim();
+  writePrivateFile(patchPath, patch);
+  return {
+    baseHead: expectedHead,
+    fixedHead: match.fixedHead,
+    fixedTree,
+    patchSha256: createHash("sha256").update(patch).digest("hex"),
+    paths,
+  };
+}
+
+function normalizeNativeFix(value, expectedHead) {
+  if (value == null) return null;
+  if (
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    value.baseHead !== expectedHead ||
+    !/^[0-9a-f]{40}$/.test(String(value.fixedHead ?? "")) ||
+    !/^[0-9a-f]{40}$/.test(String(value.fixedTree ?? "")) ||
+    !/^[0-9a-f]{64}$/.test(String(value.patchSha256 ?? "")) ||
+    !Array.isArray(value.paths) ||
+    value.paths.length < 1 ||
+    value.paths.length > 1000 ||
+    value.paths.some((path) => {
+      if (typeof path !== "string" || !path || path.length > 500 || /[\u0000-\u001f\u007f\\]/.test(path)) {
+        return true;
+      }
+      const segments = path.split("/");
+      return path.startsWith("/") || segments.some((segment) => !segment || segment === "." || segment === "..");
+    }) ||
+    privilegedCandidatePaths(value.paths).length
+  ) {
+    throw new AgentError("sanitized native no-mistakes fix is invalid", 1);
+  }
+  return {
+    baseHead: expectedHead,
+    fixedHead: value.fixedHead,
+    fixedTree: value.fixedTree,
+    patchSha256: value.patchSha256,
+    paths: [...new Set(value.paths)],
+  };
+}
+
 function safePublicText(value, maxLength) {
   return String(value ?? "")
     .replace(
@@ -369,11 +529,22 @@ function safeFinding(finding) {
 export function sanitizedGateArtifact(
   gate,
   expectedHead,
-  { unpublishedChanges = false, userApproved = false } = {},
+  { nativeFix = null, unpublishedChanges = false, userApproved = false } = {},
 ) {
   let normalized = gate;
   const headMatches = validatedHeadMatches(gate, expectedHead);
-  if (unpublishedChanges || (gate?.run?.head && !headMatches)) {
+  const normalizedNativeFix = normalizeNativeFix(nativeFix, expectedHead);
+  let artifactNativeFix = null;
+  if (unpublishedChanges) {
+    normalized = {
+      ...gate,
+      status: "failed",
+      outcome: "unpublished-changes",
+    };
+  } else if (normalizedNativeFix && gate?.status === "passed") {
+    normalized = { ...gate, status: "blocked", outcome: "native-fix" };
+    artifactNativeFix = normalizedNativeFix;
+  } else if (gate?.run?.head && !headMatches) {
     normalized = {
       ...gate,
       status: "failed",
@@ -400,6 +571,7 @@ export function sanitizedGateArtifact(
       ? normalized.failureStage
       : "",
     findings: (normalized?.findings ?? []).slice(0, 100).map(safeFinding),
+    nativeFix: artifactNativeFix,
   };
 }
 
@@ -435,6 +607,10 @@ export function normalizeGateArtifact(value, expectedHead) {
   if (!Array.isArray(value.findings) || value.findings.length > 100) {
     throw new AgentError("sanitized gate artifact findings are invalid", 1);
   }
+  const nativeFix = normalizeNativeFix(value.nativeFix, expectedHead);
+  if ((value.outcome === "native-fix") !== Boolean(nativeFix) || (nativeFix && value.status !== "blocked")) {
+    throw new AgentError("sanitized gate artifact native fix state is invalid", 1);
+  }
   return {
     version: ARTIFACT_VERSION,
     status: value.status,
@@ -447,6 +623,7 @@ export function normalizeGateArtifact(value, expectedHead) {
       ? value.failureStage
       : "",
     findings: value.findings.map(safeFinding),
+    nativeFix,
   };
 }
 
@@ -512,6 +689,12 @@ function markPending(config, pull, dryRun) {
 
 export function gateRepairDecision(artifact, repairAttempt = 0) {
   const attempt = readRepairAttempt(repairAttempt);
+  if (artifact?.outcome === "native-fix" && artifact?.nativeFix) {
+    if (attempt < MAX_GATE_REPAIR_ATTEMPTS) {
+      return { state: "native-fix", nextAttempt: attempt + 1 };
+    }
+    return { state: "exhausted", nextAttempt: null };
+  }
   const exactHeadBound =
     /^[0-9a-f]{40}$/.test(String(artifact?.expectedHead ?? "")) &&
     artifact?.validatedHead === artifact.expectedHead;
@@ -535,7 +718,12 @@ function artifactBlocker(artifact, repairAttempt = 0) {
     return `automatic reviewer repair pending (${repair.nextAttempt}/${MAX_GATE_REPAIR_ATTEMPTS})`;
   }
   if (repair.state === "exhausted") {
-    return "automatic reviewer repair limit exhausted";
+    return artifact.outcome === "native-fix"
+      ? "native no-mistakes fix publication limit exhausted"
+      : "automatic reviewer repair limit exhausted";
+  }
+  if (repair.state === "native-fix") {
+    return `native no-mistakes fixes ready to publish (${repair.nextAttempt}/${MAX_GATE_REPAIR_ATTEMPTS})`;
   }
   if (artifact.outcome === "invalid-output") {
     return "no-mistakes output remained invalid after its bounded internal retry";
@@ -589,13 +777,149 @@ export function gateLabelChanges(config, artifact, { repairAttempt = 0 } = {}) {
     };
   }
   if (artifact?.status === "passed") return { add: [], remove: [] };
-  if (gateRepairDecision(artifact, repairAttempt).state === "retry") {
+  if (["retry", "native-fix"].includes(gateRepairDecision(artifact, repairAttempt).state)) {
     return { add: [], remove: [] };
   }
   return {
     add: [config.labels.blocked],
     remove: [config.labels.automerge],
   };
+}
+
+function sortedUnique(values) {
+  return [...new Set(values)].sort();
+}
+
+export function applyNativeFixPatch(
+  { artifact, config, patchPath, pull, repairAttempt = 0, dryRun = false },
+  dependencies = {},
+) {
+  const decision = gateRepairDecision(artifact, repairAttempt);
+  if (decision.state !== "native-fix") {
+    throw new AgentError("native no-mistakes fix is not eligible for publication", 1);
+  }
+  const execute = dependencies.runCommand ?? runCommand;
+  const readFile = dependencies.readFileSync ?? readFileSync;
+  const patch = readFile(resolve(patchPath));
+  const patchSha256 = createHash("sha256").update(patch).digest("hex");
+  if (patchSha256 !== artifact.nativeFix.patchSha256) {
+    throw new AgentError("native no-mistakes fix patch digest does not match", 1);
+  }
+  const expectedHead = artifact.expectedHead;
+  if (pull.head.sha !== expectedHead) {
+    throw new AgentError("PR head changed before native no-mistakes fixes could publish", 1);
+  }
+  const headRef = String(pull.head.ref ?? "");
+  if (!/^agent\/issue-\d+-[a-z0-9]+(?:-[a-z0-9]+)*$/.test(headRef)) {
+    throw new AgentError("native no-mistakes fix target branch is invalid", 1);
+  }
+  if (dryRun) {
+    return {
+      nextHead: "",
+      nextRepairAttempt: decision.nextAttempt,
+      paths: artifact.nativeFix.paths,
+      dryRun: true,
+    };
+  }
+  execute("gh", ["auth", "setup-git", "--hostname", "github.com"]);
+  execute("git", [
+    "fetch",
+    "--no-tags",
+    "origin",
+    `+refs/heads/${headRef}:refs/remotes/origin/${headRef}`,
+  ]);
+  const fetchedHead = execute("git", ["rev-parse", `refs/remotes/origin/${headRef}^{commit}`]).stdout.trim();
+  if (fetchedHead !== expectedHead) {
+    throw new AgentError("remote PR head changed before native no-mistakes fix application", 1);
+  }
+  execute("git", ["switch", "--detach", expectedHead]);
+  execute("git", ["apply", "--index", "--binary", resolve(patchPath)]);
+  const stagedPaths = execute("git", [
+    "diff",
+    "--cached",
+    "--name-only",
+    "--no-renames",
+    "-z",
+  ]).stdout
+    .split("\0")
+    .filter(Boolean);
+  if (
+    JSON.stringify(sortedUnique(stagedPaths)) !==
+    JSON.stringify(sortedUnique(artifact.nativeFix.paths))
+  ) {
+    throw new AgentError("native no-mistakes fix patch paths do not match its manifest", 1);
+  }
+  const privileged = privilegedCandidatePaths(stagedPaths);
+  if (privileged.length) {
+    throw new AgentError("native no-mistakes fix patch touched privileged candidate paths", 1, {
+      paths: privileged,
+    });
+  }
+  const stagedTree = execute("git", ["write-tree"]).stdout.trim();
+  if (stagedTree !== artifact.nativeFix.fixedTree) {
+    throw new AgentError("native no-mistakes fix tree does not match its isolated result", 1);
+  }
+  execute("git", ["config", "user.name", "github-actions[bot]"]);
+  execute("git", [
+    "config",
+    "user.email",
+    "41898282+github-actions[bot]@users.noreply.github.com",
+  ]);
+  execute("git", ["commit", "-m", "fix: apply no-mistakes review fixes"]);
+  const nextHead = execute("git", ["rev-parse", "HEAD"]).stdout.trim();
+  execute("git", [
+    "push",
+    "origin",
+    `HEAD:refs/heads/${headRef}`,
+    `--force-with-lease=refs/heads/${headRef}:${expectedHead}`,
+  ]);
+  const remoteHead = execute("git", ["ls-remote", "origin", `refs/heads/${headRef}`]).stdout
+    .trim()
+    .split(/\s+/)[0];
+  if (remoteHead !== nextHead) {
+    throw new AgentError("published no-mistakes fix does not match the remote PR head", 1);
+  }
+  return { nextHead, nextRepairAttempt: decision.nextAttempt, paths: stagedPaths };
+}
+
+function recordNativeFix({ artifact, config, nextHead, pull, repairAttempt, dryRun = false }) {
+  const runUrl = actionsRunUrl();
+  const status = setCommitStatus({
+    config,
+    sha: artifact.expectedHead,
+    state: "failure",
+    context: STATUS_CONTEXT,
+    description: "superseded by no-mistakes fixes",
+    targetUrl: runUrl,
+    dryRun,
+  });
+  const comment = upsertManagedComment({
+    config,
+    number: pull.number,
+    marker: noMistakesCommentMarker(config),
+    body: `## no-mistakes Gate
+
+Status: repaired
+Branch: ${pull.head.ref}
+Previous head: ${artifact.expectedHead}
+Next head: ${nextHead}
+${runUrl ? `Actions run: ${runUrl}\n` : ""}
+Native review auto-fix produced and published a credential-free patch.
+Fresh exact-head CI, independent review, and no-mistakes validation are required before merge.
+
+Structured gate:
+${markdownJsonBlock({
+  status: "repaired",
+  outcome: "native-fix",
+  runId: artifact.runId || "",
+  previousHead: artifact.expectedHead,
+  nextHead,
+  fixAttempt: readRepairAttempt(repairAttempt) + 1,
+  changedFiles: artifact.nativeFix.paths.length,
+})}`,
+    dryRun,
+  });
+  return { comment, status };
 }
 
 export function terminalHeadBinding(expectedHead, currentHead) {
@@ -799,6 +1123,7 @@ function setupFailureArtifact(expectedHead) {
     userApproved: false,
     failureStage: "",
     findings: [],
+    nativeFix: null,
   };
 }
 
@@ -858,6 +1183,8 @@ async function main() {
     const expectedHead = readExpectedHead(args["expected-head"]);
     const expectedRef = String(args["expected-ref"] ?? "").trim();
     const repoDir = resolve(String(args["repo-dir"] ?? ""));
+    const fixPatchPath = String(args["fix-patch"] ?? "").trim();
+    if (!fixPatchPath) throw new AgentError("missing --fix-patch", 2);
     const actualHead = runCommand("git", ["rev-parse", "HEAD"], {
       cwd: repoDir,
     }).stdout.trim();
@@ -910,7 +1237,13 @@ async function main() {
       `${run.stdout}\n${run.stderr}`.trim(),
       run.status,
     );
+    const nativeFix = createNativeFixPatch(
+      parsed,
+      expectedHead,
+      resolve(fixPatchPath),
+    );
     const artifact = sanitizedGateArtifact(parsed, expectedHead, {
+      nativeFix,
       userApproved,
       unpublishedChanges:
         postRunHead !== expectedHead ||
@@ -964,8 +1297,48 @@ async function main() {
     }
     const binding = terminalHeadBinding(expectedHead, pull.head.sha);
     const repair = gateRepairDecision(artifact, repairAttempt);
+    if (repair.state === "native-fix") {
+      const published = applyNativeFixPatch({
+        artifact,
+        config,
+        patchPath: args["fix-patch"],
+        pull,
+        repairAttempt,
+        dryRun,
+      });
+      setGitHubOutput({
+        "repair-action": repair.state,
+        "next-head": published.nextHead,
+        "next-repair-attempt": published.nextRepairAttempt,
+      });
+      let result;
+      try {
+        result = recordNativeFix({
+          artifact,
+          config,
+          nextHead: published.nextHead || "new exact-head commit created on publish",
+          pull,
+          repairAttempt,
+          dryRun,
+        });
+      } catch (error) {
+        result = { reportingError: error?.message ?? String(error) };
+      }
+      finish(
+        {
+          ok: true,
+          message: `${dryRun ? "would publish" : "published"} native no-mistakes fixes for PR #${prNumber}`,
+          outcome: artifact.outcome,
+          repair,
+          result,
+        },
+        Boolean(args.json),
+      );
+      return;
+    }
     setGitHubOutput({
       "repair-action": repair.state,
+      "next-head": "",
       "next-repair-attempt": repair.nextAttempt ?? "",
     });
     const result = recordTerminal({

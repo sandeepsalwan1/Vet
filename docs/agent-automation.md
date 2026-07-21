@@ -19,6 +19,7 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 - `agent:automerge`: allow merge only after every configured gate passes.
 - `agent:blocked`: human input or a failed gate blocks automation.
 - `priority:high`: manual review required.
+- `priority:trivial`: owner opt-in for trivial low-risk work; skip the paid no-mistakes model gate while keeping exact-head CI and agent review.
 - `priority:low`: small, low-risk work.
 
 ## Flow
@@ -33,13 +34,20 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 7. Review repeats the credential-free read/patch separation, applies safe fixes to the agent branch, waits for exact-head CI, and re-reviews for at most two repair cycles before invoking no-mistakes.
    If the no-mistakes client times out while its daemon is still reviewing, the gate reattaches to that exact active run instead of starting another model run.
    The no-mistakes client retries one malformed evaluator result inside the same isolated run; another malformed result blocks without starting a redundant full workflow.
-   Exact-head no-mistakes findings marked `auto-fix` return to the reviewer for at most two shared repair cycles, while `ask-user` findings and exhausted repair budgets block.
+   no-mistakes v1.40 receives the authoritative source issue and managed triage through `--intent`, performs native semantic review, and may run two native safe auto-fix rounds.
+   Native fixes run in a writable credential-free worktree and become a sealed patch artifact.
+   Before artifact upload, the gate rejects binary changes and any exact credential value inherited by the gate process.
+   A separate trusted job verifies the patch digest, paths, tree, original PR head, and explicit force-with-lease before publishing it.
+   Published fixes restart exact-head CI, independent review, and no-mistakes.
+   Remaining `auto-fix` findings may return to the independent reviewer within the shared bounded repair budget, while `ask-user` findings and exhausted repair budgets block.
 8. Proof runs configured commands and records provider/artifact evidence when remote visual proof is required.
 9. Automerge updates an eligible stale branch, reruns head-bound CI and review, and merges only after every gate passes on the new head.
 10. After a trusted merge, automerge resolves the exact merge commit, dispatches baseline CI and CodeQL for it, removes agent workflow labels, and closes the linked source issue while preserving priority labels.
 Trusted recovery dispatches main-defined workflows with an expected head SHA, and CI publishes required check runs on that exact candidate.
 
 Cost-sensitive routing lives in `.agent/config.json`.
+An issue carrying `priority:trivial` before implementation records that choice in immutable PR metadata and skips only the paid no-mistakes model gate.
+The trivial lane still requires trusted triage, exact-head CI, independent agent review, proof when requested, and automerge policy.
 All model lanes use GPT-5.4 mini because GPT-5.4 nano does not support the Codex action's required tool transport.
 Implementation, first-pass review, proposal, and triage use low reasoning; no-mistakes and bounded reviewer repair use medium reasoning after measured low-effort acceptance and structured-output failures.
 Increase a lane's model or reasoning only after measured contract failures.
@@ -99,7 +107,9 @@ Implementation creates `agent/issue-<number>-<slug>`, validates the patch, opens
 Review can apply a safe patch, reruns exact-head CI and review until clean within its bounded repair budget, requests proof when needed, publishes `agent-review`, then starts no-mistakes.
 After model review, a credential-free deterministic repair removes extra blank lines at EOF only when `git diff --check` identifies them in a safe, non-privileged text file.
 Malformed no-mistakes output retries once inside the same isolated run on the unchanged head.
-Actionable no-mistakes findings return to exact-head reviewer repair within the same two-cycle budget.
+no-mistakes uses the full issue plus trusted triage as authoritative implementation intent, reviews the branch, and applies safe native fixes when possible.
+Every native fix is published through the sealed exact-head handoff, then exact-head CI, independent review, and no-mistakes run again.
+Actionable findings left after native repair return to exact-head reviewer repair within the same two-cycle budget.
 Automerge waits for every configured gate, updates a stale branch from `main`, reruns head-bound gates, merges, dispatches baseline CI and CodeQL for the exact merge commit, closes the source issue, and removes workflow labels.
 If GitHub reports a stale-branch merge conflict, trusted automation creates a merge commit that preserves `main` in conflicting hunks, then sends the linked issue back through implementation, CI, review, proof when required, and no-mistakes so the issue behavior must be restored and verified before merge.
 Implementation advances a conflict-recovered zero-diff branch to its validated base only when the branch tree exactly matches the common-base tree, then applies the validated patch without discarding divergent work.
@@ -110,6 +120,17 @@ For an existing issue, start the same path with:
 gh issue edit <issue-number> --repo "$REPO" --add-label agent:implement
 ```
 
+For genuinely trivial low-risk work, add the cost label before the implementation label:
+
+```bash
+gh issue edit <issue-number> --repo "$REPO" --add-label priority:trivial
+gh issue edit <issue-number> --repo "$REPO" --add-label agent:implement
+```
+
+That explicit label skips only the paid no-mistakes model call.
+It does not skip triage, CI, independent review, requested proof, exact-head checks, or merge policy.
+Adding `priority:trivial` after implementation starts cannot bypass no-mistakes because the original source labels are sealed into the PR metadata.
+
 `agent:triage` remains available when an operator explicitly wants to request or rerun triage:
 
 ```bash
@@ -117,6 +138,20 @@ gh issue edit <issue-number> --repo "$REPO" --add-label agent:triage
 ```
 
 Neither label bypasses product, risk, security, migration, or data decisions.
+
+### Direct Owner Push Without Agent Gates
+
+This is an explicit manual escape hatch, not an AFK label lane.
+The current `main` branch protection does not enforce checks for repository administrators, so the repository owner can push directly.
+GitHub recognizes `[skip ci]` on a direct push and skips workflows triggered by that commit.
+
+```bash
+git commit -m "fix: <description> [skip ci]"
+git push origin HEAD:main
+```
+
+Use this only when intentionally bypassing agent review, no-mistakes, CI, and PR automation.
+Do not add an automation label that silently weakens the normal AFK path.
 
 ### Ask The Proposer For Candidates
 
@@ -186,6 +221,7 @@ Successful low-risk completion has these observable results:
 
 - required CI checks pass: `quality`, `build`, `scenarios`, `audit`, and `dependency-review`;
 - commit statuses pass: `agent-review` and `no-mistakes`;
+- `priority:trivial` completion requires `agent-review` but intentionally has no no-mistakes status;
 - `agent-proof` passes when proof is required;
 - the PR is merged and its agent branch is deleted;
 - baseline CI and CodeQL are dispatched against the exact merge commit;
@@ -203,8 +239,8 @@ Read the newest managed agent comment, answer the decision, or use the exact-hea
 - Optional orchestration reference: Sandcastle demonstrates label-driven AFK orchestration patterns and remains an optional worker adapter.
 - OpenClaw execution reference: Crabbox is the execution and computer-use proof host pattern; credential-free visual fallback runs in a Crabbox local container on GitHub Actions.
 - Implementation and review use GPT-5.4 mini with low reasoning; no-mistakes uses the same mini model with medium reasoning for its stricter structured gate contract.
-- Required final gate: exact-head no-mistakes status with default `ask-user` blocking.
-- Safe merge: low or medium risk only after CI, review, required proof, and no-mistakes pass.
+- Required final gate: exact-head no-mistakes status with default `ask-user` blocking, except the immutable owner-selected `priority:trivial` cost lane.
+- Safe merge: low or medium risk only after CI, review, required proof, and no-mistakes pass, with the documented trivial-lane exception.
 - Human boundary: high priority, high risk, unclear product decisions, missing required proof, and unapproved `ask-user` results never auto-merge.
 - Cost boundary: eight active jobs by default, fifteen hard maximum, no scheduled implementation, and visual infrastructure only when explicitly needed.
 
@@ -217,15 +253,20 @@ Read the newest managed agent comment, answer the decision, or use the exact-hea
 - High-risk or high-priority work requires human review.
 - A missing provider, artifact, or lease blocks required visual proof; it does not fake success.
 - Credentialed Crabbox providers require readiness proof; built-in `local-container` receives no provider credentials and must pass the same route, lease, desktop, and media checks.
-- no-mistakes and proof statuses must reflect real execution.
-- The credentialless no-mistakes gate runs only semantic review and never rebases, edits documentation, lints, or publishes changes; deterministic scenario, API, and CLI checks may provide direct non-visual evidence when the trusted request calls for it.
+- no-mistakes and proof statuses must reflect real execution; the trivial lane omits the no-mistakes status instead of faking success.
+- The credentialless no-mistakes gate runs semantic review and native safe auto-fix only.
+- It never rebases, edits privileged automation paths, lints, or publishes directly.
+- A trusted exact-head job alone may publish its sealed patch.
+- Deterministic scenario, API, and CLI checks may provide direct non-visual evidence when the trusted request calls for it.
 - Trusted exact-head CI owns typecheck, build, scenarios, lint, dead-code, duplicate-code, audit, and dependency validation before semantic review.
-- A credential-free step also runs the trusted typecheck, build, and scenario baseline inside a pinned networkless container before no-mistakes model auth; its Codex process stays read-only, performs each model stage directly without nested review or validation tools, and unpublished source changes fail closed.
+- A credential-free step also runs the trusted typecheck, build, and scenario baseline inside a pinned networkless container before no-mistakes model auth.
+- Its Codex process can write only inside the isolated candidate worktree, performs each model stage directly without nested review or validation tools, and cannot receive GitHub publication credentials.
 - Browser, visual, and live-provider evidence remains the Agent Proof workflow's responsibility and is required only by trusted issue or triage policy.
 
 ## Gates
 
 Normal automerge requires CI checks `quality`, `build`, `scenarios`, `audit`, and `dependency-review`, plus `agent-review` and `no-mistakes` statuses.
+The `priority:trivial` lane requires the same CI and review but omits no-mistakes only when that label exists in immutable implementation metadata and on both the current issue and PR.
 `agent-proof` is also required when trusted labels or managed triage request visual proof.
 After an agent PR merges, automerge explicitly dispatches baseline CI and CodeQL against the exact merge commit.
 This explicit dispatch is required because GitHub suppresses recursive workflow events caused by its workflow token.

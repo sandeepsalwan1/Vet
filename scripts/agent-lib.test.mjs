@@ -21,6 +21,7 @@ import {
   newestManagedComment,
   parseImplementationMetadata,
   privilegedCandidatePaths,
+  skipsNoMistakesForCost,
   trustedManagedComment,
   upsertManagedComment
 } from "./agent-lib.mjs";
@@ -791,6 +792,38 @@ test("trusted agent pull requires exact bot-authored implementation provenance",
   assert.throws(
     () => assertTrustedAgentPull(pull, trustConfig, { files: [{ filename: "src/CLAUDE.md" }] }),
     /privileged candidate paths/
+  );
+});
+
+test("cost-sensitive no-mistakes skip requires immutable and current trivial labels", () => {
+  const costConfig = { labels: { priorityTrivial: "priority:trivial" } };
+  const metadata = {
+    automergeEligible: true,
+    sourceLabels: ["agent:automerge", "priority:trivial"],
+  };
+  assert.equal(
+    skipsNoMistakesForCost(costConfig, {
+      metadata,
+      pullLabels: ["priority:trivial"],
+      sourceLabels: ["priority:trivial"],
+    }),
+    true,
+  );
+  assert.equal(
+    skipsNoMistakesForCost(costConfig, {
+      metadata,
+      pullLabels: [],
+      sourceLabels: ["priority:trivial"],
+    }),
+    false,
+  );
+  assert.equal(
+    skipsNoMistakesForCost(costConfig, {
+      metadata: { ...metadata, sourceLabels: ["agent:automerge"] },
+      pullLabels: ["priority:trivial"],
+      sourceLabels: ["priority:trivial"],
+    }),
+    false,
   );
 });
 

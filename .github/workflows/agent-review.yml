@@ -213,6 +213,8 @@ jobs:
       pull-requests: write
       issues: write
       statuses: write
+    outputs:
+      next-gate: ${{ steps.apply.outputs.next-gate }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -227,6 +229,7 @@ jobs:
           name: agent-review-result-${{ inputs.pr-number }}
           path: .agent-output
       - name: Apply review result
+        id: apply
         env:
           GH_TOKEN: ${{ github.token }}
           REVIEWED_HEAD_SHA: ${{ needs.prepare-review.outputs.reviewed-head-sha }}
@@ -240,7 +243,7 @@ jobs:
           --json
 
   dispatch-no-mistakes:
-    name: dispatch no-mistakes
+    name: dispatch final gate
     needs: apply-review
     if: needs.apply-review.result == 'success'
     runs-on: ubuntu-latest
@@ -254,6 +257,7 @@ jobs:
       - name: Dispatch standalone no-mistakes gate
         env:
           GH_TOKEN: ${{ github.token }}
+          NEXT_GATE: ${{ needs.apply-review.outputs.next-gate }}
           PR_NUMBER: ${{ inputs.pr-number }}
         run: |
           set -euo pipefail
@@ -281,13 +285,28 @@ jobs:
               exit 0
             fi
           done
-          gh workflow run agent-no-mistakes.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main \
-            -f pr-number="$PR_NUMBER" \
-            -f expected-head-sha="$head_sha" \
-            -f repair-attempt="${{ inputs.repair-attempt }}" \
-            -f intent='Validate the agent-created PR after automated review. The PR must satisfy its linked issue, preserve repo architecture, pass CI, and remain blocked rather than auto-merged if no-mistakes finds ask-user or high-risk issues.'
+          case "$NEXT_GATE" in
+            automerge)
+              gh workflow run agent-automerge.yml \
+                --repo "$GITHUB_REPOSITORY" \
+                --ref main \
+                -f pr-number="$PR_NUMBER" \
+                -f expected-head-sha="$head_sha"
+              ;;
+            no-mistakes)
+              gh workflow run agent-no-mistakes.yml \
+                --repo "$GITHUB_REPOSITORY" \
+                --ref main \
+                -f pr-number="$PR_NUMBER" \
+                -f expected-head-sha="$head_sha" \
+                -f repair-attempt="${{ inputs.repair-attempt }}" \
+                -f intent='Validate the agent-created PR after automated review. The PR must satisfy its linked issue, preserve repo architecture, pass CI, and remain blocked rather than auto-merged if no-mistakes finds ask-user or high-risk issues.'
+              ;;
+            *)
+              echo "Unknown final gate: $NEXT_GATE" >&2
+              exit 1
+              ;;
+          esac
 
   report-review-failure:
     name: report-review-failure

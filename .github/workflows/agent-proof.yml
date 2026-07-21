@@ -177,10 +177,10 @@ jobs:
           download="$RUNNER_TEMP/crabbox-download"
           bin="$RUNNER_TEMP/crabbox-bin"
           mkdir -p "$download" "$bin"
-          if ! curl -fsSLo "$download/crabbox_0.38.4_linux_amd64.tar.gz" \
-            https://github.com/openclaw/crabbox/releases/download/v0.38.4/crabbox_0.38.4_linux_amd64.tar.gz || \
+          if ! curl -fsSLo "$download/crabbox_0.40.0_linux_amd64.tar.gz" \
+            https://github.com/openclaw/crabbox/releases/download/v0.40.0/crabbox_0.40.0_linux_amd64.tar.gz || \
             ! curl -fsSLo "$download/checksums.txt" \
-            https://github.com/openclaw/crabbox/releases/download/v0.38.4/checksums.txt; then
+            https://github.com/openclaw/crabbox/releases/download/v0.40.0/checksums.txt; then
             echo "Crabbox download unavailable; proof script will use its configured fallback."
             exit 0
           fi
@@ -188,7 +188,7 @@ jobs:
             echo "Crabbox checksum verification failed; proof script will use its configured fallback."
             exit 0
           fi
-          tar -xzf "$download/crabbox_0.38.4_linux_amd64.tar.gz" -C "$bin"
+          tar -xzf "$download/crabbox_0.40.0_linux_amd64.tar.gz" -C "$bin"
           chmod 755 "$bin/crabbox"
           echo "$bin" >> "$GITHUB_PATH"
       - name: Install Vercel Sandbox bridge without provider credentials
