@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  browserLaunchArgs,
   browserRouteMarker,
   browserRouteMarkerArgs,
   buildRunArgs,
@@ -219,6 +220,26 @@ test("per-route browser evidence is remote, exact, and direct-2xx only", () => {
     () => validateBrowserLaunchOutput("launched: chromium http://127.0.0.1:3000/wrong\n", "/request"),
     /no command evidence/
   );
+});
+
+test("local-container browser launch uses container-safe Chromium flags", () => {
+  assert.deepEqual(browserLaunchArgs({ provider: "local-container", leaseId: "cbx_123", route: "/request" }), [
+    "desktop",
+    "launch",
+    "--provider",
+    "local-container",
+    "--id",
+    "cbx_123",
+    "--browser",
+    "--fullscreen",
+    "--url",
+    "http://127.0.0.1:3000/request",
+    "--",
+    "/usr/local/bin/crabbox-browser",
+    "--no-sandbox",
+    "--disable-dev-shm-usage"
+  ]);
+  assert.equal(browserLaunchArgs({ provider: "hetzner", leaseId: "cbx_123", route: "/request" }).includes("--no-sandbox"), false);
 });
 
 test("remote implementation requires an explicitly ready Vercel provider", () => {

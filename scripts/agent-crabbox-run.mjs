@@ -415,6 +415,25 @@ export function validateBrowserLaunchOutput(output, route) {
   return evidence;
 }
 
+export function browserLaunchArgs({ provider, leaseId, route }) {
+  const args = [
+    "desktop",
+    "launch",
+    "--provider",
+    provider,
+    "--id",
+    leaseId,
+    "--browser",
+    "--fullscreen",
+    "--url",
+    `http://127.0.0.1:3000${route}`
+  ];
+  if (provider === "local-container") {
+    args.push("--", "/usr/local/bin/crabbox-browser", "--no-sandbox", "--disable-dev-shm-usage");
+  }
+  return args;
+}
+
 export function recoverLeaseHandle(path, expectedProvider) {
   if (!existsSync(path)) return null;
   try {
@@ -555,18 +574,7 @@ export function runCrabboxLane({
 
         const launch = runCommand(
           "crabbox",
-          [
-            "desktop",
-            "launch",
-            "--provider",
-            selection.provider,
-            "--id",
-            leaseId,
-            "--browser",
-            "--fullscreen",
-            "--url",
-            `http://127.0.0.1:3000${route}`
-          ],
+          browserLaunchArgs({ provider: selection.provider, leaseId, route }),
           { check: false, env: childEnv, cwd: workdir }
         );
         writeFileSync(logPath, redactSecrets(`\n${launch.stdout}\n${launch.stderr}`, config, env), { flag: "a", mode: 0o600 });
