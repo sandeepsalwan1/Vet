@@ -399,6 +399,7 @@ export function assertTrustedAgentPull(pull, config, options = {}, dependencies 
       throw new AgentError("source issue changed after trusted triage", 1);
     }
   }
+  const commitLookup = dependencies.ghApiJson ?? null;
   const commitCheck = runCommand("git", ["cat-file", "-e", `${pull.head.sha}^{commit}`], { check: false });
   if (commitCheck.status === 0) {
     const commitMetadata = parseImplementationMetadata(
@@ -407,8 +408,8 @@ export function assertTrustedAgentPull(pull, config, options = {}, dependencies 
     if (JSON.stringify(commitMetadata) !== JSON.stringify(metadata)) {
       throw new AgentError("implementation metadata does not match the trusted head commit", 1);
     }
-  } else if (dependencies.ghApiJson) {
-    const commit = dependencies.ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/commits/${pull.head.sha}`);
+  } else if (commitLookup) {
+    const commit = commitLookup(`repos/${config.repo.owner}/${config.repo.name}/commits/${pull.head.sha}`);
     const commitMetadata = parseImplementationMetadata(commit?.commit?.message);
     if (JSON.stringify(commitMetadata) !== JSON.stringify(metadata)) {
       throw new AgentError("implementation metadata does not match the trusted head commit", 1);

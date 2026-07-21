@@ -117,13 +117,13 @@ export async function waitForRequiredChecks(config, prNumber, expectedHeadSha, d
   });
 }
 
-function fetchPull(config, prNumber) {
+function fetchPull(config, prNumber, dependencies = {}) {
   const { pull, files } = getPullSnapshot(config, prNumber);
   const trust = assertTrustedAgentPull(pull, config, {
     files,
     rejectPrivilegedPaths: true,
     allowEmptyFiles: true
-  });
+  }, dependencies);
   const issue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${prNumber}`);
   const comments = getIssueComments(config, prNumber);
   return { pull, issue, comments, files, trust };
@@ -248,8 +248,8 @@ export function requireManagedTriageComment(comments, marker, sourceIssueNumber,
   return triageComment;
 }
 
-function writePrompt(config, prNumber, outputPath, expectedHeadSha) {
-  const { pull, issue, comments, files } = fetchPull(config, prNumber);
+function writePrompt(config, prNumber, outputPath, expectedHeadSha, dependencies = {}) {
+  const { pull, issue, comments, files } = fetchPull(config, prNumber, dependencies);
   assertReviewedHead(pull, expectedHeadSha);
   const closing = ghReadJson([
     "pr",
@@ -267,7 +267,7 @@ function writePrompt(config, prNumber, outputPath, expectedHeadSha) {
     sourceIssue,
     rejectPrivilegedPaths: true,
     allowEmptyFiles: true
-  });
+  }, dependencies);
   const sourceComments = getIssueComments(config, sourceIssueNumber);
   const triageComment = requireManagedTriageComment(
     sourceComments,
@@ -432,7 +432,7 @@ export function dispatchPullSecurity(
         `repos/${config.repo.owner}/${config.repo.name}/issues/${number}`,
       ));
   const dispatch = dependencies.dispatchWorkflow ?? dispatchWorkflow;
-  const snapshot = fetchSnapshot(config, prNumber);
+  const snapshot = fetchSnapshot(config, prNumber, dependencies);
   assertReviewedHead(snapshot.pull, expectedHeadSha);
   const sourceIssue = fetchSourceIssue(snapshot.trust.sourceIssue);
   assertTrustedAgentPull(snapshot.pull, config, {
@@ -440,7 +440,7 @@ export function dispatchPullSecurity(
     sourceIssue,
     rejectPrivilegedPaths: true,
     allowEmptyFiles: true,
-  });
+  }, dependencies);
   return dispatch(
     config,
     "codeql.yml",
@@ -827,7 +827,7 @@ async function main() {
       {
         ok: true,
         message: `wrote review prompt for #${prNumber}`,
-        ...writePrompt(config, prNumber, args["write-prompt"], args["expected-head-sha"])
+        ...writePrompt(config, prNumber, args["write-prompt"], args["expected-head-sha"], { ghApiJson })
       },
       Boolean(args.json)
     );
@@ -868,6 +868,7 @@ async function main() {
           config,
           prNumber,
           args["expected-head-sha"],
+          { ghApiJson },
         ),
       },
       Boolean(args.json),

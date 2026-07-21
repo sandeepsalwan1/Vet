@@ -86,11 +86,11 @@ export function implementationMetadata(body) {
   return parseImplementationMetadata(body);
 }
 
-export function assertTrustedAgentPull(pull, config, files) {
+export function assertTrustedAgentPull(pull, config, files, dependencies = {}) {
   return assertSharedTrustedAgentPull(pull, config, {
     files,
     rejectPrivilegedPaths: true,
-  });
+  }, dependencies);
 }
 
 export function selectTrustedManagedTriageComment(comments, marker, repoOwner) {
@@ -637,9 +637,9 @@ function fetchPullSnapshot(config, prNumber) {
   return getPullSnapshot(config, prNumber);
 }
 
-function fetchTrustedPull(config, prNumber) {
+function fetchTrustedPull(config, prNumber, dependencies = {}) {
   const snapshot = fetchPullSnapshot(config, prNumber);
-  const trust = assertTrustedAgentPull(snapshot.pull, config, snapshot.files);
+  const trust = assertTrustedAgentPull(snapshot.pull, config, snapshot.files, dependencies);
   return { ...snapshot, trust };
 }
 
@@ -1172,7 +1172,7 @@ async function main() {
     if (!Number.isInteger(prNumber)) {
       throw new AgentError("missing --pr-number", 2);
     }
-    const snapshot = fetchTrustedPull(config, prNumber);
+    const snapshot = fetchTrustedPull(config, prNumber, { ghApiJson });
     const { pull, trust } = snapshot;
     const expectedHead = readExpectedHead(args["expected-head"]);
     if (pull.head.sha !== expectedHead) {
@@ -1194,7 +1194,7 @@ async function main() {
       throw new AgentError("missing --pr-number", 2);
     }
     const expectedHead = readExpectedHead(args["expected-head"]);
-    const snapshot = fetchTrustedPull(config, prNumber);
+    const snapshot = fetchTrustedPull(config, prNumber, { ghApiJson });
     const { pull, trust } = snapshot;
     if (pull.head.sha !== expectedHead) {
       throw new AgentError("PR head changed after the pending status", 1);
@@ -1310,7 +1310,7 @@ async function main() {
     const expectedHead = readExpectedHead(args["expected-head"]);
     readInfrastructureRetry(args["infrastructure-retry"]);
     const repairAttempt = readRepairAttempt(args["repair-attempt"]);
-    const snapshot = fetchTrustedPull(config, prNumber);
+    const snapshot = fetchTrustedPull(config, prNumber, { ghApiJson });
     const { pull, trust } = snapshot;
     const context = fetchIntentContext(config, trust.sourceIssue);
     assertTrustedIntentSource(config, snapshot, context);

@@ -525,7 +525,7 @@ export function trustedClosingIssueNumbers(closingReferences, config) {
   ];
 }
 
-export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments, combined, checks, files, closingReferences }) {
+export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments, combined, checks, files, closingReferences }, dependencies = {}) {
   const prLabels = issueLabels(pullIssue);
   const sourceLabels = issueLabels(sourceIssue ?? {});
   const policyBlockers = [];
@@ -545,7 +545,7 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
       files,
       rejectPrivilegedPaths: true,
       allowEmptyFiles: true
-    });
+    }, dependencies);
     trustedPull = true;
   } catch (error) {
     policyBlockers.push(error.message);
@@ -580,7 +580,7 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
         sourceIssue,
         rejectPrivilegedPaths: true,
         allowEmptyFiles: true
-      });
+      }, dependencies);
     } catch (error) {
       policyBlockers.push(error.message);
     }
@@ -1070,7 +1070,7 @@ async function main() {
   if (!config.automerge.requiredLabels.some((label) => prLabels.includes(label))) {
     try {
       assertTrustedAgentPull(pull, config, { files, rejectPrivilegedPaths: true });
-    } catch {
+  } catch {
       finish({ ok: true, message: `ignored non-agent PR #${prNumber}` }, Boolean(args.json));
       return;
     }
@@ -1110,7 +1110,7 @@ async function main() {
     checks,
     files,
     closingReferences
-  });
+  }, { ghApiJson });
 
   const baseState = decision.allowed || decision.staleRecoveryAllowed
     ? resolveBaseState({ config, pull })
