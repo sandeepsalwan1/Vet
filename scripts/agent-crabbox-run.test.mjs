@@ -249,6 +249,7 @@ test("credential-free visual dry-run requests Crabbox desktop and browser", () =
   assert.ok(result.crabboxCommand.includes("--desktop"));
   assert.ok(result.crabboxCommand.includes("--browser"));
   assert.ok(result.crabboxCommand.includes("--keep"));
+  assert.equal(result.crabboxCommand.includes("--lease-output"), false);
   assert.equal(result.crabboxCommand.some((value) => /TOKEN|API_KEY/.test(value)), false);
 });
 

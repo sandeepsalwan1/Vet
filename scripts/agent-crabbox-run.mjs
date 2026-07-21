@@ -319,7 +319,8 @@ export function buildRunArgs({ provider, command, visual, lane, leasePath, noSyn
     );
   }
   if (visual) {
-    args.push("--desktop", "--browser", "--keep", "--keep-on-failure", "--lease-output", leasePath);
+    args.push("--desktop", "--browser", "--keep", "--keep-on-failure");
+    if (provider !== "local-container") args.push("--lease-output", leasePath);
   } else if (provider !== "vercel-sandbox") {
     args.push("--stop-after", "always");
   }
@@ -530,7 +531,10 @@ export function runCrabboxLane({
 
     if (visual) {
       validateProbedRoutes(run.stdout, routes);
-      const session = verifySession(recoverLeaseHandle(leasePath, selection.provider), timing, selection.provider);
+      const session =
+        selection.provider === "local-container"
+          ? { provider: selection.provider, leaseId: timing.leaseId, kept: true }
+          : verifySession(recoverLeaseHandle(leasePath, selection.provider), timing, selection.provider);
       leaseId = session.leaseId;
       for (const [index, route] of routes.entries()) {
         const markerRun = runCommand(
