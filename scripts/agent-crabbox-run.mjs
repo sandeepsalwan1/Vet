@@ -358,6 +358,22 @@ function artifactArgs({ provider, leaseId, outputDir, proofKind }) {
   return args;
 }
 
+export function gifEncoderBootstrapCommands({
+  proofKind,
+  ffmpegAvailable = commandExists("ffmpeg"),
+  platform = process.platform,
+  githubActions = process.env.GITHUB_ACTIONS
+}) {
+  if (proofKind !== "GIF" || ffmpegAvailable) return [];
+  if (platform !== "linux" || githubActions !== "true") {
+    throw new AgentError("ffmpeg is required on the host for Crabbox GIF proof", 1);
+  }
+  return [
+    ["sudo", ["apt-get", "update"]],
+    ["sudo", ["apt-get", "install", "-y", "--no-install-recommends", "ffmpeg"]]
+  ];
+}
+
 function safeArtifactSlug(route, index) {
   const slug = route.replace(/^\/+/, "").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "");
   return slug || `root-${index + 1}`;
@@ -559,6 +575,21 @@ export function runCrabboxLane({
           ? { provider: selection.provider, leaseId: timing.leaseId, kept: true }
           : verifySession(recoverLeaseHandle(leasePath, selection.provider), timing, selection.provider);
       leaseId = session.leaseId;
+      for (const [bootstrapCommand, bootstrapArgs] of gifEncoderBootstrapCommands({
+        proofKind,
+        githubActions: env.GITHUB_ACTIONS
+      })) {
+        const bootstrap = runCommand(bootstrapCommand, bootstrapArgs, {
+          check: false,
+          env: childEnv,
+          cwd: workdir
+        });
+        writeFileSync(logPath, redactSecrets(`\n${bootstrap.stdout}\n${bootstrap.stderr}`, config, env), {
+          flag: "a",
+          mode: 0o600
+        });
+        if (bootstrap.status !== 0) throw new AgentError("Could not install the host GIF encoder", 1);
+      }
       for (const [index, route] of routes.entries()) {
         const markerRun = runCommand(
           "crabbox",

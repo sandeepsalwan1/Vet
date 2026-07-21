@@ -9,6 +9,7 @@ import {
   browserRouteMarker,
   browserRouteMarkerArgs,
   buildRunArgs,
+  gifEncoderBootstrapCommands,
   parseTimingReport,
   providerChildEnvironment,
   recoverLeaseHandle,
@@ -44,6 +45,49 @@ const pngData = Buffer.concat([
 ]);
 const gifData = Buffer.from("GIF89a fixture");
 const mp4Data = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from("ftypisomfixture")]);
+
+test("GIF proof bootstraps its host encoder only on GitHub Linux", () => {
+  assert.deepEqual(
+    gifEncoderBootstrapCommands({
+      proofKind: "GIF",
+      ffmpegAvailable: false,
+      platform: "linux",
+      githubActions: "true"
+    }),
+    [
+      ["sudo", ["apt-get", "update"]],
+      ["sudo", ["apt-get", "install", "-y", "--no-install-recommends", "ffmpeg"]]
+    ]
+  );
+  assert.deepEqual(
+    gifEncoderBootstrapCommands({
+      proofKind: "UI",
+      ffmpegAvailable: false,
+      platform: "linux",
+      githubActions: "true"
+    }),
+    []
+  );
+  assert.deepEqual(
+    gifEncoderBootstrapCommands({
+      proofKind: "GIF",
+      ffmpegAvailable: true,
+      platform: "darwin",
+      githubActions: undefined
+    }),
+    []
+  );
+  assert.throws(
+    () =>
+      gifEncoderBootstrapCommands({
+        proofKind: "GIF",
+        ffmpegAvailable: false,
+        platform: "darwin",
+        githubActions: undefined
+      }),
+    /ffmpeg is required/
+  );
+});
 
 function writeRouteBinding(dir, overrides = {}) {
   const value = {
