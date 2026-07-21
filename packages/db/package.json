@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@next/env": "^16.0.0",
+    "@next/env": "^16.2.11",
     "postgres": "^3.4.7"
   },
   "devDependencies": {
