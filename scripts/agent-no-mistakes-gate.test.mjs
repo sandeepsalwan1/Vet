@@ -148,9 +148,11 @@ test("authenticated reviewer auto-fixes only inside the credential-free sealed h
   assert.match(workflow, /--repo "\$GITHUB_REPOSITORY"/);
   assert.match(workflow, /-f pr-number="\$\{\{ inputs\.pr-number \}\}"/);
   assert.match(workflow, /-f expected-head-sha="\$\{\{ needs\.prepare\.outputs\.head_sha \}\}"/);
+  assert.match(workflow, /gh workflow run agent-proof\.yml/);
   assert.match(workflow, /dispatch-automerge:\n[\s\S]*?needs:\n\s+- prepare\n\s+- finalize/);
   assert.match(workflow, /repair-attempt:/);
   assert.match(workflow, /dispatch-repair:\n[\s\S]*?gh workflow run agent-review\.yml/);
+  assert.match(workflow, /-f repair-attempt=0/);
   assert.match(workflow, /needs\.finalize\.outputs\.repair-action == 'retry'/);
   assert.doesNotMatch(workflow, /retry-infrastructure:/);
   assert.doesNotMatch(workflow, /-f infrastructure-retry=1/);
