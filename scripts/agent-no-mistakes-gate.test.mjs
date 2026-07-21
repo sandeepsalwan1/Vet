@@ -11,6 +11,7 @@ import {
   assertTrustedAgentPull,
   composeEffectiveIntent,
   createNativeFixPatch,
+  finalizeNativeFixPublication,
   gateEnvironment,
   gateLabelChanges,
   gateRepairDecision,
@@ -149,6 +150,8 @@ test("authenticated reviewer auto-fixes only inside the credential-free sealed h
   assert.match(workflow, /-f pr-number="\$\{\{ inputs\.pr-number \}\}"/);
   assert.match(workflow, /-f expected-head-sha="\$\{\{ needs\.prepare\.outputs\.head_sha \}\}"/);
   assert.match(workflow, /gh workflow run agent-proof\.yml/);
+  assert.match(workflow, /source_issue="\$\(/);
+  assert.match(workflow, /gh issue view "\$source_issue" --repo "\$GITHUB_REPOSITORY" --json labels/);
   assert.match(workflow, /dispatch-automerge:\n[\s\S]*?needs:\n\s+- prepare\n\s+- finalize/);
   assert.match(workflow, /repair-attempt:/);
   assert.match(workflow, /dispatch-repair:\n[\s\S]*?gh workflow run agent-review\.yml/);
@@ -257,6 +260,26 @@ test("trusted publication reapplies the sealed tree with an exact-head lease", (
           `--force-with-lease=refs/heads/${fixture.branch}:${fixture.baseHead}`,
         ),
     ),
+  );
+});
+
+test("native fix publication fails closed on publish errors", () => {
+  const fixture = nativeFixFixture();
+  assert.throws(
+    () =>
+      finalizeNativeFixPublication({
+        artifact: fixture.artifact,
+        config,
+        pull: { number: 42, head: { ref: fixture.branch, sha: fixture.baseHead } },
+        repairAttempt: 0,
+        patchPath: fixture.patchPath,
+        applyPatch: () => ({ nextHead: fixture.fixedHead, nextRepairAttempt: 1, paths: fixture.artifact.nativeFix.paths }),
+        recordFix: () => {
+          throw new Error("publish failed");
+        },
+        setOutput: () => {},
+      }),
+    /publish failed/,
   );
 });
 

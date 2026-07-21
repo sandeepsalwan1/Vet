@@ -922,6 +922,41 @@ ${markdownJsonBlock({
   return { comment, status };
 }
 
+export function finalizeNativeFixPublication({
+  artifact,
+  config,
+  pull,
+  repairAttempt,
+  patchPath,
+  dryRun = false,
+  applyPatch = applyNativeFixPatch,
+  recordFix = recordNativeFix,
+  setOutput = setGitHubOutput,
+}) {
+  const published = applyPatch({
+    artifact,
+    config,
+    patchPath,
+    pull,
+    repairAttempt,
+    dryRun,
+  });
+  setOutput({
+    "repair-action": "native-fix",
+    "next-head": published.nextHead,
+    "next-repair-attempt": published.nextRepairAttempt,
+  });
+  const result = recordFix({
+    artifact,
+    config,
+    nextHead: published.nextHead || "new exact-head commit created on publish",
+    pull,
+    repairAttempt,
+    dryRun,
+  });
+  return { published, result };
+}
+
 export function terminalHeadBinding(expectedHead, currentHead) {
   if (!/^[0-9a-f]{40}$/.test(String(expectedHead ?? ""))) {
     throw new AgentError("terminal status head is invalid", 2);
@@ -1298,32 +1333,14 @@ async function main() {
     const binding = terminalHeadBinding(expectedHead, pull.head.sha);
     const repair = gateRepairDecision(artifact, repairAttempt);
     if (repair.state === "native-fix") {
-      const published = applyNativeFixPatch({
+      const { result } = finalizeNativeFixPublication({
         artifact,
         config,
-        patchPath: args["fix-patch"],
         pull,
         repairAttempt,
+        patchPath: args["fix-patch"],
         dryRun,
       });
-      setGitHubOutput({
-        "repair-action": repair.state,
-        "next-head": published.nextHead,
-        "next-repair-attempt": published.nextRepairAttempt,
-      });
-      let result;
-      try {
-        result = recordNativeFix({
-          artifact,
-          config,
-          nextHead: published.nextHead || "new exact-head commit created on publish",
-          pull,
-          repairAttempt,
-          dryRun,
-        });
-      } catch (error) {
-        result = { reportingError: error?.message ?? String(error) };
-      }
       finish(
         {
           ok: true,

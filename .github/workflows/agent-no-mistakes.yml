@@ -465,6 +465,23 @@ jobs:
             -f expected-head-sha="$HEAD_SHA" \
             -f repair-attempt=0
           proof_requested="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name] | any(. == "agent:proof")')"
+          if [ "$proof_requested" != "true" ]; then
+            pr_body="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
+            source_issue="$(
+              PR_BODY="$pr_body" node --input-type=module <<'NODE'
+const body = process.env.PR_BODY ?? "";
+const marker = "<!-- agent-implementation:v1 -->";
+const markerIndex = body.indexOf(marker);
+if (markerIndex === -1) process.exit(1);
+const match = body.slice(markerIndex + marker.length).match(/```json\s*([\s\S]*?)```/);
+if (!match) process.exit(1);
+const metadata = JSON.parse(match[1]);
+if (!Number.isInteger(metadata.sourceIssue) || metadata.sourceIssue <= 0) process.exit(1);
+process.stdout.write(String(metadata.sourceIssue));
+NODE
+            )"
+            proof_requested="$(gh issue view "$source_issue" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name] | any(. == "agent:proof")')"
+          fi
           if [ "$proof_requested" = "true" ]; then
             gh workflow run agent-proof.yml \
               --repo "$GITHUB_REPOSITORY" \
