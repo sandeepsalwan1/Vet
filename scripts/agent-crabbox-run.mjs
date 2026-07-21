@@ -25,6 +25,8 @@ import {
 } from "./agent-lib.mjs";
 
 const VISUAL_LANES = new Set(["visualProof", "gifProof"]);
+const LOCAL_CONTAINER_VISUAL_IMAGE =
+  "node:22-bookworm@sha256:5647be709086c696ff32edaaf1c70cd26d1da6ab2b39c32f3c7b4c4a31957e37";
 
 function redactSecrets(text, config, env = process.env) {
   let redacted = String(text ?? "");
@@ -254,7 +256,8 @@ export function validateRouteBinding(path, { bundleDir, provider, leaseId, route
     binding?.launchMarker !== launchMarker ||
     binding?.launchEvidence !== launchEvidence ||
     binding?.launchStatus !== 0 ||
-    binding?.desktopDoctorStatus !== 0
+    binding?.desktopDoctorStatus !== 0 ||
+    binding?.computerUseStatus !== 0
   ) {
     throw new AgentError("Crabbox route binding does not match the captured route and lease", 1);
   }
@@ -307,6 +310,7 @@ export function validateCollectedArtifacts(
 
 export function buildRunArgs({ provider, command, visual, lane, leasePath, noSync = false }) {
   const args = ["run", "--provider", provider, "--timing-json", "--timing-record", "off"];
+  if (visual && provider === "local-container") args.push("--local-container-image", LOCAL_CONTAINER_VISUAL_IMAGE);
   if (noSync) args.push("--no-sync");
   if (lane === "implementRemote") {
     args.push(
@@ -551,7 +555,18 @@ export function runCrabboxLane({
 
         const launch = runCommand(
           "crabbox",
-          ["desktop", "launch", "--provider", selection.provider, "--id", leaseId, "--browser", "--url", `http://127.0.0.1:3000${route}`],
+          [
+            "desktop",
+            "launch",
+            "--provider",
+            selection.provider,
+            "--id",
+            leaseId,
+            "--browser",
+            "--fullscreen",
+            "--url",
+            `http://127.0.0.1:3000${route}`
+          ],
           { check: false, env: childEnv, cwd: workdir }
         );
         writeFileSync(logPath, redactSecrets(`\n${launch.stdout}\n${launch.stderr}`, config, env), { flag: "a", mode: 0o600 });
@@ -566,6 +581,17 @@ export function runCrabboxLane({
         writeFileSync(logPath, redactSecrets(`\n${doctor.stdout}\n${doctor.stderr}`, config, env), { flag: "a", mode: 0o600 });
         if (doctor.status !== 0) throw new AgentError(`Crabbox desktop did not settle for ${route}`, 1);
 
+        const computerUse = runCommand(
+          "crabbox",
+          ["desktop", "key", "--provider", selection.provider, "--id", leaseId, "--keys", "Home"],
+          { check: false, env: childEnv, cwd: workdir }
+        );
+        writeFileSync(logPath, redactSecrets(`\n${computerUse.stdout}\n${computerUse.stderr}`, config, env), {
+          flag: "a",
+          mode: 0o600
+        });
+        if (computerUse.status !== 0) throw new AgentError(`Crabbox computer input failed for ${route}`, 1);
+
         const bundleDir = join(
           outputDir,
           `crabbox-${lane}-${stamp}-${String(index + 1).padStart(2, "0")}-${safeArtifactSlug(route, index)}`
@@ -579,7 +605,8 @@ export function runCrabboxLane({
           launchMarker,
           launchEvidence,
           launchStatus: launch.status,
-          desktopDoctorStatus: doctor.status
+          desktopDoctorStatus: doctor.status,
+          computerUseStatus: computerUse.status
         });
         const collected = runCommand(
           "crabbox",

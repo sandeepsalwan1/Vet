@@ -53,6 +53,7 @@ function writeRouteBinding(dir, overrides = {}) {
     launchEvidence: "launched: chromium http://127.0.0.1:3000/request",
     launchStatus: 0,
     desktopDoctorStatus: 0,
+    computerUseStatus: 0,
     ...overrides
   };
   const path = join(dir, "route-binding.json");
@@ -250,6 +251,11 @@ test("credential-free visual dry-run requests Crabbox desktop and browser", () =
   assert.ok(result.crabboxCommand.includes("--browser"));
   assert.ok(result.crabboxCommand.includes("--keep"));
   assert.equal(result.crabboxCommand.includes("--lease-output"), false);
+  assert.ok(
+    result.crabboxCommand.includes(
+      "node:22-bookworm@sha256:5647be709086c696ff32edaaf1c70cd26d1da6ab2b39c32f3c7b4c4a31957e37"
+    )
+  );
   assert.equal(result.crabboxCommand.some((value) => /TOKEN|API_KEY/.test(value)), false);
 });
 
@@ -326,7 +332,8 @@ test("artifact verification rejects an arbitrary provider or lease claim", (t) =
       launchMarker: browserRouteMarker("/wrong"),
       launchEvidence: "launched: chromium http://127.0.0.1:3000/wrong",
       launchStatus: 0,
-      desktopDoctorStatus: 0
+      desktopDoctorStatus: 0,
+      computerUseStatus: 0
     })}\n`
   );
   assert.throws(() => validateCollectedArtifacts(bundle, options), /route binding does not match/);
