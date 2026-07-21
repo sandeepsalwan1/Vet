@@ -13,6 +13,7 @@ import {
   getIssueComments,
   getPullSnapshot,
   ghApiJson,
+  implementationCommitMessage,
   loadConfig,
   markdownJsonBlock,
   newestManagedComment,
@@ -865,7 +866,14 @@ export function applyNativeFixPatch(
     "user.email",
     "41898282+github-actions[bot]@users.noreply.github.com",
   ]);
-  execute("git", ["commit", "-m", "fix: apply no-mistakes review fixes"]);
+  execute("git", [
+    "commit",
+    "-m",
+    implementationCommitMessage(
+      "fix: apply no-mistakes review fixes",
+      parseImplementationMetadata(pull.body),
+    ),
+  ]);
   const nextHead = execute("git", ["rev-parse", "HEAD"]).stdout.trim();
   execute("git", [
     "push",

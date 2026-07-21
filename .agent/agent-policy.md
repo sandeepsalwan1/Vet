@@ -24,7 +24,7 @@ Automerge is allowed only when all are true:
 - computed risk is low or medium.
 - CI required checks pass.
 - reviewer status is passing.
-- no-mistakes status is passing, unless immutable implementation metadata and the current source issue and PR all contain `priority:trivial`.
+- no-mistakes status is passing, unless the pre-model validation artifact, immutable PR commit seal, and the current source issue and PR all contain `priority:trivial`.
 - required proof is present.
 - no unresolved human question remains.
 
@@ -66,5 +66,5 @@ Automerge is forbidden for high-priority or high-risk work even if all checks pa
 - Malformed evaluator output receives one exact-head infrastructure retry, then blocks if the retry also fails.
 - A manual rerun may carry explicit user approval only for its immutable expected head; later heads and ordinary runs still block on `ask-user`.
 - A passing approved rerun removes the blocked label and restores automerge for that head.
-- `priority:trivial` can bypass no-mistakes only when it was sealed before implementation and remains on the issue and PR.
+- `priority:trivial` can bypass no-mistakes only when it was sealed before model execution, remains in immutable PR commit ancestry, and remains on the issue and PR.
 - An eligible stale branch is updated by the trusted automerge workflow, then all head-bound CI and review gates run again before merge.

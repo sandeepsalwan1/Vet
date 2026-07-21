@@ -14,5 +14,5 @@ GitHub Actions workflows.
 - Do not expose OpenAI keys as job-level env vars. Pass them only to `openai/codex-action`.
 - Keep write-token jobs separate from Codex/API-key jobs.
 - Do not fake no-mistakes success; normal automerge requires a real status.
-- `priority:trivial` may omit no-mistakes only when sealed into implementation metadata and still present on the source issue and PR; CI and review remain required.
+- `priority:trivial` may omit no-mistakes only when sealed before model execution, preserved in immutable PR commit ancestry, and still present on the source issue and PR; CI and review remain required.
 - After a trusted agent merge, explicitly dispatch baseline CI and CodeQL against the immutable merge commit.

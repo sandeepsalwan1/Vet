@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { implementationCommitMessage, parseImplementationMetadata } from "./agent-lib.mjs";
 
 import {
   applyNativeFixPatch,
@@ -85,6 +86,7 @@ test("authenticated reviewer auto-fixes only inside the credential-free sealed h
   const repoConfig = readFileSync(new URL("../.no-mistakes.yaml", import.meta.url), "utf8");
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const gate = readFileSync(new URL("./agent-no-mistakes-gate.mjs", import.meta.url), "utf8");
+  const review = readFileSync(new URL("./agent-review.mjs", import.meta.url), "utf8");
 
   assert.match(workflow, /- --sandbox\s+- workspace-write/);
   assert.match(workflow, /auto_fix:\n\s+review: 2/);
@@ -149,11 +151,10 @@ test("authenticated reviewer auto-fixes only inside the credential-free sealed h
   assert.match(workflow, /--repo "\$GITHUB_REPOSITORY"/);
   assert.match(workflow, /-f pr-number="\$\{\{ inputs\.pr-number \}\}"/);
   assert.match(workflow, /-f expected-head-sha="\$\{\{ needs\.prepare\.outputs\.head_sha \}\}"/);
-  assert.match(workflow, /gh workflow run agent-proof\.yml/);
-  assert.match(workflow, /issues: read/);
-  assert.match(workflow, /commit_message="\$\(/);
-  assert.match(workflow, /gh api "repos\/\$GITHUB_REPOSITORY\/commits\/\$HEAD_SHA" --jq '.commit.message'/);
-  assert.match(workflow, /gh issue view "\$source_issue" --repo "\$GITHUB_REPOSITORY" --json labels/);
+  assert.doesNotMatch(workflow, /gh workflow run agent-proof\.yml/);
+  assert.match(review, /const proofRequested =/);
+  assert.match(review, /sourceLabels\.includes\(config\.labels\.proof\)/);
+  assert.match(review, /cycle\.state === "ready" && proofRequested && !dryRun/);
   assert.match(workflow, /dispatch-automerge:\n[\s\S]*?needs:\n\s+- prepare\n\s+- finalize/);
   assert.match(workflow, /repair-attempt:/);
   assert.match(workflow, /dispatch-repair:\n[\s\S]*?gh workflow run agent-review\.yml/);
@@ -240,7 +241,10 @@ test("trusted publication reapplies the sealed tree with an exact-head lease", (
       artifact: fixture.artifact,
       config,
       patchPath: fixture.patchPath,
-      pull: { number: 42, head: { ref: fixture.branch, sha: fixture.baseHead } },
+      pull: trustedPull({
+        number: 42,
+        head: { ref: fixture.branch, sha: fixture.baseHead },
+      }),
       repairAttempt: 0,
     },
     { runCommand: execute },
@@ -254,6 +258,18 @@ test("trusted publication reapplies the sealed tree with an exact-head lease", (
   assert.equal(remoteTree, fixture.artifact.nativeFix.fixedTree);
   assert.equal(published.nextRepairAttempt, 1);
   assert.match(published.nextHead, /^[0-9a-f]{40}$/);
+  assert.deepEqual(
+    parseImplementationMetadata(
+      gitAt(
+        fixture.origin,
+        "log",
+        "-1",
+        "--format=%B",
+        `refs/heads/${fixture.branch}`,
+      ),
+    ),
+    parseImplementationMetadata(trustedPull().body),
+  );
   assert.ok(
     commands.some(
       ([command, args]) =>
@@ -412,6 +428,19 @@ Agent implementation metadata:
     },
     base: { ref: "main", repo: { full_name: "owner/repo" } },
     ...overrides,
+  };
+}
+
+function trustedHeadDependencies(pull = trustedPull()) {
+  return {
+    ghApiJson: () => [{
+      commit: {
+        message: implementationCommitMessage(
+          "chore: implement agent issue #42",
+          parseImplementationMetadata(pull.body),
+        ),
+      },
+    }],
   };
 }
 
@@ -1100,7 +1129,8 @@ test("terminal failures block while exact-head auto-fix findings receive bounded
 });
 
 test("trusted gate scope rejects forks, manual branches, and policy changes", () => {
-  const trust = assertTrustedAgentPull(trustedPull(), config, safeFiles);
+  const pull = trustedPull();
+  const trust = assertTrustedAgentPull(pull, config, safeFiles, trustedHeadDependencies(pull));
   assert.equal(trust.sourceIssue, 42);
 
   assert.throws(

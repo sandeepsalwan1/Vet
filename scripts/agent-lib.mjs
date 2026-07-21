@@ -341,6 +341,16 @@ export function parseImplementationMetadata(body) {
   return metadata;
 }
 
+export function implementationCommitMessage(subject, metadata) {
+  const summary = String(subject ?? "").trim();
+  if (!summary || summary.includes(IMPLEMENTATION_MARKER)) {
+    throw new AgentError("implementation commit subject is invalid", 1);
+  }
+  const message = `${summary}\n\n${IMPLEMENTATION_MARKER}\nAgent implementation metadata:${markdownJsonBlock(metadata)}`;
+  parseImplementationMetadata(message);
+  return message;
+}
+
 export function assertTrustedAgentPull(pull, config, options = {}, dependencies = {}) {
   const { files, sourceIssue, rejectPrivilegedPaths = Boolean(files), allowEmptyFiles = false } = Array.isArray(options)
     ? { files: options, rejectPrivilegedPaths: true }
@@ -399,21 +409,26 @@ export function assertTrustedAgentPull(pull, config, options = {}, dependencies 
       throw new AgentError("source issue changed after trusted triage", 1);
     }
   }
-  const commitLookup = dependencies.ghApiJson ?? null;
-  const commitCheck = runCommand("git", ["cat-file", "-e", `${pull.head.sha}^{commit}`], { check: false });
-  if (commitCheck.status === 0) {
-    const commitMetadata = parseImplementationMetadata(
-      runCommand("git", ["log", "-1", "--format=%B", pull.head.sha]).stdout
-    );
-    if (JSON.stringify(commitMetadata) !== JSON.stringify(metadata)) {
-      throw new AgentError("implementation metadata does not match the trusted head commit", 1);
-    }
-  } else if (commitLookup) {
-    const commit = commitLookup(`repos/${config.repo.owner}/${config.repo.name}/commits/${pull.head.sha}`);
-    const commitMetadata = parseImplementationMetadata(commit?.commit?.message);
-    if (JSON.stringify(commitMetadata) !== JSON.stringify(metadata)) {
-      throw new AgentError("implementation metadata does not match the trusted head commit", 1);
-    }
+  const commitLookup = dependencies.ghApiJson;
+  if (!commitLookup || !Number.isInteger(pull?.number) || pull.number <= 0) {
+    throw new AgentError("trusted implementation commit metadata is unavailable", 1);
+  }
+  const commits = commitLookup(
+    `repos/${config.repo.owner}/${config.repo.name}/pulls/${pull.number}/commits?per_page=100`,
+    { paginate: true },
+  );
+  if (!Array.isArray(commits) || commits.length === 0) {
+    throw new AgentError("trusted implementation commit metadata is unavailable", 1);
+  }
+  const sealedMetadata = commits
+    .map((commit) => String(commit?.commit?.message ?? ""))
+    .filter((message) => message.includes(IMPLEMENTATION_MARKER))
+    .map(parseImplementationMetadata);
+  if (
+    sealedMetadata.length === 0 ||
+    sealedMetadata.some((sealed) => JSON.stringify(sealed) !== JSON.stringify(metadata))
+  ) {
+    throw new AgentError("implementation metadata does not match the immutable PR commit seal", 1);
   }
   return { metadata, sourceIssue: metadata.sourceIssue };
 }

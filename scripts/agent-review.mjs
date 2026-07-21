@@ -16,6 +16,7 @@ import {
   ghApiJson,
   ghReadJson,
   gitOutput,
+  implementationCommitMessage,
   issueLabels,
   loadConfig,
   markdownJsonBlock,
@@ -103,7 +104,7 @@ export async function waitForRequiredChecks(config, prNumber, expectedHeadSha, d
   const intervalMs = dependencies.intervalMs ?? 15000;
   let checks = [];
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const { pull } = fetchSnapshot(config, prNumber);
+    const { pull } = fetchSnapshot(config, prNumber, dependencies);
     assertReviewedHead(pull, expectedHeadSha);
     checks = fetchChecks(config, expectedHeadSha);
     if (checks.every((check) => !["missing", "queued", "in_progress", "pending", "requested", "waiting"].includes(check.state))) {
@@ -638,9 +639,10 @@ function applyReview(
   patchPath,
   dryRun,
   expectedHeadSha,
-  repairAttemptValue = 0
+  repairAttemptValue = 0,
+  dependencies = {},
 ) {
-  const { pull, issue, files } = fetchPull(config, prNumber);
+  const { pull, issue, files } = fetchPull(config, prNumber, dependencies);
   assertReviewedHead(pull, expectedHeadSha);
   const closing = ghReadJson([
     "pr",
@@ -658,7 +660,7 @@ function applyReview(
     sourceIssue,
     rejectPrivilegedPaths: true,
     allowEmptyFiles: true
-  });
+  }, dependencies);
   const metadata = implementationMetadata(pull.body);
   const sourceLabels = issueLabels(sourceIssue);
   const automergeEligible =
@@ -703,7 +705,11 @@ function applyReview(
       } else {
         runCommand("git", ["config", "user.name", "github-actions[bot]"]);
         runCommand("git", ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
-        runCommand("git", ["commit", "-m", `fix: address agent review for #${prNumber}`]);
+        runCommand("git", [
+          "commit",
+          "-m",
+          implementationCommitMessage(`fix: address agent review for #${prNumber}`, metadata),
+        ]);
         statusSha = gitOutput(["rev-parse", "HEAD"]);
         runCommand("gh", ["auth", "setup-git", "--hostname", "github.com"]);
         runCommand("git", ["push", "origin", `HEAD:${pull.head.ref}`]);
@@ -762,8 +768,13 @@ function applyReview(
     added: addLabels(config, prNumber, policy.add, dryRun),
     removed: removeLabels(config, prNumber, policy.remove, dryRun)
   };
+  const proofRequested =
+    issueLabels(issue).includes(config.labels.proof) ||
+    sourceLabels.includes(config.labels.proof) ||
+    review.proofNeeded === "UI" ||
+    review.proofNeeded === "GIF";
   const proofDispatch =
-    policy.add.includes(config.labels.proof) && !dryRun
+    cycle.state === "ready" && proofRequested && !dryRun
       ? dispatchWorkflow(
           config,
           "agent-proof.yml",
@@ -838,7 +849,12 @@ async function main() {
       {
         ok: true,
         message: `waited for exact-head CI for #${prNumber}`,
-        result: await waitForRequiredChecks(config, prNumber, args["expected-head-sha"])
+        result: await waitForRequiredChecks(
+          config,
+          prNumber,
+          args["expected-head-sha"],
+          { ghApiJson },
+        )
       },
       Boolean(args.json)
     );
@@ -883,7 +899,8 @@ async function main() {
       args["apply-patch"],
       dryRun,
       args["expected-head-sha"],
-      args["repair-attempt"]
+      args["repair-attempt"],
+      { ghApiJson },
     );
     setGitHubOutput({ "next-gate": result.skipNoMistakes ? "automerge" : "no-mistakes" });
     finish(

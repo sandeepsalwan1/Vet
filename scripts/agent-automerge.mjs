@@ -1069,8 +1069,13 @@ async function main() {
 
   if (!config.automerge.requiredLabels.some((label) => prLabels.includes(label))) {
     try {
-      assertTrustedAgentPull(pull, config, { files, rejectPrivilegedPaths: true });
-  } catch {
+      assertTrustedAgentPull(
+        pull,
+        config,
+        { files, rejectPrivilegedPaths: true },
+        { ghApiJson },
+      );
+    } catch {
       finish({ ok: true, message: `ignored non-agent PR #${prNumber}` }, Boolean(args.json));
       return;
     }

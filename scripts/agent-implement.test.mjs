@@ -351,7 +351,12 @@ test("isolated validation binds patch, output, base, and result tree", (t) => {
   writeFileSync(outputPath, "Implemented safely.\n");
   writeFileSync(
     join(cwd, "implementation-intent.json"),
-    `${JSON.stringify({ version: 1, issueNumber: 42, issueSnapshotSha256: snapshotSha256 })}\n`
+    `${JSON.stringify({
+      version: 1,
+      issueNumber: 42,
+      issueSnapshotSha256: snapshotSha256,
+      sourceLabels: ["agent:implement", "agent:automerge", "priority:trivial"],
+    })}\n`
   );
 
   assert.throws(
@@ -398,6 +403,7 @@ test("isolated validation binds patch, output, base, and result tree", (t) => {
   assert.equal(manifest.baseSha, prepared.baseSha);
   assert.equal(manifest.resultTree, git("write-tree").trim());
   assert.deepEqual(manifest.changedPaths, ["file.txt"]);
+  assert.deepEqual(manifest.sourceLabels, ["agent:implement", "agent:automerge", "priority:trivial"]);
   assert.deepEqual(verified, manifest);
 
   writeFileSync(patchPath, `${readFileSync(patchPath, "utf8")}\n# tampered\n`);
@@ -429,7 +435,12 @@ test("final validation seal rejects changes to the prepared host tree", (t) => {
   writeFileSync(outputPath, "Implemented safely.\n");
   writeFileSync(
     join(cwd, "implementation-intent.json"),
-    `${JSON.stringify({ version: 1, issueNumber: 42, issueSnapshotSha256: "d".repeat(64) })}\n`
+    `${JSON.stringify({
+      version: 1,
+      issueNumber: 42,
+      issueSnapshotSha256: "d".repeat(64),
+      sourceLabels: ["agent:implement", "agent:automerge"],
+    })}\n`
   );
   const preparedPath = join(root, "prepared.json");
   preparePatchValidation(config, 42, patchPath, outputPath, preparedPath, join(root, "candidate"), cwd);
@@ -471,6 +482,7 @@ test("isolated validation command environment removes credentials and workflow c
 
 test("implementation workflow isolates candidate checks from credentials, artifacts, and command channels", () => {
   const workflow = readFileSync(join(process.cwd(), ".github/workflows/agent-implement.yml"), "utf8");
+  const implementationScript = readFileSync(join(process.cwd(), "scripts/agent-implement.mjs"), "utf8");
   const labels = JSON.parse(readFileSync(join(process.cwd(), ".agent/labels.json"), "utf8"));
   const policy = readFileSync(join(process.cwd(), ".agent/agent-policy.md"), "utf8");
   const prepare = workflow.slice(workflow.indexOf("  prepare-prompt:"), workflow.indexOf("  generate-patch-remote:"));
@@ -486,6 +498,9 @@ test("implementation workflow isolates candidate checks from credentials, artifa
   assert.equal(labels.some((label) => label.name === "priority:trivial"), true);
   assert.match(policy, /priority:trivial/);
   assert.match(policy, /Every published native fix starts fresh exact-head CI/);
+  assert.match(implementationScript, /sourceLabels: issueLabels\(issue\)/);
+  assert.match(implementationScript, /sourceLabels: intent\.sourceLabels/);
+  assert.match(implementationScript, /implementationCommitMessage/);
   assert.match(prepare, /concurrency-group: \$\{\{ steps\.concurrency\.outputs\.group \}\}/);
   assert.match(prepare, /agent-concurrency-slot\.mjs --lane implement --key "\$CONCURRENCY_KEY" --json/);
   assert.match(prepare, /id: backend\n\s+run: node scripts\/agent-worker\.mjs --validate-backend --lane implement --json/);
@@ -621,7 +636,12 @@ test("prepared validation checks both sides of a privileged rename", (t) => {
   writeFileSync(outputPath, "Renamed safely.\n");
   writeFileSync(
     join(cwd, "implementation-intent.json"),
-    `${JSON.stringify({ version: 1, issueNumber: 42, issueSnapshotSha256: "c".repeat(64) })}\n`
+    `${JSON.stringify({
+      version: 1,
+      issueNumber: 42,
+      issueSnapshotSha256: "c".repeat(64),
+      sourceLabels: ["agent:implement", "agent:automerge"],
+    })}\n`
   );
 
   assert.throws(

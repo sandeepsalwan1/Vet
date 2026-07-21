@@ -16,6 +16,7 @@ import {
   getPullFiles,
   getPullRequest,
   getPullSnapshot,
+  implementationCommitMessage,
   issueSnapshotSha256,
   isTransientGitHubReadError,
   newestManagedComment,
@@ -753,6 +754,7 @@ test("trusted agent pull requires exact bot-authored implementation provenance",
     issueSnapshotSha256: issueSnapshotSha256(sourceIssue)
   };
   const pull = {
+    number: 9,
     state: "open",
     merged: false,
     merged_at: null,
@@ -767,24 +769,39 @@ test("trusted agent pull requires exact bot-authored implementation provenance",
     base: { ref: "main", repo: { full_name: "repo-owner/repo" } }
   };
   const trustConfig = { repo: { owner: "repo-owner", name: "repo", defaultBranch: "main" } };
-  const commitMessage = `chore: implement agent issue #42\n\n${pull.body}`;
+  const commitMessage = implementationCommitMessage("chore: implement agent issue #42", metadata);
 
   assert.deepEqual(
     assertTrustedAgentPull(
       pull,
       trustConfig,
       { files: [{ filename: "src/safe.ts" }], sourceIssue },
-      { ghApiJson: () => ({ commit: { message: commitMessage } }) }
+      { ghApiJson: () => [{ commit: { message: commitMessage } }] }
     ),
     { metadata, sourceIssue: 42 }
   );
   assert.deepEqual(parseImplementationMetadata(pull.body), metadata);
+  assert.deepEqual(parseImplementationMetadata(commitMessage), metadata);
+  assert.deepEqual(
+    assertTrustedAgentPull(
+      pull,
+      trustConfig,
+      { files: [{ filename: "src/safe.ts" }], sourceIssue },
+      {
+        ghApiJson: () => [
+          { commit: { message: commitMessage } },
+          { commit: { message: "Merge the validated base into the agent branch" } },
+        ],
+      },
+    ),
+    { metadata, sourceIssue: 42 },
+  );
   assert.deepEqual(
     assertTrustedAgentPull(
       { ...pull, changed_files: 0 },
       trustConfig,
       { files: [], sourceIssue, allowEmptyFiles: true },
-      { ghApiJson: () => ({ commit: { message: commitMessage } }) }
+      { ghApiJson: () => [{ commit: { message: commitMessage } }] }
     ),
     { metadata, sourceIssue: 42 }
   );
@@ -808,13 +825,44 @@ test("trusted agent pull requires exact bot-authored implementation provenance",
         },
         trustConfig,
         { files: [{ filename: "src/safe.ts" }], sourceIssue },
-        { ghApiJson: () => ({ commit: { message: commitMessage } }) }
+        { ghApiJson: () => [{ commit: { message: commitMessage } }] }
       ),
-    /implementation metadata does not match the trusted head commit/
+    /implementation metadata does not match the immutable PR commit seal/
+  );
+  assert.throws(
+    () =>
+      assertTrustedAgentPull(
+        pull,
+        trustConfig,
+        { files: [{ filename: "src/safe.ts" }], sourceIssue },
+        {
+          ghApiJson: () => [
+            { commit: { message: commitMessage } },
+            {
+              commit: {
+                message: implementationCommitMessage("fix: forged cost lane", {
+                  ...metadata,
+                  sourceLabels: [...metadata.sourceLabels, "priority:trivial"],
+                }),
+              },
+            },
+          ],
+        },
+      ),
+    /implementation metadata does not match the immutable PR commit seal/,
   );
   assert.throws(
     () => assertTrustedAgentPull(pull, trustConfig, { files: [{ filename: "src/CLAUDE.md" }] }),
     /privileged candidate paths/
+  );
+  assert.throws(
+    () =>
+      assertTrustedAgentPull(
+        pull,
+        trustConfig,
+        { files: [{ filename: "src/safe.ts" }], sourceIssue },
+      ),
+    /trusted implementation commit metadata is unavailable/,
   );
 });
 

@@ -15,6 +15,7 @@ import {
   ghJson,
   ghReadJson,
   gitOutput,
+  implementationCommitMessage,
   issueLabels,
   issueSnapshotSha256,
   isTransientGitHubReadError,
@@ -22,6 +23,7 @@ import {
   markdownJsonBlock,
   newestManagedComment,
   parseArgs,
+  parseImplementationMetadata,
   privilegedCandidatePaths,
   readText,
   removeLabels,
@@ -66,7 +68,12 @@ ${triage.body}
   const intentPath = join(dirname(outputPath), "implementation-intent.json");
   writeFileSync(
     intentPath,
-    `${JSON.stringify({ version: 1, issueNumber, issueSnapshotSha256: snapshotSha256 }, null, 2)}\n`
+    `${JSON.stringify({
+      version: 1,
+      issueNumber,
+      issueSnapshotSha256: snapshotSha256,
+      sourceLabels: issueLabels(issue),
+    }, null, 2)}\n`
   );
   return { issueNumber, outputPath, intentPath };
 }
@@ -421,6 +428,7 @@ function readArtifactMetadata(path, label = "integrity manifest") {
     "issueSnapshotSha256",
     "patchSha256",
     "resultTree",
+    "sourceLabels",
     "version"
   ];
   if (
@@ -432,6 +440,9 @@ function readArtifactMetadata(path, label = "integrity manifest") {
     !/^[a-f0-9]{40,64}$/.test(manifest.resultTree ?? "") ||
     !/^[a-f0-9]{64}$/.test(manifest.patchSha256 ?? "") ||
     !/^[a-f0-9]{64}$/.test(manifest.codexOutputSha256 ?? "") ||
+    !Array.isArray(manifest.sourceLabels) ||
+    !manifest.sourceLabels.every((label) => typeof label === "string" && label.length > 0) ||
+    new Set(manifest.sourceLabels).size !== manifest.sourceLabels.length ||
     !Array.isArray(manifest.changedPaths) ||
     !manifest.changedPaths.every((path) => typeof path === "string") ||
     new Set(manifest.changedPaths).size !== manifest.changedPaths.length ||
@@ -457,10 +468,13 @@ function readImplementationIntent(path, issueNumber) {
   }
   if (
     JSON.stringify(Object.keys(intent ?? {}).sort()) !==
-      JSON.stringify(["issueNumber", "issueSnapshotSha256", "version"]) ||
+      JSON.stringify(["issueNumber", "issueSnapshotSha256", "sourceLabels", "version"]) ||
     intent.version !== 1 ||
     intent.issueNumber !== issueNumber ||
-    !/^[a-f0-9]{64}$/.test(intent.issueSnapshotSha256 ?? "")
+    !/^[a-f0-9]{64}$/.test(intent.issueSnapshotSha256 ?? "") ||
+    !Array.isArray(intent.sourceLabels) ||
+    !intent.sourceLabels.every((label) => typeof label === "string" && label.length > 0) ||
+    new Set(intent.sourceLabels).size !== intent.sourceLabels.length
   ) {
     throw new AgentError("implementation intent is invalid", 1);
   }
@@ -518,6 +532,7 @@ export function preparePatchValidation(
     version: 1,
     issueNumber,
     issueSnapshotSha256: intent.issueSnapshotSha256,
+    sourceLabels: intent.sourceLabels,
     baseSha,
     resultTree,
     patchSha256: sha256(patchPath),
@@ -731,20 +746,11 @@ ${markdownJsonBlock({
 export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputPath, manifestPath, dryRun) {
   if (!existsSync(patchPath)) throw new AgentError(`patch not found: ${patchPath}`, 2);
   const { issue, comments } = fetchIssue(config, issueNumber);
-  const labels = assertImplementationSource(config, issue);
+  assertImplementationSource(config, issue);
   const triage = newestManagedComment(comments, config.comments.triage, config.repo.owner);
   if (!triage) throw new AgentError(`source issue #${issueNumber} has no trusted managed triage`, 1);
   const snapshotSha256 = assertIssueMatchesTriageSnapshot(issue, triage, config.comments.triage);
   if (!dryRun) runCommand("gh", ["auth", "setup-git", "--hostname", "github.com"]);
-  const metadata = {
-    sourceIssue: issue.number,
-    sourceLabels: labels,
-    issueSnapshotSha256: snapshotSha256,
-    automergeEligible:
-      labels.includes(config.labels.automerge) &&
-      !labels.includes(config.labels.priorityHigh) &&
-      !labels.includes(config.labels.blocked)
-  };
   const preferredBranch = preferredBranchName(issueNumber, issue.title);
   const existingPull = selectExistingPull(listPulls(config), config, issueNumber, preferredBranch);
   const remoteBranches = remoteAgentBranches(issueNumber);
@@ -777,6 +783,16 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
     repoRoot(),
     snapshotSha256
   );
+  const sealedLabels = manifest.sourceLabels;
+  const metadata = {
+    sourceIssue: issue.number,
+    sourceLabels: sealedLabels,
+    issueSnapshotSha256: snapshotSha256,
+    automergeEligible:
+      sealedLabels.includes(config.labels.automerge) &&
+      !sealedLabels.includes(config.labels.priorityHigh) &&
+      !sealedLabels.includes(config.labels.blocked)
+  };
   if (dryRun) {
     return {
       branch,
@@ -796,14 +812,26 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
   let committed = false;
   const staged = gitOutput(["diff", "--cached", "--name-only"]);
   if (staged) {
-    runCommand(
-      "git",
-      [
-        "commit",
-        "-m",
-        `chore: implement agent issue #${issueNumber}\n\n<!-- agent-implementation:v1 -->\nAgent implementation metadata:\n${markdownJsonBlock(metadata)}`
-      ]
-    );
+    runCommand("git", [
+      "commit",
+      "-m",
+      implementationCommitMessage(`chore: implement agent issue #${issueNumber}`, metadata),
+    ]);
+    committed = true;
+  }
+  let headMetadata = null;
+  try {
+    headMetadata = parseImplementationMetadata(gitOutput(["log", "-1", "--format=%B"]));
+  } catch {
+    // A merge-only recovery or empty implementation still needs an immutable head seal.
+  }
+  if (JSON.stringify(headMetadata) !== JSON.stringify(metadata)) {
+    runCommand("git", [
+      "commit",
+      "--allow-empty",
+      "-m",
+      implementationCommitMessage(`chore: seal agent issue #${issueNumber}`, metadata),
+    ]);
     committed = true;
   }
   if (committed || branchAlignment.action === "merged-validated-base" || !remoteExists) {
@@ -811,7 +839,7 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
   }
   const candidateSha = gitOutput(["rev-parse", "HEAD"]);
   const pull = upsertPullRequest({ config, issue, branch, codexOutput, metadata, existingPull });
-  const prLabels = implementationPullLabels(config, labels);
+  const prLabels = implementationPullLabels(config, sealedLabels);
   addLabels(config, pull.number, prLabels, false);
   const dispatch = {
     ci: dispatchCandidateCi(config, pull.number, candidateSha),

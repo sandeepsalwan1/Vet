@@ -23,7 +23,7 @@ import {
   waitForRequiredChecks,
   validateReviewResult
 } from "./agent-review.mjs";
-import { issueSnapshotSha256 } from "./agent-lib.mjs";
+import { implementationCommitMessage, issueSnapshotSha256 } from "./agent-lib.mjs";
 
 const config = {
   repo: { owner: "sandeepsalwan1", name: "Vet", defaultBranch: "main" },
@@ -278,6 +278,7 @@ function trustedSecurityDispatchFixture() {
     }
   };
   return {
+    commitMessage: implementationCommitMessage("chore: implement agent issue #42", metadata),
     pull,
     sourceIssue,
     snapshot: {
@@ -294,6 +295,7 @@ test("trusted security dispatch uses the main workflow for the validated SHA", (
   const result = dispatchPullSecurity(config, 8, fixture.pull.head.sha, {
     fetchSnapshot: () => fixture.snapshot,
     fetchSourceIssue: () => fixture.sourceIssue,
+    ghApiJson: () => [{ commit: { message: fixture.commitMessage } }],
     dispatchWorkflow: (...args) => {
       calls.push(args);
       return { ok: true };
@@ -321,6 +323,7 @@ test("trusted security dispatch rejects stale or changed authorization", () => {
   const dependencies = {
     fetchSnapshot: () => fixture.snapshot,
     fetchSourceIssue: () => fixture.sourceIssue,
+    ghApiJson: () => [{ commit: { message: fixture.commitMessage } }],
     dispatchWorkflow: () => {
       dispatched = true;
     }
@@ -507,6 +510,8 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(prepare, /reviewed-base-sha: \$\{\{ steps\.mark-pending\.outputs\.base-sha \}\}/);
   assert.match(reviewScript, /dispatchPullSecurity/);
   assert.match(reviewScript, /allowEmptyFiles: true/);
+  assert.match(reviewScript, /implementationCommitMessage/);
+  assert.match(reviewScript, /cycle\.state === "ready" && proofRequested && !dryRun/);
   assert.match(codeqlWorkflow, /workflow_dispatch:/);
   assert.match(codeqlWorkflow, /candidate-sha:/);
   assert.match(codeqlWorkflow, /candidate-ref:/);

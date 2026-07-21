@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { issueSnapshotSha256 } from "./agent-lib.mjs";
+import {
+  implementationCommitMessage,
+  issueSnapshotSha256,
+  parseImplementationMetadata,
+} from "./agent-lib.mjs";
 
 import {
   agentWorkflowLabels,
@@ -12,7 +16,7 @@ import {
   conflictRecoveryDispatchArgs,
   dispatchPostMergeChecks,
   disableNativeAutomergeArgs,
-  evaluate,
+  evaluate as evaluateAutomerge,
   isStaleBase,
   isUpdateBranchMergeConflict,
   nativeMergeArgs,
@@ -58,6 +62,20 @@ const config = {
     proofStatus: "agent-proof"
   }
 };
+
+function evaluate(value) {
+  const metadata = parseImplementationMetadata(value.pull.body);
+  return evaluateAutomerge(value, {
+    ghApiJson: () => [{
+      commit: {
+        message: implementationCommitMessage(
+          `chore: implement agent issue #${metadata.sourceIssue}`,
+          metadata,
+        ),
+      },
+    }],
+  });
+}
 
 function status(context, state = "success", id = 1) {
   return {

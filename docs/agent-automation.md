@@ -46,7 +46,7 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 Trusted recovery dispatches main-defined workflows with an expected head SHA, and CI publishes required check runs on that exact candidate.
 
 Cost-sensitive routing lives in `.agent/config.json`.
-An issue carrying `priority:trivial` before implementation records that choice in immutable PR metadata and skips only the paid no-mistakes model gate.
+An issue carrying `priority:trivial` when implementation starts records that choice before the model runs, seals it in immutable PR commit ancestry, and skips only the paid no-mistakes model gate.
 The trivial lane still requires trusted triage, exact-head CI, independent agent review, proof when requested, and automerge policy.
 All model lanes use GPT-5.4 mini because GPT-5.4 nano does not support the Codex action's required tool transport.
 Implementation, first-pass review, proposal, and triage use low reasoning; no-mistakes and bounded reviewer repair use medium reasoning after measured low-effort acceptance and structured-output failures.
@@ -129,7 +129,7 @@ gh issue edit <issue-number> --repo "$REPO" --add-label agent:implement
 
 That explicit label skips only the paid no-mistakes model call.
 It does not skip triage, CI, independent review, requested proof, exact-head checks, or merge policy.
-Adding `priority:trivial` after implementation starts cannot bypass no-mistakes because the original source labels are sealed into the PR metadata.
+Adding `priority:trivial` after implementation starts cannot bypass no-mistakes because the original source labels are frozen in the trusted validation artifact and must match every immutable implementation seal and the PR metadata.
 
 `agent:triage` remains available when an operator explicitly wants to request or rerun triage:
 
@@ -266,7 +266,7 @@ Read the newest managed agent comment, answer the decision, or use the exact-hea
 ## Gates
 
 Normal automerge requires CI checks `quality`, `build`, `scenarios`, `audit`, and `dependency-review`, plus `agent-review` and `no-mistakes` statuses.
-The `priority:trivial` lane requires the same CI and review but omits no-mistakes only when that label exists in immutable implementation metadata and on both the current issue and PR.
+The `priority:trivial` lane requires the same CI and review but omits no-mistakes only when the pre-model validation artifact, immutable PR commit seal, PR metadata, current issue, and current PR all carry that label.
 `agent-proof` is also required when trusted labels or managed triage request visual proof.
 After an agent PR merges, automerge explicitly dispatches baseline CI and CodeQL against the exact merge commit.
 This explicit dispatch is required because GitHub suppresses recursive workflow events caused by its workflow token.
