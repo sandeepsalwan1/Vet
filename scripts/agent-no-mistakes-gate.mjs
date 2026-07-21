@@ -941,11 +941,6 @@ export function finalizeNativeFixPublication({
     repairAttempt,
     dryRun,
   });
-  setOutput({
-    "repair-action": "native-fix",
-    "next-head": published.nextHead,
-    "next-repair-attempt": published.nextRepairAttempt,
-  });
   const result = recordFix({
     artifact,
     config,
@@ -953,6 +948,11 @@ export function finalizeNativeFixPublication({
     pull,
     repairAttempt,
     dryRun,
+  });
+  setOutput({
+    "repair-action": "native-fix",
+    "next-head": published.nextHead,
+    "next-repair-attempt": published.nextRepairAttempt,
   });
   return { published, result };
 }

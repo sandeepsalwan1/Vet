@@ -265,6 +265,7 @@ test("trusted publication reapplies the sealed tree with an exact-head lease", (
 
 test("native fix publication fails closed on publish errors", () => {
   const fixture = nativeFixFixture();
+  const events = [];
   assert.throws(
     () =>
       finalizeNativeFixPublication({
@@ -273,14 +274,21 @@ test("native fix publication fails closed on publish errors", () => {
         pull: { number: 42, head: { ref: fixture.branch, sha: fixture.baseHead } },
         repairAttempt: 0,
         patchPath: fixture.patchPath,
-        applyPatch: () => ({ nextHead: fixture.fixedHead, nextRepairAttempt: 1, paths: fixture.artifact.nativeFix.paths }),
+        applyPatch: () => {
+          events.push("apply");
+          return { nextHead: fixture.fixedHead, nextRepairAttempt: 1, paths: fixture.artifact.nativeFix.paths };
+        },
         recordFix: () => {
+          events.push("record");
           throw new Error("publish failed");
         },
-        setOutput: () => {},
+        setOutput: () => {
+          events.push("output");
+        },
       }),
     /publish failed/,
   );
+  assert.deepEqual(events, ["apply", "record"]);
 });
 
 test("native fix publication dry-run validates without mutating git or GitHub", () => {

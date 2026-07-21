@@ -410,6 +410,7 @@ jobs:
     permissions:
       actions: write
       contents: read
+      issues: read
       pull-requests: read
     steps:
       - name: Dispatch exact-head reviewer repair

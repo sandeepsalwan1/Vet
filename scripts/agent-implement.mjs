@@ -796,7 +796,14 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
   let committed = false;
   const staged = gitOutput(["diff", "--cached", "--name-only"]);
   if (staged) {
-    runCommand("git", ["commit", "-m", `chore: implement agent issue #${issueNumber}`]);
+    runCommand(
+      "git",
+      [
+        "commit",
+        "-m",
+        `chore: implement agent issue #${issueNumber}\n\n<!-- agent-implementation:v1 -->\nAgent implementation metadata:\n${markdownJsonBlock(metadata)}`
+      ]
+    );
     committed = true;
   }
   if (committed || branchAlignment.action === "merged-validated-base" || !remoteExists) {

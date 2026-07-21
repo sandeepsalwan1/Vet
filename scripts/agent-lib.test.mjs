@@ -767,9 +767,15 @@ test("trusted agent pull requires exact bot-authored implementation provenance",
     base: { ref: "main", repo: { full_name: "repo-owner/repo" } }
   };
   const trustConfig = { repo: { owner: "repo-owner", name: "repo", defaultBranch: "main" } };
+  const commitMessage = `chore: implement agent issue #42\n\n${pull.body}`;
 
   assert.deepEqual(
-    assertTrustedAgentPull(pull, trustConfig, { files: [{ filename: "src/safe.ts" }], sourceIssue }),
+    assertTrustedAgentPull(
+      pull,
+      trustConfig,
+      { files: [{ filename: "src/safe.ts" }], sourceIssue },
+      { ghApiJson: () => ({ commit: { message: commitMessage } }) }
+    ),
     { metadata, sourceIssue: 42 }
   );
   assert.deepEqual(parseImplementationMetadata(pull.body), metadata);
@@ -777,7 +783,8 @@ test("trusted agent pull requires exact bot-authored implementation provenance",
     assertTrustedAgentPull(
       { ...pull, changed_files: 0 },
       trustConfig,
-      { files: [], sourceIssue, allowEmptyFiles: true }
+      { files: [], sourceIssue, allowEmptyFiles: true },
+      { ghApiJson: () => ({ commit: { message: commitMessage } }) }
     ),
     { metadata, sourceIssue: 42 }
   );
@@ -788,6 +795,22 @@ test("trusted agent pull requires exact bot-authored implementation provenance",
   assert.throws(
     () => assertTrustedAgentPull({ ...pull, user: { login: "contributor" } }, trustConfig),
     /author must be github-actions\[bot\]/
+  );
+  assert.throws(
+    () =>
+      assertTrustedAgentPull(
+        {
+          ...pull,
+          body: `<!-- agent-implementation:v1 -->\nAgent implementation metadata:\n\`\`\`json\n${JSON.stringify({
+            ...metadata,
+            sourceLabels: [...metadata.sourceLabels, "priority:trivial"]
+          })}\n\`\`\``
+        },
+        trustConfig,
+        { files: [{ filename: "src/safe.ts" }], sourceIssue },
+        { ghApiJson: () => ({ commit: { message: commitMessage } }) }
+      ),
+    /implementation metadata does not match the trusted head commit/
   );
   assert.throws(
     () => assertTrustedAgentPull(pull, trustConfig, { files: [{ filename: "src/CLAUDE.md" }] }),
