@@ -150,3 +150,12 @@ Resolution: Applied. Vet commit `de479b2` is live at `https://vetagent-internal.
 
 35. Add the intended complete change set to git.
 Resolution: Applied. The Vet product and review files are one change set. The shared Lavish skill is committed separately in `agent-scripts` so unrelated changes in that repository are not swept in.
+
+## July 20 notification clarity instruction
+
+> just deploy whatever u think is relevant here e.g. i had that whole plan e.g. make it super clear to me how the notifications works etc.
+
+36. Make the implemented notification journey clear before deployment.
+Resolution: Applied in the Admin dashboard only.
+The new Notifications tab explains the five customer touchpoints, each trigger, channel, timing, consent rule, quiet hours, and recent delivery status using the tenant's current settings and queue data.
+Customer, staff, and veterinarian screens remain unchanged.

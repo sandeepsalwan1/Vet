@@ -1,11 +1,12 @@
 "use client";
 
-import { Bot, ClipboardList, LayoutDashboard, LogOut, Users } from "lucide-react";
+import { BellRing, Bot, ClipboardList, LayoutDashboard, LogOut, Users } from "lucide-react";
 import { useState } from "react";
 import { logout, type AccountSession } from "../../lib/accountStore";
 import { ChatPanel } from "../ChatPanel";
 import { useClinicBrand } from "../ClinicContext";
 import { AdminTasksTab } from "./AdminTasksTab";
+import { AdminNotificationsTab } from "./AdminNotificationsTab";
 import { TeamAccountPanel } from "./TeamAccountPanel";
 import { useAdminAssistantChat } from "./useAdminAssistantChat";
 import { useAdminTaskSnapshot } from "./useAdminTaskSnapshot";
@@ -18,7 +19,7 @@ type Props = {
   onOpenBoard: () => void;
 };
 
-type Tab = "tasks" | "assistant" | "team";
+type Tab = "tasks" | "notifications" | "assistant" | "team";
 
 export function AdminDashboard({ session, onLogout, onOpenBoard }: Props) {
   const clinic = useClinicBrand();
@@ -95,6 +96,14 @@ export function AdminDashboard({ session, onLogout, onOpenBoard }: Props) {
           {newTaskCount > 0 && tab !== "tasks" && <span className="adminDashTabBadge">+{newTaskCount}</span>}
         </button>
         <button
+          className={`adminDashTab${tab === "notifications" ? " adminDashTab--active" : ""}`}
+          onClick={() => setTab("notifications")}
+          type="button"
+        >
+          <BellRing size={15} />
+          Notifications
+        </button>
+        <button
           className={`adminDashTab${tab === "assistant" ? " adminDashTab--active" : ""}`}
           onClick={() => setTab("assistant")}
           type="button"
@@ -134,6 +143,10 @@ export function AdminDashboard({ session, onLogout, onOpenBoard }: Props) {
             placeholder="Ask for a daily digest, records, invoices, pricing…"
           />
         </div>
+      )}
+
+      {tab === "notifications" && (
+        <AdminNotificationsTab session={session} />
       )}
 
       {tab === "team" && (

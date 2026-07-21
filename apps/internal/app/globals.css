@@ -6047,6 +6047,224 @@ textarea:focus {
   padding: 16px 24px 24px;
 }
 
+/* Admin client notifications: compact operational explanation, not a second task board. */
+.adminNotifications {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px;
+  color: var(--ink);
+}
+
+.adminNotifications--loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+}
+
+.adminNotifications--loading p { margin: 0; }
+
+.adminNotifications--loading button {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 6px 10px;
+  background: white;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.adminNotificationsHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  max-width: 1180px;
+  margin: 0 auto 18px;
+}
+
+.adminNotificationsHeader h2 {
+  margin: 3px 0 5px;
+  font-family: var(--font-display-active);
+  font-size: clamp(23px, 3vw, 32px);
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+}
+
+.adminNotificationsHeader > div > p:last-child {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.adminNotificationSafety {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  border: 1px solid #bbd8ca;
+  border-radius: 999px;
+  padding: 7px 11px;
+  background: #eef8f2;
+  color: #276447;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.adminNotificationFlow {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  max-width: 1180px;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12px 34px rgba(22, 52, 42, 0.06);
+}
+
+.adminNotificationStep {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 168px;
+  padding: 18px 16px;
+  border-right: 1px solid var(--line);
+}
+
+.adminNotificationStep:last-child { border-right: 0; }
+
+.adminNotificationStepNumber {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  flex: 0 0 25px;
+  border-radius: 50%;
+  background: #e5f2ea;
+  color: #226346;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.adminNotificationStep strong {
+  display: block;
+  margin: 2px 0 6px;
+  font-size: 14px;
+}
+
+.adminNotificationStep p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.48;
+}
+
+.adminNotificationStep small {
+  display: inline-block;
+  color: #286549;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.adminNotificationRules {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  max-width: 1180px;
+  margin: 12px auto 22px;
+}
+
+.adminNotificationRule {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 12px 14px;
+  background: rgba(248, 250, 249, 0.88);
+  color: #356653;
+}
+
+.adminNotificationRule span { min-width: 0; }
+.adminNotificationRule strong { display: block; color: var(--ink); font-size: 12px; }
+.adminNotificationRule small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; line-height: 1.35; }
+
+.adminNotificationRecent {
+  max-width: 1180px;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: white;
+}
+
+.adminNotificationRecentHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 15px;
+  border-bottom: 1px solid var(--line);
+}
+
+.adminNotificationRecentHeader h3 { margin: 2px 0 0; font-size: 16px; }
+.adminNotificationRecentHeader > span { color: var(--muted); font-size: 12px; }
+.adminNotificationList { display: grid; }
+
+.adminNotificationMessage {
+  display: grid;
+  grid-template-columns: 64px minmax(160px, 1fr) 120px 100px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 15px;
+  border-bottom: 1px solid #edf1ef;
+  font-size: 12px;
+}
+
+.adminNotificationMessage:last-child { border-bottom: 0; }
+.adminNotificationMessageName strong { display: block; }
+.adminNotificationMessageName small { display: block; margin-top: 2px; color: var(--muted); text-transform: capitalize; }
+.adminNotificationMessageTime { color: var(--muted); }
+
+.adminNotificationChannel,
+.adminNotificationStatus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.adminNotificationChannel { background: #e8f0fb; color: #275b91; }
+.adminNotificationChannel--sms { background: #e6f5eb; color: #276447; }
+.adminNotificationStatus { background: #fff3d4; color: #7a5c0b; }
+.adminNotificationStatus--sent { background: #e6f5eb; color: #276447; }
+.adminNotificationStatus--failed { background: #fde8e6; color: #a0352a; }
+.adminNotificationStatus--cancelled,
+.adminNotificationStatus--skipped { background: #eef1f3; color: #5f6b73; }
+.adminNotificationEmpty { margin: 0; padding: 22px 15px; color: var(--muted); font-size: 13px; }
+
+@media (max-width: 980px) {
+  .adminNotificationFlow { grid-template-columns: 1fr; }
+  .adminNotificationStep { min-height: 0; border-right: 0; border-bottom: 1px solid var(--line); }
+  .adminNotificationStep:last-child { border-bottom: 0; }
+  .adminNotificationRules { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 680px) {
+  .adminNotifications { padding: 18px 12px; }
+  .adminNotificationsHeader { flex-direction: column; gap: 12px; }
+  .adminNotificationMessage { grid-template-columns: 58px 1fr; }
+  .adminNotificationMessageTime,
+  .adminNotificationStatus { grid-column: 2; }
+}
+
 /* Client journey */
 .authSegmented {
   display: grid;
