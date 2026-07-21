@@ -267,7 +267,20 @@ test("remote implementation forwards only invocation auth and downloads generate
   );
   assert.ok(args.includes(".agent-output/codex.patch=.agent-output/codex.patch"));
   assert.ok(args.includes(".agent-output/implementation.md=.agent-output/implementation.md"));
+  assert.equal(args.includes("--stop-after"), false);
   assert.equal(args.includes("GH_TOKEN"), false);
+});
+
+test("delegated Vercel runs rely on one-shot cleanup instead of stop-after", () => {
+  const args = buildRunArgs({
+    provider: "vercel-sandbox",
+    command: "npm test",
+    visual: false,
+    lane: "ciRemote",
+    leasePath: "/tmp/unused.json"
+  });
+
+  assert.equal(args.includes("--stop-after"), false);
 });
 
 test("exact remote PR mode disables local workspace sync", () => {

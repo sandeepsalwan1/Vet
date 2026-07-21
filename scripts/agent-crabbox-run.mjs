@@ -320,7 +320,7 @@ export function buildRunArgs({ provider, command, visual, lane, leasePath, noSyn
   }
   if (visual) {
     args.push("--desktop", "--browser", "--keep", "--keep-on-failure", "--lease-output", leasePath);
-  } else {
+  } else if (provider !== "vercel-sandbox") {
     args.push("--stop-after", "always");
   }
   args.push("--", "sh", "-lc", command);
