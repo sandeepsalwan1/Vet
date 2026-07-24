@@ -38,7 +38,7 @@
     "postgres": "^3.4.7"
   },
   "devDependencies": {
-    "@types/node": "^22.20.0",
+    "@types/node": "^26.1.1",
     "eslint-config-next": "^16.0.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "jscpd": "^5.0.12",
