@@ -185,8 +185,15 @@ export async function getClientAnalytics(input: {
             from mock_appointments appointment
             where appointment.clinic_id = ${clinicId}
               and appointment.client_id = range_client.client_id
-              and appointment.appointment_date >= current_date
+              and (appointment.appointment_date + appointment.appointment_time)
+                at time zone ${settings.timeZone} > now()
               and appointment.status in ('scheduled', 'confirmed')
+              and not exists (
+                select 1
+                from range_visits completed_visit
+                where completed_visit.client_id = range_client.client_id
+                  and completed_visit.appointment_id = appointment.id
+              )
           )
         )::int as rebooked_clients
       from range_clients range_client
