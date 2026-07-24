@@ -136,7 +136,7 @@ function AppRootContent({ audience }: { audience: Audience }) {
             priority
             unoptimized
           />
-          <p className="bootStatus">{view.kind === "redirecting" ? "Taking you there…" : "Opening…"}</p>
+          <p className="bootLine">{view.kind === "redirecting" ? "Taking you there…" : "Opening…"}</p>
         </section>
       </main>
     );
