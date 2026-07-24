@@ -1,6 +1,7 @@
 "use client";
 
 import type { AppRole } from "@central-vet/db";
+import Image from "next/image";
 import { Check, Pencil, ShieldCheck } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { authenticateActorSession } from "../lib/authClient";
@@ -72,10 +73,16 @@ export function BootScreen() {
   return (
     <main className="entryShell">
       <section className="entryPanel bootPanel">
-        <p className="eyebrow">{clinic.name}</p>
-        <h1>Clinic Tasks</h1>
+        <Image
+          className="bootWordmark"
+          src="/central-vet-loading.svg"
+          alt={clinic.name}
+          width={360}
+          height={92}
+          priority
+          unoptimized
+        />
         <div className="bootLine">Opening board</div>
-        <div className="bootBar" aria-hidden="true" />
       </section>
     </main>
   );
