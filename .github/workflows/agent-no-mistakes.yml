@@ -334,7 +334,7 @@ jobs:
             node ../trusted/scripts/agent-no-mistakes-gate.mjs "${args[@]}"
       - name: Upload sanitized gate result and native fix
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: no-mistakes-result-${{ inputs.pr-number }}
           path: ${{ runner.temp }}/no-mistakes-result

@@ -131,7 +131,7 @@ jobs:
           --dispatch-pr-security
           --json
       - run: cp .agent/schemas/review.schema.json .agent-output/review.schema.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agent-review-context-${{ inputs.pr-number }}
           path: |
@@ -191,7 +191,7 @@ jobs:
           --pr-number "${{ inputs.pr-number }}"
           --create-patch .agent-output/review.patch
           --json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agent-review-result-${{ inputs.pr-number }}
           path: |

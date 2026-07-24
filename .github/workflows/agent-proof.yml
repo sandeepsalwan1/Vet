@@ -228,7 +228,7 @@ jobs:
             --request-base64 "$REQUEST_B64" \
             --workdir "$GITHUB_WORKSPACE/trusted" \
             --json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         id: artifact
         if: always()
         with:
