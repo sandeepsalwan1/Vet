@@ -319,11 +319,13 @@ test("terminal marker preserves terminal failure detail for status finalization"
 
 test("proof workflow dispatches automerge only after terminal success is published", () => {
   const workflow = readFileSync(new URL("../.github/workflows/agent-proof.yml", import.meta.url), "utf8");
+  const finalizeJob = workflow.slice(workflow.indexOf("\n  finalize:"));
   const statusIndex = workflow.indexOf("gh api \"repos/$GITHUB_REPOSITORY/statuses/$STATUS_SHA\"");
   const dispatchIndex = workflow.indexOf("gh workflow run agent-automerge.yml");
 
   assert.ok(statusIndex >= 0);
   assert.ok(dispatchIndex > statusIndex);
+  assert.match(finalizeJob, /pull-requests: write/);
   assert.match(workflow, /v0\.40\.0/);
   assert.match(workflow, /crabbox_0\.40\.0_linux_amd64\.tar\.gz/);
   assert.doesNotMatch(workflow, /0\.38\.4/);
