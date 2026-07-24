@@ -362,12 +362,35 @@ test("oversized diff blocks instead of truncating", () => {
   );
 });
 
-test("ready-human-review is technically successful but merge-blocking", () => {
-  const result = reviewPolicyOutcome(review({ mergeRecommendation: "ready-human-review" }));
+test("ready-human-review with a real question is technically successful but merge-blocking", () => {
+  const result = reviewPolicyOutcome(
+    review({
+      mergeRecommendation: "ready-human-review",
+      humanQuestion: "Choose the product behavior?"
+    })
+  );
 
   assert.equal(result.technicalSuccess, true);
   assert.equal(result.manualBlock, true);
   assert.equal(result.statusState, "failure");
+});
+
+test("low-risk ready-human-review without a question continues automatically", () => {
+  const normalized = normalizeReviewPolicy(
+    review({
+      mergeRecommendation: "ready-human-review",
+      proofNeeded: "GIF"
+    })
+  );
+  const decision = reviewCycleDecision(normalized, {
+    repairAttempt: 0,
+    patchApplied: false,
+    ciPassed: true
+  });
+
+  assert.equal(normalized.mergeRecommendation, "ready");
+  assert.equal(decision.state, "ready");
+  assert.equal(decision.continueToNoMistakes, true);
 });
 
 test("high risk ready result is normalized to human review", () => {
@@ -386,7 +409,13 @@ test("passing review does not clear a shared blocked label", () => {
 });
 
 test("human review adds blocked and removes automerge", () => {
-  const changes = reviewLabelChanges(config, review({ mergeRecommendation: "ready-human-review" }));
+  const changes = reviewLabelChanges(
+    config,
+    review({
+      mergeRecommendation: "ready-human-review",
+      humanQuestion: "Choose the product behavior?"
+    })
+  );
 
   assert.ok(changes.add.includes(config.labels.blocked));
   assert.ok(changes.remove.includes(config.labels.automerge));
