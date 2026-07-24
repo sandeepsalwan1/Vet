@@ -11,6 +11,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { canManage } from "../lib/taskWorkflow";
 import { logWarn } from "./_apiResponse";
+import { requestHostname } from "./_requestHostname";
 
 const roleSchema = z.enum(["staff", "va", "task_adder", "veterinarian", "admin"]);
 export const actorSchema = z.object({
@@ -50,8 +51,7 @@ function passcodeMatches(input: string | undefined, ...allowed: Array<string | n
 }
 
 export async function resolveClinicFromRequest(request: Request): Promise<ClinicContext> {
-  const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || new URL(request.url).host;
-  return resolveClinicForHostname(host);
+  return resolveClinicForHostname(requestHostname(request));
 }
 
 async function normalizeActor(
