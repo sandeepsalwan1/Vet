@@ -377,7 +377,7 @@ jobs:
       - name: Download sanitized gate result
         id: download
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: no-mistakes-result-${{ inputs.pr-number }}
           path: ${{ runner.temp }}/no-mistakes-result
