@@ -1,7 +1,9 @@
 import nextEnv from "@next/env";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import postgres from "postgres";
+import { planMigrations } from "./migrationPlan.mjs";
 
 const root = path.resolve(import.meta.dirname, "../../..");
 const { loadEnvConfig } = nextEnv;
@@ -28,10 +30,101 @@ const files = (await fs.readdir(migrationsDir))
   .sort();
 
 try {
+  await sql`
+    create table if not exists app_schema_migrations (
+      filename text primary key,
+      checksum text not null,
+      applied_at timestamptz not null default now()
+    )
+  `;
+
+  const appliedRows = await sql`
+    select filename, checksum
+    from app_schema_migrations
+    order by filename
+  `;
+  const [{ tenantTablesExist }] = await sql`
+    select
+      to_regclass('public.clinics') is not null
+      and to_regclass('public.clinic_domains') is not null
+      as "tenantTablesExist"
+  `;
+  let legacyBaselineComplete = false;
+
+  if (tenantTablesExist) {
+    const [baselineState] = await sql`
+      select
+        exists (
+          select 1
+          from clinics clinic
+          join clinic_domains domain on domain.clinic_id = clinic.id
+          where clinic.slug = 'central-vet'
+            and domain.hostname = 'centralvet.eepish.com'
+        )
+        and exists (
+          select 1
+          from clinics clinic
+          join clinic_domains domain on domain.clinic_id = clinic.id
+          where clinic.slug = 'tri-city-vet'
+            and domain.hostname = 'tricityvet.eepish.com'
+        )
+        as "legacyBaselineComplete"
+    `;
+    legacyBaselineComplete = baselineState.legacyBaselineComplete;
+  }
+
+  const sources = new Map(
+    await Promise.all(
+      files.map(async (file) => [
+        file,
+        await fs.readFile(path.join(migrationsDir, file), "utf8")
+      ])
+    )
+  );
+  const checksums = new Map(
+    [...sources].map(([file, source]) => [
+      file,
+      createHash("sha256").update(source).digest("hex")
+    ])
+  );
+  const appliedChecksums = new Map(
+    appliedRows.map((row) => [row.filename, row.checksum])
+  );
+  const { baseline, pending } = planMigrations({
+    files,
+    appliedFiles: [...appliedChecksums.keys()],
+    legacyBaselineComplete
+  });
+
+  if (baseline.length > 0) {
+    await sql.begin(async (transaction) => {
+      for (const file of baseline) {
+        await transaction`
+          insert into app_schema_migrations (filename, checksum)
+          values (${file}, ${checksums.get(file)})
+        `;
+      }
+    });
+    console.log(`baselined ${baseline.length} existing migrations`);
+  }
+
   for (const file of files) {
-    const source = await fs.readFile(path.join(migrationsDir, file), "utf8");
+    const appliedChecksum = appliedChecksums.get(file);
+    if (appliedChecksum && appliedChecksum !== checksums.get(file)) {
+      throw new Error(`Applied migration changed: ${file}`);
+    }
+  }
+
+  for (const file of pending) {
+    const source = sources.get(file);
     console.log(`running ${file}`);
-    await sql.unsafe(source);
+    await sql.begin(async (transaction) => {
+      await transaction.unsafe(source);
+      await transaction`
+        insert into app_schema_migrations (filename, checksum)
+        values (${file}, ${checksums.get(file)})
+      `;
+    });
   }
   console.log("migrations complete");
 } finally {
