@@ -83,7 +83,7 @@ jobs:
             -f context=agent-review \
             -f description='agent review running' \
             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: main
           persist-credentials: false
@@ -153,7 +153,7 @@ jobs:
       pull-requests: read
       issues: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare-review.outputs.reviewed-head-sha }}
           fetch-depth: 0
@@ -216,7 +216,7 @@ jobs:
     outputs:
       next-gate: ${{ steps.apply.outputs.next-gate }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
