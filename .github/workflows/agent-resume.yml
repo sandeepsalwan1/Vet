@@ -1,0 +1,67 @@
+name: Agent Resume
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue-number:
+        required: true
+        type: number
+      comment-id:
+        required: true
+        type: number
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: agent-resume-${{ inputs.issue-number }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: validate owner reply
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      should-resume: ${{ steps.resume.outputs.should_resume }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - id: resume
+        name: Validate exact owner reply
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/agent-resume.mjs
+          --issue-number "${{ inputs.issue-number }}"
+          --comment-id "${{ inputs.comment-id }}"
+          --json
+
+  dispatch:
+    name: dispatch deterministic triage
+    needs: validate
+    if: needs.validate.outputs.should-resume == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch exact owner reply
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue-number }}
+          COMMENT_ID: ${{ inputs.comment-id }}
+        run: >-
+          gh workflow run agent-triage.yml
+          --repo "$GITHUB_REPOSITORY"
+          --ref main
+          -f issue-number="$ISSUE_NUMBER"
+          -f resume-comment-id="$COMMENT_ID"

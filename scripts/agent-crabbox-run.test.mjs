@@ -10,9 +10,11 @@ import {
   browserRouteMarkerArgs,
   buildRunArgs,
   emitImplementationOutput,
+  gifArtifactArgs,
   gifEncoderBootstrapCommands,
   parseTimingReport,
   providerChildEnvironment,
+  recordedBrowserLaunchScript,
   recoverLeaseHandle,
   runCrabboxLane,
   restoreImplementationOutput,
@@ -110,11 +112,15 @@ function writeRouteBinding(dir, overrides = {}) {
 
 function artifactOptions(dir, overrides = {}) {
   const { binding: bindingOverrides, ...options } = overrides;
-  const binding = writeRouteBinding(dir, bindingOverrides);
+  const proofKind = options.proofKind ?? "UI";
+  const binding = writeRouteBinding(dir, {
+    captureStartedBeforeLaunch: proofKind === "GIF",
+    ...bindingOverrides
+  });
   return {
     provider: binding.value.provider,
     leaseId: binding.value.leaseId,
-    proofKind: "UI",
+    proofKind,
     bundleDir: dir,
     route: binding.value.route,
     routeBindingPath: binding.path,
@@ -286,6 +292,39 @@ test("local-container browser launch uses container-safe Chromium flags", () => 
     "--disable-dev-shm-usage"
   ]);
   assert.equal(browserLaunchArgs({ provider: "hetzner", leaseId: "cbx_123", route: "/request" }).includes("--no-sandbox"), false);
+});
+
+test("GIF capture starts before the browser navigates and encodes that recording", () => {
+  const script = recordedBrowserLaunchScript({
+    provider: "local-container",
+    leaseId: "cbx_123",
+    route: "/request",
+    videoPath: "/tmp/proof/screen.mp4",
+    contactSheetPath: "/tmp/proof/screen.contact.png"
+  });
+
+  assert.ok(script.indexOf("'artifacts' 'video'") < script.indexOf("'desktop' 'launch'"));
+  assert.ok(script.indexOf("sleep 1") < script.indexOf("'desktop' 'launch'"));
+  assert.match(script, /'--duration' '10s'/);
+  assert.match(script, /'--fps' '30'/);
+  assert.match(script, /http:\/\/127\.0\.0\.1:3000\/request/);
+  assert.deepEqual(
+    gifArtifactArgs({
+      videoPath: "/tmp/proof/screen.mp4",
+      gifPath: "/tmp/proof/screen.trimmed.gif",
+      trimmedVideoPath: "/tmp/proof/screen.trimmed.mp4"
+    }),
+    [
+      "artifacts",
+      "gif",
+      "--input",
+      "/tmp/proof/screen.mp4",
+      "--output",
+      "/tmp/proof/screen.trimmed.gif",
+      "--trimmed-video-output",
+      "/tmp/proof/screen.trimmed.mp4"
+    ]
+  );
 });
 
 test("remote implementation requires an explicitly ready Vercel provider", () => {
@@ -491,6 +530,14 @@ test("GIF proof requires authentic video and GIF files from one bundle", (t) => 
     validateCollectedArtifacts(complete, options),
     [options.routeBindingPath, screenshot, video, gif]
   );
+  writeFileSync(
+    options.routeBindingPath,
+    `${JSON.stringify({
+      ...JSON.parse(readFileSync(options.routeBindingPath, "utf8")),
+      captureStartedBeforeLaunch: false
+    })}\n`
+  );
+  assert.throws(() => validateCollectedArtifacts(complete, options), /route binding does not match/);
 });
 
 test("artifact verification rejects path escapes, symlinks, empty files, and forged media", (t) => {
