@@ -509,6 +509,21 @@ test("implementation workflow isolates candidate checks from credentials, artifa
     assert.match(generator, /cancel-in-progress: false/);
     assert.match(generator, /queue: max/);
   }
+  assert.match(remote, /continue-on-error: true/);
+  assert.match(
+    remote,
+    /generated: \$\{\{ steps\.generate\.outcome == 'success' && steps\.implementation-artifact\.outcome == 'success' \}\}/
+  );
+  assert.match(remote, /git init --quiet/);
+  assert.match(remote, /git commit --quiet --no-verify/);
+  assert.match(remote, /--sandbox danger-full-access/);
+  assert.doesNotMatch(remote, /npm ci && npm install --global/);
+  assert.match(remote, /name: agent-implementation-remote-diagnostics-\$\{\{ inputs\.issue-number \}\}/);
+  assert.match(
+    remote,
+    /if: always\(\) && \(steps\.generate\.outcome != 'success' \|\| steps\.implementation-artifact\.outcome != 'success'\)/
+  );
+  assert.match(fallback, /needs\.generate-patch-remote\.outputs\.generated != 'true'/);
   assert.match(fallback, /sandbox: \$\{\{ needs\.prepare-prompt\.outputs\.backend-sandbox \}\}/);
   assert.match(fallback, /model: \$\{\{ needs\.prepare-prompt\.outputs\.backend-model \}\}/);
   assert.match(fallback, /effort: \$\{\{ needs\.prepare-prompt\.outputs\.backend-effort \}\}/);

@@ -82,6 +82,9 @@ jobs:
     needs: prepare-prompt
     if: vars.CRABBOX_VERCEL_READY == 'true' || vars.CRABBOX_HETZNER_READY == 'true'
     runs-on: ubuntu-latest
+    continue-on-error: true
+    outputs:
+      generated: ${{ steps.generate.outcome == 'success' && steps.implementation-artifact.outcome == 'success' }}
     concurrency:
       group: ${{ needs.prepare-prompt.outputs.concurrency-group }}
       cancel-in-progress: false
@@ -98,7 +101,6 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-      - run: npm ci
       - uses: actions/download-artifact@v4
         with:
           name: agent-implementation-context-${{ inputs.issue-number }}
@@ -129,6 +131,7 @@ jobs:
           chmod 755 "$bridge"
           echo "CRABBOX_VERCEL_SANDBOX_BRIDGE=$bridge" >> "$GITHUB_ENV"
       - name: Generate patch in Crabbox
+        id: generate
         env:
           CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -140,27 +143,48 @@ jobs:
           CRABBOX_HETZNER_READY: ${{ vars.CRABBOX_HETZNER_READY }}
           REMOTE_COMMAND: >-
             agent_key="$CODEX_API_KEY"; unset CODEX_API_KEY OPENAI_API_KEY;
-            npm ci && npm install --global @openai/codex@0.144.1 &&
+            git init --quiet &&
+            git config user.name "Agent Worker" &&
+            git config user.email "agent@example.invalid" &&
+            git add --all &&
+            git commit --quiet --no-verify -m "chore: seed remote workspace" &&
+            npm install --global --ignore-scripts --no-audit --no-fund @openai/codex@0.144.1 &&
             CODEX_API_KEY="$agent_key" node scripts/agent-worker.mjs
+            --sandbox danger-full-access
             --prompt-file .agent-output/implement-prompt.md
             --output-file .agent-output/implementation.md &&
             unset agent_key && node scripts/agent-implement.mjs
             --issue-number "${{ inputs.issue-number }}"
             --create-patch .agent-output/codex.patch --json
         run: node scripts/agent-crabbox-run.mjs --lane implementRemote --command "$REMOTE_COMMAND" --json
-      - uses: actions/upload-artifact@v4
+      - id: implementation-artifact
+        uses: actions/upload-artifact@v4
+        if: steps.generate.outcome == 'success'
         with:
           name: agent-implementation-${{ inputs.issue-number }}
           path: .agent-output/*
           include-hidden-files: true
           if-no-files-found: error
+      - name: Upload redacted remote diagnostics
+        if: always() && (steps.generate.outcome != 'success' || steps.implementation-artifact.outcome != 'success')
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-implementation-remote-diagnostics-${{ inputs.issue-number }}
+          path: |
+            .agent-output/crabbox-implementRemote-*.json
+            .agent-output/crabbox-implementRemote-*.log
+          include-hidden-files: true
+          if-no-files-found: warn
+      - name: Report GitHub fallback
+        if: always() && (steps.generate.outcome != 'success' || steps.implementation-artifact.outcome != 'success')
+        run: echo "::warning::Remote Crabbox generation failed; continuing with the isolated GitHub implementer."
 
   generate-patch:
     name: generate-patch
     needs:
       - prepare-prompt
       - generate-patch-remote
-    if: always() && needs.prepare-prompt.result == 'success' && needs.generate-patch-remote.result != 'success'
+    if: always() && needs.prepare-prompt.result == 'success' && needs.generate-patch-remote.outputs.generated != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -210,7 +234,7 @@ jobs:
     needs:
       - generate-patch-remote
       - generate-patch
-    if: always() && (needs.generate-patch-remote.result == 'success' || needs.generate-patch.result == 'success')
+    if: always() && (needs.generate-patch-remote.outputs.generated == 'true' || needs.generate-patch.result == 'success')
     permissions:
       contents: read
     env:

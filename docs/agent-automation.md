@@ -242,7 +242,7 @@ Read the newest managed agent comment, answer the decision, or use the exact-hea
 
 - Issue control plane: GitHub issue labels plus `agent-router.yml`.
 - Cost control: proposal uses GPT-5.4 mini with low reasoning; triage uses no model.
-- Remote implementation: Crabbox first after provider readiness; isolated GitHub Actions fallback for non-visual work.
+- Remote implementation: Crabbox first after provider readiness; isolated GitHub Actions fallback for missing auth, provider failure, or artifact-publication failure.
 - Optional orchestration reference: Sandcastle demonstrates label-driven AFK orchestration patterns and remains an optional worker adapter.
 - OpenClaw execution reference: Crabbox is the execution and computer-use proof host pattern; credential-free visual fallback runs in a Crabbox local container on GitHub Actions.
 - Implementation and review use GPT-5.4 mini with low reasoning; no-mistakes uses the same mini model with medium reasoning for its stricter structured gate contract.
@@ -254,8 +254,10 @@ Read the newest managed agent comment, answer the decision, or use the exact-hea
 ## Trust Boundaries
 
 - Keep baseline CI separate from agent workflows.
-- Pass the OpenAI key only to `openai/codex-action`, never as job-level environment.
+- Pass the OpenAI key only to the isolated Codex Action or Crabbox worker invocation, never as job-level environment.
 - Keep GitHub write tokens out of Codex jobs; validation commands run with GitHub token variables removed.
+- Remote Codex uses full filesystem access only inside its ephemeral Crabbox lease because Vercel Sandbox cannot run Codex's nested Bubblewrap sandbox.
+- The remote lease receives model auth but no GitHub write credentials, and its patch still passes the separate exact-base validation and trusted publication jobs.
 - Codex Action author gates allow the repository owner and `github-actions[bot]`; cross-repository PR review is rejected before Codex runs.
 - High-risk or high-priority work requires human review.
 - A missing provider, artifact, or lease blocks required visual proof; it does not fake success.
