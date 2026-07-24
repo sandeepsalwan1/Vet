@@ -1,5 +1,6 @@
 import { getSql } from "./connection";
 import { resolveClinicId } from "./clinics";
+import { recordClientVisitStage } from "./analytics";
 import {
   normalizeAppointment,
   normalizeFollowup,
@@ -126,7 +127,19 @@ export async function markAppointmentArrived(id: string, options?: { clinicId?: 
       and clinic_id = ${clinicId}
     returning id, client_id, pet_id, appointment_date, appointment_time, appointment_type, doctor, status, wait_minutes, room_status, arrived_at, notes
   `;
-  return rows[0] ? normalizeAppointment(rows[0]) : null;
+  const appointment = rows[0] ? normalizeAppointment(rows[0]) : null;
+  if (appointment?.arrivedAt) {
+    await recordClientVisitStage({
+      clinicId,
+      clientId: appointment.clientId,
+      petId: appointment.petId,
+      appointmentId: appointment.id,
+      stage: "checked_in",
+      source: "agent_arrival",
+      occurredAt: appointment.arrivedAt
+    });
+  }
+  return appointment;
 }
 
 export async function bookMockAppointment(input: {
