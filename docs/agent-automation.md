@@ -13,7 +13,7 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 ## Labels
 
 - `agent:triage`: request or rerun trusted issue triage.
-- `agent:implement`: recommended one-label entry; run cheap trusted triage, then implement an approved issue on an agent branch and draft PR.
+- `agent:implement`: recommended one-label entry; record a zero-model trusted intent seal, then implement the issue on an agent branch and draft PR.
 - `agent:review`: review or fix an agent-created PR and publish a recommendation.
 - `agent:proof`: require explicit proof before automerge.
 - `agent:automerge`: allow merge only after every configured gate passes.
@@ -26,9 +26,9 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 
 1. `agent-router.yml` maps label events to reusable workflows; issue `agent:implement` intentionally enters trusted triage first.
 2. Proposal generation receives a bounded public snapshot of current `main` workflow health and treats that snapshot as evidence, never as instructions.
-3. Triage uses a schema-constrained Codex result, then applies managed labels/comments.
+3. Triage deterministically seals the issue snapshot, priority, and explicit proof request without a model call, then applies managed labels/comments and dispatches implementation.
    Read-only GitHub API calls use bounded exponential retries, managed comments and pull metadata use GitHub GraphQL with independent REST read fallbacks, PR file inventories use head-bound paginated GraphQL with immutable rename verification, diffs use exact commit comparison, and PR creation or updates use GraphQL mutations.
-4. Expensive proposer, triage, implementation, review, no-mistakes, and proof jobs share deterministic slot groups from `.agent/config.json`.
+4. Expensive proposer, implementation, review, no-mistakes, and proof jobs share deterministic slot groups from `.agent/config.json`.
 5. Implementation selects its allowed backend from `.agent/config.json`, runs without write credentials, uploads a patch, then applies it in a separate write-token job and opens a draft PR.
 6. The current installed worker adapter is Codex; unsupported or unimplemented backend selections fail before model execution.
 7. Review repeats the credential-free read/patch separation, applies safe fixes to the agent branch, waits for exact-head CI, and re-reviews for at most two repair cycles before invoking no-mistakes.
@@ -49,7 +49,8 @@ Cost-sensitive routing lives in `.agent/config.json`.
 An issue carrying `priority:trivial` when implementation starts records that choice before the model runs, seals it in immutable PR commit ancestry, and skips only the paid no-mistakes model gate.
 The trivial lane still requires trusted triage, exact-head CI, independent agent review, proof when requested, and automerge policy.
 All model lanes use GPT-5.4 mini because GPT-5.4 nano does not support the Codex action's required tool transport.
-Implementation, first-pass review, proposal, and triage use low reasoning; no-mistakes and bounded reviewer repair use medium reasoning after measured low-effort acceptance and structured-output failures.
+Triage uses no model.
+Implementation, first-pass review, and proposal use low reasoning; no-mistakes and bounded reviewer repair use medium reasoning after measured low-effort acceptance and structured-output failures.
 Increase a lane's model or reasoning only after measured contract failures.
 
 Model upgrades require config changes only:
@@ -57,7 +58,7 @@ Model upgrades require config changes only:
 - implementation: `backend.model` and `backend.effort`;
 - review: `backend.reviewModel` and `backend.reviewEffort`;
 - no-mistakes: `backend.noMistakesModel` and `backend.noMistakesEffort`;
-- proposal/triage: their matching `proposer*` and `triage*` fields.
+- proposal: `backend.proposerModel` and `backend.proposerEffort`.
 
 ## Operate The Loop
 
@@ -100,9 +101,9 @@ gh issue create \
   --label agent:implement
 ```
 
-That one label starts cheap trusted triage before any implementation model runs.
-Triage reads root and applicable nested `AGENTS.md` files, `VISION.md`, repository policy, current issue state, architecture docs, and any repository plan/spec linked by the issue.
-An aligned low-risk result adds `agent:implement` and `agent:automerge`, then dispatches implementation automatically.
+That one label records a deterministic trusted intent seal before any implementation model runs.
+The seal uses no model credits, preserves explicit priority and proof requests, and sends routine ambiguity to the implementer.
+A successful seal adds `agent:implement`, adds `agent:automerge` only when policy permits, clears stale triage blocks, and dispatches implementation automatically.
 Implementation creates `agent/issue-<number>-<slug>`, validates the patch, opens or updates a draft PR, starts exact-head CI, and starts review.
 Review can apply a safe patch, reruns exact-head CI and review until clean within its bounded repair budget, requests proof when needed, publishes `agent-review`, then starts no-mistakes.
 After model review, a credential-free deterministic repair removes extra blank lines at EOF only when `git diff --check` identifies them in a safe, non-privileged text file.
@@ -131,7 +132,7 @@ That explicit label skips only the paid no-mistakes model call.
 It does not skip triage, CI, independent review, requested proof, exact-head checks, or merge policy.
 Adding `priority:trivial` after implementation starts cannot bypass no-mistakes because the original source labels are frozen in the trusted validation artifact and must match every immutable implementation seal and the PR metadata.
 
-`agent:triage` remains available when an operator explicitly wants to request or rerun triage:
+`agent:triage` remains available when an operator wants to refresh the zero-model intent seal:
 
 ```bash
 gh issue edit <issue-number> --repo "$REPO" --add-label agent:triage
@@ -234,7 +235,7 @@ Read the newest managed agent comment, answer the decision, or use the exact-hea
 ## Plan Acceptance Map
 
 - Issue control plane: GitHub issue labels plus `agent-router.yml`.
-- Cheap proposal and triage: GPT-5.4 mini with low reasoning, the cheapest configured model compatible with the Codex action.
+- Cost control: proposal uses GPT-5.4 mini with low reasoning; triage uses no model.
 - Remote implementation: Crabbox first after provider readiness; isolated GitHub Actions fallback for non-visual work.
 - Optional orchestration reference: Sandcastle demonstrates label-driven AFK orchestration patterns and remains an optional worker adapter.
 - OpenClaw execution reference: Crabbox is the execution and computer-use proof host pattern; credential-free visual fallback runs in a Crabbox local container on GitHub Actions.

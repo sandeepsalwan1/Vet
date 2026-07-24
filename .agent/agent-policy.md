@@ -41,6 +41,7 @@ Automerge is forbidden for high-priority or high-risk work even if all checks pa
 ## Worker Routing
 
 - GitHub Actions owns label events and CI status.
+- Triage is a deterministic zero-model intent seal; routine ambiguity passes to the implementer for repository-grounded judgment.
 - Crabbox is preferred for implementation/proof when provider auth exists.
 - A provider is eligible only after a live smoke passes and its repository readiness variable is enabled.
 - Crabbox `local-container` is the credential-free exception for explicit visual proof on a GitHub runner; it receives no provider credentials and must produce the same authentic route-bound artifacts or fail closed.

@@ -8,7 +8,7 @@ on:
         type: number
     secrets:
       OPENAI_API_KEY:
-        required: true
+        required: false
   workflow_dispatch:
     inputs:
       issue-number:
@@ -27,8 +27,6 @@ jobs:
     name: prepare triage
     runs-on: ubuntu-latest
     outputs:
-      backend-effort: ${{ steps.backend.outputs.effort }}
-      backend-model: ${{ steps.backend.outputs.model }}
       concurrency-group: ${{ steps.concurrency.outputs.group }}
     permissions:
       contents: read
@@ -41,9 +39,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Select triage model
-        id: backend
-        run: node scripts/agent-worker.mjs --validate-backend --lane triage --json
       - name: Allocate triage capacity
         id: concurrency
         env:
@@ -56,10 +51,9 @@ jobs:
           node scripts/agent-triage.mjs
           --issue-number "${{ inputs.issue-number }}"
           --prepare
-          --write-prompt .agent-output/triage-prompt.md
+          --lightweight
           --write-manifest .agent-output/triage-manifest.json
           --json
-      - run: cp .agent/schemas/triage.schema.json .agent-output/triage.schema.json
       - uses: actions/upload-artifact@v4
         with:
           name: agent-triage-context-${{ inputs.issue-number }}
@@ -68,7 +62,7 @@ jobs:
           if-no-files-found: error
 
   generate:
-    name: generate triage
+    name: generate lightweight triage
     needs: prepare
     runs-on: ubuntu-latest
     concurrency:
@@ -77,6 +71,7 @@ jobs:
       queue: max
     permissions:
       contents: read
+      issues: read
     steps:
       - uses: actions/checkout@v5
         with:
@@ -86,19 +81,18 @@ jobs:
         with:
           name: agent-triage-context-${{ inputs.issue-number }}
           path: .agent-output
-      - name: Run read-only Codex triage
-        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
+      - uses: actions/setup-node@v4
         with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          prompt-file: .agent-output/triage-prompt.md
-          sandbox: read-only
-          model: ${{ needs.prepare.outputs.backend-model }}
-          effort: ${{ needs.prepare.outputs.backend-effort }}
-          allow-users: ${{ github.repository_owner }}
-          allow-bots: true
-          codex-version: "0.144.1"
-          output-schema-file: .agent-output/triage.schema.json
-          output-file: .agent-output/triage.json
+          node-version: "22"
+      - name: Write deterministic triage decision
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/agent-triage.mjs
+          --issue-number "${{ inputs.issue-number }}"
+          --manifest .agent-output/triage-manifest.json
+          --write-lightweight .agent-output/triage.json
+          --json
       - uses: actions/upload-artifact@v4
         with:
           name: agent-triage-result-${{ inputs.issue-number }}

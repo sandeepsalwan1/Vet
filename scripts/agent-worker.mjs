@@ -22,8 +22,7 @@ const CODEX_LANES = Object.freeze({
   implement: Object.freeze({ model: "model", effort: "effort" }),
   "no-mistakes": Object.freeze({ model: "noMistakesModel", effort: "noMistakesEffort" }),
   proposer: Object.freeze({ model: "proposerModel", effort: "proposerEffort" }),
-  review: Object.freeze({ model: "reviewModel", effort: "reviewEffort" }),
-  triage: Object.freeze({ model: "triageModel", effort: "triageEffort" })
+  review: Object.freeze({ model: "reviewModel", effort: "reviewEffort" })
 });
 
 function nonemptyString(value, label) {

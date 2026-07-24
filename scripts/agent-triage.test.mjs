@@ -7,6 +7,7 @@ import test from "node:test";
 import { issueSnapshotSha256 } from "./agent-lib.mjs";
 import {
   assertTriageSnapshot,
+  lightweightTriageDecision,
   parseAuthoritativeTriageJson,
   readTriageManifest,
   triageBody,
@@ -50,26 +51,29 @@ test("manual review blocks and removes stale implementation labels", () => {
   assert.ok(changes.remove.includes(config.labels.automerge));
 });
 
-test("existing blocked label prevents a safe decision from restarting implementation", () => {
+test("safe retriage clears a stale triage block and restarts implementation", () => {
   const changes = triageLabelChanges(config, decision(), [config.labels.blocked]);
 
-  assert.equal(changes.blocked, true);
-  assert.ok(!changes.add.includes(config.labels.implement));
-  assert.ok(!changes.add.includes(config.labels.automerge));
-  assert.ok(!changes.remove.includes(config.labels.blocked));
+  assert.equal(changes.blocked, false);
+  assert.ok(changes.add.includes(config.labels.implement));
+  assert.ok(changes.add.includes(config.labels.automerge));
+  assert.ok(changes.remove.includes(config.labels.blocked));
 });
 
-test("high-priority and proof labels are sticky across retriage", () => {
+test("high-priority work still implements but cannot automerge", () => {
   const changes = triageLabelChanges(config, decision({ priority: "low", proofNeeded: "none" }), [
+    config.labels.blocked,
     config.labels.priorityHigh,
     config.labels.proof
   ]);
 
-  assert.equal(changes.blocked, true);
+  assert.equal(changes.blocked, false);
+  assert.ok(changes.add.includes(config.labels.implement));
   assert.ok(!changes.remove.includes(config.labels.priorityHigh));
   assert.ok(!changes.remove.includes(config.labels.proof));
   assert.ok(changes.remove.includes(config.labels.priorityLow));
   assert.ok(changes.remove.includes(config.labels.automerge));
+  assert.ok(changes.remove.includes(config.labels.blocked));
 });
 
 test("a nonblank human question blocks implementation", () => {
@@ -79,6 +83,47 @@ test("a nonblank human question blocks implementation", () => {
   assert.ok(changes.add.includes(config.labels.blocked));
   assert.ok(!changes.add.includes(config.labels.implement));
   assert.ok(!changes.add.includes(config.labels.automerge));
+});
+
+test("lightweight triage spends no model judgment on routine ambiguity", () => {
+  assert.deepEqual(
+    lightweightTriageDecision(config, {
+      number: 27,
+      title: "Improve the loading screen",
+      body: "Choose the right loading surface and provide GIF or video proof.",
+      labels: [{ name: config.labels.priorityLow }, { name: config.labels.proof }]
+    }),
+    {
+      value: "low",
+      priority: "low",
+      risk: "low",
+      alignment: "yes",
+      implementationScope:
+        "Implement the requested outcome using repository context and reasonable defaults. Resolve routine ambiguity during implementation instead of asking for exhaustive requirements.",
+      proofNeeded: "GIF",
+      automationDecision: "implement",
+      humanQuestion: ""
+    }
+  );
+  assert.deepEqual(
+    lightweightTriageDecision(config, {
+      number: 28,
+      title: "Choose the exact copy",
+      body: "Improve the README.",
+      labels: []
+    }),
+    {
+      value: "medium",
+      priority: "medium",
+      risk: "medium",
+      alignment: "yes",
+      implementationScope:
+        "Implement the requested outcome using repository context and reasonable defaults. Resolve routine ambiguity during implementation instead of asking for exhaustive requirements.",
+      proofNeeded: "none",
+      automationDecision: "implement",
+      humanQuestion: ""
+    }
+  );
 });
 
 test("authoritative parser accepts raw JSON and one final fenced block", () => {
@@ -165,16 +210,17 @@ test("managed triage JSON stores the trusted issue snapshot digest", () => {
   assert.match(body, /"issueSnapshotSha256": "a{64}"/);
 });
 
-test("Codex generation is pinned and has no GitHub write permissions", () => {
+test("triage generation is deterministic and uses no model credits", () => {
   const workflow = readFileSync(new URL("../.github/workflows/agent-triage.yml", import.meta.url), "utf8");
   const prepare = workflow.match(/\n  prepare:\n([\s\S]*?)\n  generate:/)?.[1] ?? "";
   const generate = workflow.match(/\n  generate:\n([\s\S]*?)\n  apply:/)?.[1] ?? "";
 
-  assert.match(prepare, /--validate-backend --lane triage --json/);
-  assert.match(generate, /permissions:\n      contents: read/);
+  assert.doesNotMatch(prepare, /--validate-backend|backend-model|backend-effort/);
+  assert.match(prepare, /--prepare[\s\S]*--lightweight/);
+  assert.doesNotMatch(prepare, /triage-prompt/);
+  assert.match(generate, /permissions:\n      contents: read\n      issues: read/);
   assert.doesNotMatch(generate, /(?:actions|issues|pull-requests|statuses): write/);
-  assert.match(generate, /codex-version: "0\.144\.1"/);
+  assert.doesNotMatch(generate, /openai\/codex-action|openai-api-key|model:|effort:/);
+  assert.match(generate, /--write-lightweight \.agent-output\/triage\.json/);
   assert.match(generate, /ref: main\n          persist-credentials: false/);
-  assert.match(generate, /model: \$\{\{ needs\.prepare\.outputs\.backend-model \}\}/);
-  assert.match(generate, /effort: \$\{\{ needs\.prepare\.outputs\.backend-effort \}\}/);
 });

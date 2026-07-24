@@ -6,8 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Submitting this form starts cheap trusted triage, then unattended implementation for aligned work.
-        High-risk, unclear, or unprovable work stops for human input.
+        Submitting this form records a zero-model intent seal, then starts unattended implementation.
+        Routine ambiguity is resolved by the implementer; real safety or authorization decisions still stop for human input.
   - type: textarea
     id: outcome
     attributes:

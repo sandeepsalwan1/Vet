@@ -70,8 +70,6 @@
     "effort": "low",
     "proposerModel": "gpt-5.4-mini",
     "proposerEffort": "low",
-    "triageModel": "gpt-5.4-mini",
-    "triageEffort": "low",
     "reviewModel": "gpt-5.4-mini",
     "reviewEffort": "low",
     "noMistakesModel": "gpt-5.4-mini",

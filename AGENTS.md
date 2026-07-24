@@ -31,7 +31,7 @@ Central Veterinary Hospital MVP: one deployed Next.js app, Postgres-backed npm w
 
 - New work: open `https://github.com/sandeepsalwan1/Vet/issues/new?template=afk-implementation.yml`; submission adds `agent:implement` automatically.
 - Existing issue: run `gh issue edit <number> --repo sandeepsalwan1/Vet --add-label agent:implement`.
-- Then leave it alone; automation triages, creates its branch and draft PR, runs CI, review, and no-mistakes, then safely merges and closes the issue.
+- Then leave it alone; automation records a zero-model intent seal, creates its branch and draft PR, runs CI, review, and no-mistakes, then safely merges and closes the issue.
 - Trivial low-risk cost lane: add `priority:trivial` before `agent:implement`; it skips paid no-mistakes only, while CI and review remain required.
 - No manual branch or push is required.
 - Intentional manual bypass: a repository-owner direct push is outside the AFK loop; `[skip ci]` also skips push-triggered Actions.

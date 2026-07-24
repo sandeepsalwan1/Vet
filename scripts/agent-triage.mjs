@@ -184,6 +184,43 @@ export function validateTriageDecision(decision) {
   return decision;
 }
 
+export function lightweightTriageDecision(config, issue) {
+  const labels = issueLabels(issue);
+  const priority = labels.includes(config.labels.priorityHigh)
+    ? "high"
+    : labels.includes(config.labels.priorityLow) || labels.includes(config.labels.priorityTrivial)
+      ? "low"
+      : "medium";
+  const issueText = `${issue?.title ?? ""}\n${issue?.body ?? ""}`;
+  const proofNeeded = /\b(?:gif|video|screen recording)\b/i.test(issueText)
+    ? "GIF"
+    : labels.includes(config.labels.proof)
+      ? "UI"
+      : "none";
+
+  return {
+    value: priority,
+    priority,
+    risk: priority === "low" ? "low" : "medium",
+    alignment: "yes",
+    implementationScope:
+      "Implement the requested outcome using repository context and reasonable defaults. Resolve routine ambiguity during implementation instead of asking for exhaustive requirements.",
+    proofNeeded,
+    automationDecision: "implement",
+    humanQuestion: ""
+  };
+}
+
+export function writeLightweightTriageDecision(config, issueNumber, manifestPath, outputPath) {
+  const manifest = readTriageManifest(manifestPath);
+  const { issue } = fetchIssue(config, issueNumber);
+  assertTriageSnapshot(issue, manifest, issueNumber);
+  const decision = lightweightTriageDecision(config, issue);
+  mkdirSync(dirname(outputPath), { recursive: true });
+  writeFileSync(outputPath, `${JSON.stringify(decision, null, 2)}\n`);
+  return decision;
+}
+
 export function triageBody(decision) {
   return `## Agent Triage
 
@@ -209,17 +246,12 @@ ${markdownJsonBlock(decision)}`;
 export function triageLabelChanges(config, decision, currentLabels = []) {
   const add = [];
   const remove = [];
-  const alreadyBlocked = currentLabels.includes(config.labels.blocked);
   const stickyHighPriority = currentLabels.includes(config.labels.priorityHigh);
   const blocked =
-    alreadyBlocked ||
-    stickyHighPriority ||
     decision.alignment !== "yes" ||
     decision.automationDecision === "blocked" ||
     decision.automationDecision === "manual-review" ||
     decision.automationDecision === "reject" ||
-    decision.risk === "high" ||
-    decision.priority === "high" ||
     decision.humanQuestion.trim() !== "";
   const requiresVisualProof = decision.proofNeeded === "UI" || decision.proofNeeded === "GIF";
 
@@ -232,7 +264,12 @@ export function triageLabelChanges(config, decision, currentLabels = []) {
     remove.push(config.labels.implement, config.labels.automerge);
   } else if (decision.automationDecision === "implement") {
     add.push(config.labels.implement);
-    if (decision.risk !== "high" && decision.priority !== "high") add.push(config.labels.automerge);
+    remove.push(config.labels.blocked);
+    if (decision.risk !== "high" && decision.priority !== "high" && !stickyHighPriority) {
+      add.push(config.labels.automerge);
+    } else {
+      remove.push(config.labels.automerge);
+    }
   }
 
   if (stickyHighPriority || decision.priority !== "low") remove.push(config.labels.priorityLow);
@@ -246,9 +283,11 @@ export function triageLabelChanges(config, decision, currentLabels = []) {
 
 export function prepareTriage(config, issueNumber, promptPath, manifestPath, dryRun = false) {
   const { issue, comments } = fetchIssue(config, issueNumber);
-  const prompt = buildPrompt(config, issue, comments);
-  mkdirSync(dirname(promptPath), { recursive: true });
-  writeFileSync(promptPath, prompt);
+  if (promptPath) {
+    const prompt = buildPrompt(config, issue, comments);
+    mkdirSync(dirname(promptPath), { recursive: true });
+    writeFileSync(promptPath, prompt);
+  }
   const manifest = writeTriageManifest(manifestPath, issue);
   const comment = upsertManagedComment({
     config,
@@ -327,13 +366,13 @@ async function main() {
   const dryRun = Boolean(args["dry-run"]);
 
   if (args.prepare) {
-    if (!args["write-prompt"] || !args["write-manifest"]) {
-      throw new AgentError("--prepare requires --write-prompt and --write-manifest", 2);
+    if (!args["write-manifest"] || (!args.lightweight && !args["write-prompt"])) {
+      throw new AgentError("--prepare requires --write-manifest and a prompt unless --lightweight", 2);
     }
     const result = prepareTriage(
       config,
       issueNumber,
-      args["write-prompt"],
+      args.lightweight ? "" : args["write-prompt"],
       args["write-manifest"],
       dryRun
     );
@@ -344,6 +383,26 @@ async function main() {
   if (args["mark-failed"]) {
     const result = markTriageFailed(config, issueNumber, dryRun);
     finish({ ok: true, message: `marked triage failed for #${issueNumber}`, ...result }, Boolean(args.json));
+    return;
+  }
+
+  if (args["write-lightweight"]) {
+    if (!args.manifest) throw new AgentError("--write-lightweight requires --manifest", 2);
+    const decision = writeLightweightTriageDecision(
+      config,
+      issueNumber,
+      args.manifest,
+      args["write-lightweight"]
+    );
+    finish(
+      {
+        ok: true,
+        message: `wrote lightweight triage for #${issueNumber}`,
+        outputPath: args["write-lightweight"],
+        decision
+      },
+      Boolean(args.json)
+    );
     return;
   }
 
