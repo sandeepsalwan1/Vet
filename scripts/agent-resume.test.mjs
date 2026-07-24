@@ -132,16 +132,13 @@ test("owner follow-up lookup can revalidate an exact frozen reply", () => {
   assert.equal(comment.body, "You choose the safest reasonable behavior.");
 });
 
-test("resume workflow serializes per issue and calls zero-model triage", () => {
+test("resume workflow serializes per issue and dispatches zero-model triage", () => {
   const workflow = readFileSync(new URL("../.github/workflows/agent-resume.yml", import.meta.url), "utf8");
 
   assert.match(workflow, /group: agent-resume-\$\{\{ inputs\.issue-number \}\}/);
   assert.match(workflow, /cancel-in-progress: false/);
   assert.match(workflow, /node scripts\/agent-resume\.mjs/);
-  assert.match(
-    workflow,
-    /triage:\n[\s\S]*?permissions:\n      actions: write\n      contents: read\n      issues: write\n[\s\S]*?uses: \.\/\.github\/workflows\/agent-triage\.yml/
-  );
-  assert.match(workflow, /resume-comment-id:/);
+  assert.match(workflow, /gh workflow run agent-triage\.yml/);
+  assert.match(workflow, /-f resume-comment-id="\$COMMENT_ID"/);
   assert.doesNotMatch(workflow, /openai\/codex-action|model:|effort:/);
 });

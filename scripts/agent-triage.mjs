@@ -19,6 +19,7 @@ import {
   readText,
   removeLabels,
   repoRoot,
+  setGitHubOutput,
   upsertManagedComment
 } from "./agent-lib.mjs";
 import { evaluateResumeRequest, ownerFollowUpForComment } from "./agent-resume.mjs";
@@ -320,7 +321,13 @@ export function prepareTriage(
   let ownerFollowUp = null;
   if (resumeCommentId) {
     const resume = evaluateResumeRequest(config, issue, comments, resumeCommentId);
-    if (!resume.shouldResume) throw new AgentError(`resume refused: ${resume.reason}`, 1);
+    if (!resume.shouldResume) {
+      return {
+        issueNumber,
+        skipped: true,
+        reason: resume.reason
+      };
+    }
     ownerFollowUp = resume.followUp;
   }
   if (promptPath) {
@@ -434,7 +441,15 @@ async function main() {
       dryRun,
       resumeCommentId
     );
-    finish({ ok: true, message: `prepared triage for #${issueNumber}`, ...result }, Boolean(args.json));
+    setGitHubOutput({ should_continue: !result.skipped });
+    finish(
+      {
+        ok: true,
+        message: result.skipped ? `skipped resumed triage for #${issueNumber}` : `prepared triage for #${issueNumber}`,
+        ...result
+      },
+      Boolean(args.json)
+    );
     return;
   }
 
