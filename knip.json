@@ -11,7 +11,8 @@
         "app/**/page.tsx",
         "app/**/route.ts"
       ],
-      "project": ["app/**/*.{ts,tsx}"]
+      "project": ["app/**/*.{ts,tsx}"],
+      "ignoreDependencies": ["sharp"]
     },
     "packages/db": {
       "entry": ["scripts/*.mjs"],
