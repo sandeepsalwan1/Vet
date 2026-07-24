@@ -70,6 +70,20 @@ _Avoid_: Staff-confirmed recommendation
 The process of moving a room from occupied to cleaning to open after a visit is done, preferably from a PIMS signal with clinic-team fallback.
 _Avoid_: Manual-only room release
 
+**Visit stage event**:
+A tenant-scoped timestamp for checked in, roomed, care started, care complete, or checkout complete.
+It can come from the current app or a future PIMS adapter and supports real wait-time analytics.
+_Avoid_: Estimated journey duration
+
+**Returning client**:
+A client with more than one completed visit.
+Future appointments are reported separately as rebooked business.
+_Avoid_: Counting reminders or portal logins as repeat business
+
+**Recovery follow-up**:
+The post-visit pet health email and, only when unanswered by the configured deadline, the Admin call queue.
+_Avoid_: Automatic medical advice
+
 **Design-partner profile**:
 Tenant-configured clinic branding, history, sender identity, domain, messaging defaults, and PIMS provider.
 The current profile is Tri-City; it is not a product-wide hardcode.

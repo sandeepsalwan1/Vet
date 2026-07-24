@@ -14,6 +14,7 @@ export type ClientJourneySettings = {
   quietHoursEnd: string;
   feedbackDelayMinutes: number;
   petCheckDelayHours: number;
+  followupCallDelayHours: number;
   roomPressureNumerator: number;
   roomPressureDenominator: number;
 };
@@ -151,6 +152,7 @@ export type JourneySettingsRow = {
   quiet_hours_end: string;
   feedback_delay_minutes: number;
   pet_check_delay_hours: number;
+  followup_call_delay_hours: number;
   room_pressure_numerator: number;
   room_pressure_denominator: number;
 };
@@ -170,6 +172,7 @@ export const journeySettingsColumns = `
   quiet_hours_end::text,
   feedback_delay_minutes,
   pet_check_delay_hours,
+  followup_call_delay_hours,
   room_pressure_numerator,
   room_pressure_denominator
 `;
@@ -191,6 +194,7 @@ export function normalizeJourneySettings(row: JourneySettingsRow, timeZone: stri
     quietHoursEnd: row.quiet_hours_end,
     feedbackDelayMinutes: row.feedback_delay_minutes,
     petCheckDelayHours: row.pet_check_delay_hours,
+    followupCallDelayHours: row.followup_call_delay_hours,
     roomPressureNumerator: row.room_pressure_numerator,
     roomPressureDenominator: row.room_pressure_denominator
   };

@@ -45,6 +45,20 @@ export async function resetMockClinicState(options?: { clinicId?: string | null 
       )
     returning id
   `;
+  const visitStageRows = await sql<{ id: string }[]>`
+    delete from client_visit_stage_events
+    where clinic_id = ${clinicId}
+      and (
+        appointment_id in (
+          'appt-biscuit-today',
+          'appt-luna-today',
+          'appt-otis-today',
+          'appt-maple-tomorrow'
+        )
+        or appointment_id like 'appointment-slot-%'
+      )
+    returning id
+  `;
   const appointmentRows = await sql<{ id: string }[]>`
     update mock_appointments
     set status = 'scheduled',
@@ -88,6 +102,7 @@ export async function resetMockClinicState(options?: { clinicId?: string | null 
   return {
     resetRooms: roomRows.length,
     resetArrivals: arrivalRows.length,
+    resetVisitStages: visitStageRows.length,
     resetAppointments: appointmentRows.length,
     resetBookedAppointments: bookedRows.length,
     resetSlots: slotRows.length,

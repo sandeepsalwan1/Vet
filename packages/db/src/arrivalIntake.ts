@@ -1,5 +1,6 @@
 import { getSql } from "./connection";
 import { resolveClinicId } from "./clinics";
+import { recordClientVisitStage } from "./analytics";
 import {
   assignOpenRoom,
   autoOpenReadyRooms,
@@ -273,6 +274,26 @@ export async function submitMatchedArrival(input: {
     where clinic_id = ${clinicId}
       and id = ${input.match.appointmentId}
   `;
+  await recordClientVisitStage({
+    clinicId,
+    clientId: input.match.clientId,
+    petId: input.match.petId,
+    appointmentId: input.match.appointmentId,
+    stage: "checked_in",
+    source: "arrival_intake",
+    occurredAt: arrival.createdAt
+  });
+  if (room) {
+    await recordClientVisitStage({
+      clinicId,
+      clientId: input.match.clientId,
+      petId: input.match.petId,
+      appointmentId: input.match.appointmentId,
+      stage: "roomed",
+      source: "room_assignment",
+      occurredAt: room.stateChangedAt
+    });
+  }
   return arrival;
 }
 

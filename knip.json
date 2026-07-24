@@ -11,7 +11,11 @@
         "app/**/page.tsx",
         "app/**/route.ts"
       ],
-      "project": ["app/**/*.{ts,tsx}"]
+      "project": ["app/**/*.{ts,tsx}", "components/**/*.{ts,tsx}", "lib/**/*.ts"],
+      "ignoreDependencies": ["sharp"],
+      "ignoreIssues": {
+        "components/ui/**": ["exports", "types"]
+      }
     },
     "packages/db": {
       "entry": ["scripts/*.mjs"],

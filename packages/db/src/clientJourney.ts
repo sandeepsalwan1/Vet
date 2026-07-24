@@ -109,6 +109,7 @@ function defaultSettings(clinicId: string, publicName: string, timeZone: string)
     quietHoursEnd: "08:00:00",
     feedbackDelayMinutes: 75,
     petCheckDelayHours: 24,
+    followupCallDelayHours: 48,
     roomPressureNumerator: 2,
     roomPressureDenominator: 3
   };
@@ -134,6 +135,40 @@ export async function getClientJourneySettings(options?: { clinicId?: string | n
     returning ${sql.unsafe(journeySettingsColumns)}
   `;
   return normalizeJourneySettings(inserted[0], defaults.timeZone);
+}
+
+export async function updateClientJourneySettings(input: {
+  clinicId?: string | null;
+  confirmationEmailEnabled: boolean;
+  reminderEmailHours: number;
+  reminderSmsHours: number;
+  reminderSmsEnabled: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  feedbackDelayMinutes: number;
+  petCheckDelayHours: number;
+  followupCallDelayHours: number;
+}) {
+  const sql = getSql();
+  const clinicId = await resolveClinicId(input.clinicId);
+  const current = await getClientJourneySettings({ clinicId });
+  const rows = await sql<JourneySettingsRow[]>`
+    update client_journey_settings
+    set
+      confirmation_email_enabled = ${input.confirmationEmailEnabled},
+      reminder_email_hours = ${input.reminderEmailHours},
+      reminder_sms_hours = ${input.reminderSmsHours},
+      reminder_sms_enabled = ${input.reminderSmsEnabled},
+      quiet_hours_start = ${input.quietHoursStart},
+      quiet_hours_end = ${input.quietHoursEnd},
+      feedback_delay_minutes = ${input.feedbackDelayMinutes},
+      pet_check_delay_hours = ${input.petCheckDelayHours},
+      followup_call_delay_hours = ${input.followupCallDelayHours},
+      updated_at = now()
+    where clinic_id = ${clinicId}
+    returning ${sql.unsafe(journeySettingsColumns)}
+  `;
+  return normalizeJourneySettings(rows[0], current.timeZone);
 }
 
 export async function beginClientAccountClaim(input: {

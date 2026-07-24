@@ -59,6 +59,16 @@ Central Veterinary Hospital is one Next.js app backed by Postgres workspace pack
 7. A records request creates a front-desk task. Authorization, recipient, and scope are confirmed by staff outside the customer portal.
 8. Admin owns journey automation controls. Staff uses the task board for front-desk and cashier work; veterinarians use clinical task views.
 9. Room and check-in controls open from a compact task-board dialog, refresh automatically, and show pressure only at two-thirds occupancy or higher.
+10. Admin can edit future confirmation, reminder, feedback, pet-check, call-queue, and quiet-hour timing.
+11. Saved tenant settings do not enable transport. `NOTIFICATION_MODE` remains the deployment-level delivery gate.
+
+### Client Analytics
+
+1. Check-in, room placement, care, and checkout write idempotent Visit stage events behind a PIMS-ready database interface.
+2. The Admin-only analytics route calculates median and 90th-percentile stage time without substituting estimates for missing timestamps.
+3. Completed visit stages drive returning-client and rebooking rates; journey responses drive satisfaction and pet-health rates.
+4. A recovery email is scheduled after the configured pet-check delay.
+5. An unanswered sent email enters the Admin call queue at the configured call deadline, while a recorded pet-health response removes it from that queue.
 
 ### Agent Workflow
 

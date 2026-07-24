@@ -1,5 +1,15 @@
 export { getSql, MissingDatabaseUrlError } from "./connection";
 export {
+  getClientAnalytics,
+  recordClientVisitStage
+} from "./analytics";
+export type {
+  AnalyticsRangeDays,
+  ClientAnalyticsSnapshot,
+  ClientVisitStage,
+  WaitStageMetric
+} from "./analyticsRows";
+export {
   getClinicById,
   resolveClinicForHostname,
   resolveClinicId
@@ -111,7 +121,8 @@ export {
   markClientJourneyMessageStatus,
   planClientJourneyMessage,
   recordClientJourneyResponse,
-  saveClientContactPreferences
+  saveClientContactPreferences,
+  updateClientJourneySettings
 } from "./clientJourney";
 export type { DueClientJourneyMessage } from "./clientJourneyRows";
 export type {

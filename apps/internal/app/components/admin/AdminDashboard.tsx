@@ -1,10 +1,11 @@
 "use client";
 
-import { BellRing, Bot, ClipboardList, LayoutDashboard, LogOut, Users } from "lucide-react";
+import { BarChart3, BellRing, Bot, ClipboardList, LayoutDashboard, LogOut, Users } from "lucide-react";
 import { useState } from "react";
 import { logout, type AccountSession } from "../../lib/accountStore";
 import { ChatPanel } from "../ChatPanel";
 import { useClinicBrand } from "../ClinicContext";
+import { AdminAnalyticsTab } from "./AdminAnalyticsTab";
 import { AdminTasksTab } from "./AdminTasksTab";
 import { AdminNotificationsTab } from "./AdminNotificationsTab";
 import { TeamAccountPanel } from "./TeamAccountPanel";
@@ -19,7 +20,7 @@ type Props = {
   onOpenBoard: () => void;
 };
 
-type Tab = "tasks" | "notifications" | "assistant" | "team";
+type Tab = "tasks" | "analytics" | "notifications" | "assistant" | "team";
 
 export function AdminDashboard({ session, onLogout, onOpenBoard }: Props) {
   const clinic = useClinicBrand();
@@ -96,6 +97,14 @@ export function AdminDashboard({ session, onLogout, onOpenBoard }: Props) {
           {newTaskCount > 0 && tab !== "tasks" && <span className="adminDashTabBadge">+{newTaskCount}</span>}
         </button>
         <button
+          className={`adminDashTab${tab === "analytics" ? " adminDashTab--active" : ""}`}
+          onClick={() => setTab("analytics")}
+          type="button"
+        >
+          <BarChart3 size={15} />
+          Analytics
+        </button>
+        <button
           className={`adminDashTab${tab === "notifications" ? " adminDashTab--active" : ""}`}
           onClick={() => setTab("notifications")}
           type="button"
@@ -143,6 +152,10 @@ export function AdminDashboard({ session, onLogout, onOpenBoard }: Props) {
             placeholder="Ask for a daily digest, records, invoices, pricing…"
           />
         </div>
+      )}
+
+      {tab === "analytics" && (
+        <AdminAnalyticsTab session={session} />
       )}
 
       {tab === "notifications" && (

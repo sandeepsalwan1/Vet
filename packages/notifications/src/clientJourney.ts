@@ -206,10 +206,13 @@ export function planPetCheckMessage(args: {
   preferences: ClientContactPreferences;
   appointmentId: string | null;
 }) {
+  const channel = args.preferences.emailEnabled && args.profile.email
+    ? "email" as const
+    : "sms" as const;
   return [{
     messageType: "pet_health_check",
-    channel: args.preferences.smsConsent ? "sms" : "email",
-    subject: args.preferences.smsConsent ? null : `How is ${args.profile.petName} doing?`,
+    channel,
+    subject: channel === "email" ? `How is ${args.profile.petName} doing?` : null,
     body: conciseSms(`${args.settings.publicName}: How is ${args.profile.petName} doing after the visit? Choose thumbs up or thumbs down in the secure portal. If symptoms are severe, worsening, or urgent, call the clinic or seek emergency veterinary care now.`),
     scheduledFor: minutesAfterNow(args.settings.petCheckDelayHours * 60),
     idempotencyKey: `feedback/${args.appointmentId ?? args.profile.petId}/pet-health`

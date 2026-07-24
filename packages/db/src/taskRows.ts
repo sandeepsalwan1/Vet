@@ -9,17 +9,17 @@ export type TaskRow = {
   client_name: string | null;
   clarity_id: string | null;
   client_phone: string | null;
-  client_date_of_birth: string | null;
+  client_date_of_birth: string | Date | null;
   pet_name: string | null;
   pet_weight: string | null;
-  last_visit: string | null;
+  last_visit: string | Date | null;
   request: string;
   request_type: Task["requestType"];
   notes: string | null;
   assigned_to: string | null;
   assigned_by_role: AppRole | null;
   priority: Task["priority"];
-  due_date: string;
+  due_date: string | Date;
   due_time: string;
   created_by_name: string | null;
   created_by_role: AppRole | null;
@@ -118,6 +118,13 @@ export function metadataRole(metadata: Record<string, unknown>, key: string) {
     : null;
 }
 
+export function taskDateText(value: string | Date | null) {
+  if (!value) return null;
+  return value instanceof Date
+    ? value.toISOString().slice(0, 10)
+    : value.split("T")[0] || value;
+}
+
 export function normalizeTask(row: TaskRow): Task {
   return {
     id: row.id,
@@ -128,17 +135,17 @@ export function normalizeTask(row: TaskRow): Task {
     clientName: row.client_name,
     clarityId: row.clarity_id,
     clientPhone: row.client_phone,
-    clientDateOfBirth: row.client_date_of_birth,
+    clientDateOfBirth: taskDateText(row.client_date_of_birth),
     petName: row.pet_name,
     petWeight: row.pet_weight,
-    lastVisit: row.last_visit,
+    lastVisit: taskDateText(row.last_visit),
     request: row.request,
     requestType: row.request_type,
     notes: row.notes,
     assignedTo: row.assigned_to,
     assignedByRole: row.assigned_by_role,
     priority: row.priority,
-    dueDate: row.due_date,
+    dueDate: taskDateText(row.due_date) ?? "",
     dueTime: row.due_time,
     createdByName: row.created_by_name,
     createdByRole: row.created_by_role,

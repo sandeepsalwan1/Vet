@@ -29,7 +29,7 @@ import {
 import { sendNotification, type SendResult } from "./notificationSend";
 
 type AgentEmailCadence = "once" | "monthly" | "post_appointment";
-export { notificationEmailFrom };
+export { notificationEmailFrom, notificationMode };
 export type { NotificationMode };
 export {
   planAppointmentMessages,

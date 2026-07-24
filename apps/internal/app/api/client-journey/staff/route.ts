@@ -4,13 +4,15 @@ import {
   getClientClaimProfile,
   getClientContactPreferences,
   getClientJourneySettings,
-  listStaffClientJourneys
+  listStaffClientJourneys,
+  recordClientVisitStage,
+  updateClientJourneySettings
 } from "@central-vet/db";
-import { planStaffUpdateMessage } from "@central-vet/notifications";
+import { notificationMode, planStaffUpdateMessage } from "@central-vet/notifications";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { actorSchema, authenticateActor, authenticateActorFromQuery, resolveClinicFromRequest } from "../../_shared";
-import { dbError, noStoreHeaders } from "../../_apiResponse";
+import { dbError, logInfo, noStoreHeaders } from "../../_apiResponse";
 import { persistClientJourneyPlans } from "../_messagePlans";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +27,26 @@ const updateSchema = z.object({
   balanceCents: z.number().int().min(0).max(10_000_000).optional().nullable()
 });
 
+const clockTimeSchema = z.string().regex(
+  /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/,
+  "Use a 24-hour time."
+);
+
+export const clientJourneySettingsPatchSchema = z.object({
+  actor: actorSchema,
+  settings: z.object({
+    confirmationEmailEnabled: z.boolean(),
+    reminderEmailHours: z.number().int().min(1).max(336),
+    reminderSmsHours: z.number().int().min(1).max(336),
+    reminderSmsEnabled: z.boolean(),
+    quietHoursStart: clockTimeSchema,
+    quietHoursEnd: clockTimeSchema,
+    feedbackDelayMinutes: z.number().int().min(15).max(1440),
+    petCheckDelayHours: z.number().int().min(4).max(168),
+    followupCallDelayHours: z.number().int().min(4).max(336)
+  }).strict()
+}).strict();
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -34,9 +56,38 @@ export async function GET(request: Request) {
     if (auth.actor.role !== "admin") {
       return NextResponse.json({ error: "Admin access required." }, { status: 403 });
     }
-    return NextResponse.json(await listStaffClientJourneys({ clinicId: clinic.clinicId }), { headers: noStoreHeaders });
+    return NextResponse.json({
+      ...await listStaffClientJourneys({ clinicId: clinic.clinicId }),
+      deliveryMode: notificationMode()
+    }, { headers: noStoreHeaders });
   } catch (error) {
     return dbError(error, { route: "client-journey.staff.get" });
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const clinic = await resolveClinicFromRequest(request);
+    const parsed = clientJourneySettingsPatchSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Check the notification settings." }, { status: 400 });
+    }
+    const auth = await authenticateActor(parsed.data.actor, request, clinic);
+    if ("response" in auth) return auth.response;
+    if (auth.actor.role !== "admin") {
+      return NextResponse.json({ error: "Admin access required." }, { status: 403 });
+    }
+    const settings = await updateClientJourneySettings({
+      clinicId: clinic.clinicId,
+      ...parsed.data.settings
+    });
+    logInfo("client_journey_settings_updated", {
+      actorRole: auth.actor.role,
+      clinicId: clinic.clinicId
+    });
+    return NextResponse.json({ settings }, { headers: noStoreHeaders });
+  } catch (error) {
+    return dbError(error, { route: "client-journey.staff.patch" });
   }
 }
 
@@ -81,6 +132,23 @@ export async function POST(request: Request) {
         reason: "Appointment cancelled or rescheduled; stale reminders suppressed."
       });
       return NextResponse.json({ ok: true, planned: 0 });
+    }
+    const stage = parsed.data.updateType === "hospitalized_update"
+      ? "care_started"
+      : parsed.data.updateType === "ready_for_pickup"
+        ? "care_complete"
+        : parsed.data.updateType === "checkout"
+          ? "checkout_complete"
+          : null;
+    if (stage && parsed.data.appointmentId) {
+      await recordClientVisitStage({
+        clinicId: clinic.clinicId,
+        clientId: profile.clientId,
+        petId: profile.petId,
+        appointmentId: parsed.data.appointmentId,
+        stage,
+        source: `staff:${auth.actor.role}`
+      });
     }
     const common = {
       settings,

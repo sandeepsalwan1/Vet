@@ -30,6 +30,7 @@ const settings: ClientJourneySettings = {
   quietHoursEnd: "08:00:00",
   feedbackDelayMinutes: 75,
   petCheckDelayHours: 24,
+  followupCallDelayHours: 48,
   roomPressureNumerator: 2,
   roomPressureDenominator: 3
 };
@@ -152,6 +153,7 @@ test("next-day pet check contains urgent-care guidance", () => {
     appointmentId: appointment.id
   });
   assert.equal(message.messageType, "pet_health_check");
+  assert.equal(message.channel, "email");
   assert.match(message.body, /seek emergency veterinary care now/);
 });
 
