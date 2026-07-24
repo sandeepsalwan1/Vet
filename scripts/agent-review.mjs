@@ -483,6 +483,17 @@ ${markdownJsonBlock(review)}`;
 export function normalizeReviewPolicy(review) {
   validateReviewResult(review);
   if (
+    review.mergeRecommendation === "ready-human-review" &&
+    review.remainingRisk !== "high" &&
+    review.bugsFound.length === 0 &&
+    !review.humanQuestion.trim()
+  ) {
+    return {
+      ...review,
+      mergeRecommendation: "ready"
+    };
+  }
+  if (
     review.mergeRecommendation !== "ready" ||
     (review.remainingRisk !== "high" && !review.humanQuestion.trim())
   ) {
