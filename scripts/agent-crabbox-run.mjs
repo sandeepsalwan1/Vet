@@ -244,7 +244,10 @@ function hasMediaSignature(kind, path) {
   return true;
 }
 
-export function validateRouteBinding(path, { bundleDir, provider, leaseId, route, launchMarker, launchEvidence }) {
+export function validateRouteBinding(
+  path,
+  { bundleDir, provider, leaseId, proofKind, route, launchMarker, launchEvidence }
+) {
   const bindingPath = validateRegularArtifact(path, bundleDir, "route binding");
   let binding;
   try {
@@ -260,7 +263,8 @@ export function validateRouteBinding(path, { bundleDir, provider, leaseId, route
     binding?.launchEvidence !== launchEvidence ||
     binding?.launchStatus !== 0 ||
     binding?.desktopDoctorStatus !== 0 ||
-    binding?.computerUseStatus !== 0
+    binding?.computerUseStatus !== 0 ||
+    (proofKind === "GIF" && binding?.captureStartedBeforeLaunch !== true)
   ) {
     throw new AgentError("Crabbox route binding does not match the captured route and lease", 1);
   }
@@ -283,6 +287,7 @@ export function validateCollectedArtifacts(
     bundleDir: expectedDirectory,
     provider,
     leaseId,
+    proofKind,
     route,
     launchMarker,
     launchEvidence
@@ -425,8 +430,8 @@ function verifySession(session, timing, provider) {
   return session;
 }
 
-function artifactArgs({ provider, leaseId, outputDir, proofKind }) {
-  const args = [
+function artifactArgs({ provider, leaseId, outputDir }) {
+  return [
     "artifacts",
     "collect",
     "--provider",
@@ -440,8 +445,6 @@ function artifactArgs({ provider, leaseId, outputDir, proofKind }) {
     "--doctor=false",
     "--webvnc-status=false"
   ];
-  if (proofKind === "GIF") args.push("--video", "--gif", "--duration", "8s");
-  return args;
 }
 
 export function gifEncoderBootstrapCommands({
@@ -534,6 +537,54 @@ export function browserLaunchArgs({ provider, leaseId, route }) {
     args.push("--", "/usr/local/bin/crabbox-browser", "--no-sandbox", "--disable-dev-shm-usage");
   }
   return args;
+}
+
+export function recordedBrowserLaunchScript({ provider, leaseId, route, videoPath, contactSheetPath }) {
+  const video = [
+    "crabbox",
+    "artifacts",
+    "video",
+    "--provider",
+    provider,
+    "--id",
+    leaseId,
+    "--output",
+    videoPath,
+    "--duration",
+    "10s",
+    "--fps",
+    "30",
+    "--contact-sheet-output",
+    contactSheetPath
+  ]
+    .map(shellQuote)
+    .join(" ");
+  const launch = ["crabbox", ...browserLaunchArgs({ provider, leaseId, route })].map(shellQuote).join(" ");
+  return [
+    "set +e",
+    `${video} &`,
+    "video_pid=$!",
+    "sleep 1",
+    launch,
+    "launch_status=$?",
+    'wait "$video_pid"',
+    "video_status=$?",
+    'if [ "$launch_status" -ne 0 ]; then exit "$launch_status"; fi',
+    'if [ "$video_status" -ne 0 ]; then exit "$video_status"; fi'
+  ].join("\n");
+}
+
+export function gifArtifactArgs({ videoPath, gifPath, trimmedVideoPath }) {
+  return [
+    "artifacts",
+    "gif",
+    "--input",
+    videoPath,
+    "--output",
+    gifPath,
+    "--trimmed-video-output",
+    trimmedVideoPath
+  ];
 }
 
 export function recoverLeaseHandle(path, expectedProvider) {
@@ -686,6 +737,15 @@ export function runCrabboxLane({
         if (bootstrap.status !== 0) throw new AgentError("Could not install the host GIF encoder", 1);
       }
       for (const [index, route] of routes.entries()) {
+        const bundleDir = join(
+          outputDir,
+          `crabbox-${lane}-${stamp}-${String(index + 1).padStart(2, "0")}-${safeArtifactSlug(route, index)}`
+        );
+        mkdirSync(bundleDir, { recursive: true });
+        const videoPath = join(bundleDir, "screen.mp4");
+        const contactSheetPath = join(bundleDir, "screen.contact.png");
+        const gifPath = join(bundleDir, "screen.trimmed.gif");
+        const trimmedVideoPath = join(bundleDir, "screen.trimmed.mp4");
         const markerRun = runCommand(
           "crabbox",
           browserRouteMarkerArgs({ provider: selection.provider, leaseId, route }),
@@ -698,11 +758,27 @@ export function runCrabboxLane({
         if (markerRun.status !== 0) throw new AgentError(`Crabbox remote route marker failed for ${route}`, 1);
         const launchMarker = validateBrowserRouteMarker(markerRun.stdout, route);
 
-        const launch = runCommand(
-          "crabbox",
-          browserLaunchArgs({ provider: selection.provider, leaseId, route }),
-          { check: false, env: childEnv, cwd: workdir }
-        );
+        const launch =
+          proofKind === "GIF"
+            ? runCommand(
+                "sh",
+                [
+                  "-c",
+                  recordedBrowserLaunchScript({
+                    provider: selection.provider,
+                    leaseId,
+                    route,
+                    videoPath,
+                    contactSheetPath
+                  })
+                ],
+                { check: false, env: childEnv, cwd: workdir }
+              )
+            : runCommand("crabbox", browserLaunchArgs({ provider: selection.provider, leaseId, route }), {
+                check: false,
+                env: childEnv,
+                cwd: workdir
+              });
         writeFileSync(logPath, redactSecrets(`\n${launch.stdout}\n${launch.stderr}`, config, env), { flag: "a", mode: 0o600 });
         if (launch.status !== 0) throw new AgentError(`Crabbox browser launch failed for ${route}`, 1);
         const launchEvidence = validateBrowserLaunchOutput(launch.stdout, route);
@@ -726,11 +802,16 @@ export function runCrabboxLane({
         });
         if (computerUse.status !== 0) throw new AgentError(`Crabbox computer input failed for ${route}`, 1);
 
-        const bundleDir = join(
-          outputDir,
-          `crabbox-${lane}-${stamp}-${String(index + 1).padStart(2, "0")}-${safeArtifactSlug(route, index)}`
-        );
-        mkdirSync(bundleDir, { recursive: true });
+        if (proofKind === "GIF") {
+          const gif = runCommand(
+            "crabbox",
+            gifArtifactArgs({ videoPath, gifPath, trimmedVideoPath }),
+            { check: false, env: childEnv, cwd: workdir }
+          );
+          writeFileSync(logPath, redactSecrets(`\n${gif.stdout}\n${gif.stderr}`, config, env), { flag: "a", mode: 0o600 });
+          if (gif.status !== 0) throw new AgentError(`Crabbox GIF encoding failed for ${route}`, 1);
+        }
+
         const routeBindingPath = join(bundleDir, "route-binding.json");
         writeJson(routeBindingPath, {
           provider: selection.provider,
@@ -740,16 +821,27 @@ export function runCrabboxLane({
           launchEvidence,
           launchStatus: launch.status,
           desktopDoctorStatus: doctor.status,
-          computerUseStatus: computerUse.status
+          computerUseStatus: computerUse.status,
+          captureStartedBeforeLaunch: proofKind === "GIF"
         });
         const collected = runCommand(
           "crabbox",
-          artifactArgs({ provider: selection.provider, leaseId, outputDir: bundleDir, proofKind }),
+          artifactArgs({ provider: selection.provider, leaseId, outputDir: bundleDir }),
           { check: false, env: childEnv, cwd: workdir }
         );
         writeFileSync(logPath, redactSecrets(`\n${collected.stdout}\n${collected.stderr}`, config, env), { flag: "a", mode: 0o600 });
         if (collected.status !== 0) throw new AgentError(`Crabbox artifact collection failed for ${route}`, 1);
-        const routeArtifacts = validateCollectedArtifacts(parseJsonDocument(collected.stdout), {
+        const bundle = parseJsonDocument(collected.stdout);
+        if (proofKind === "GIF" && bundle) {
+          bundle.files ??= [];
+          bundle.files.push(
+            { kind: "video", path: videoPath },
+            { kind: "gif", path: gifPath }
+          );
+          if (existsSync(contactSheetPath)) bundle.files.push({ kind: "contact-sheet", path: contactSheetPath });
+          if (existsSync(trimmedVideoPath)) bundle.files.push({ kind: "trimmed-video", path: trimmedVideoPath });
+        }
+        const routeArtifacts = validateCollectedArtifacts(bundle, {
           provider: selection.provider,
           leaseId,
           proofKind,

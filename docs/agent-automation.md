@@ -104,6 +104,9 @@ gh issue create \
 That one label records a deterministic trusted intent seal before any implementation model runs.
 The seal uses no model credits, preserves explicit priority and proof requests, and sends routine ambiguity to the implementer.
 A successful seal adds `agent:implement`, adds `agent:automerge` only when policy permits, clears stale triage blocks, and dispatches implementation automatically.
+If trusted triage asks a real question, reply on the source issue from the repository-owner account.
+That exact reply resumes zero-model triage automatically, is frozen as untrusted implementation context, and dispatches implementation once.
+Bot replies, non-owner replies, stale comments, duplicate replies, and pull-request comments do not resume work.
 Implementation creates `agent/issue-<number>-<slug>`, validates the patch, opens or updates a draft PR, starts exact-head CI, and starts review.
 Review can apply a safe patch, reruns exact-head CI and review until clean within its bounded repair budget, requests proof when needed, publishes `agent-review`, then starts no-mistakes.
 After model review, a credential-free deterministic repair removes extra blank lines at EOF only when `git diff --check` identifies them in a safe, non-privileged text file.
@@ -175,7 +178,10 @@ gh pr edit <pr-number> --repo "$REPO" --add-label agent:proof
 CI proof can run on GitHub Actions.
 UI or GIF proof prefers a credentialed Crabbox provider that passed a live smoke plus its readiness variable.
 Without one, Crabbox uses its credential-free `local-container` provider on the GitHub runner with `--desktop` and `--browser`.
-The lane launches each affected route, checks desktop health, records the actual provider and lease, and collects authentic route-bound screenshots or requested video/GIF artifacts.
+For GIF proof, recording starts before browser navigation so transient startup states are captured instead of only the settled page.
+The lane checks each affected route, desktop health, actual provider, lease, and route-bound media.
+The managed GitHub comment links the downloadable Actions artifact and keeps runner-only paths in a collapsed diagnostic section.
+Visual proof fails closed when no reviewable artifact URL is published.
 This fallback spends GitHub Actions time only and does not require the user's laptop or a paid provider key.
 A missing Docker runtime, failed desktop bootstrap, or invalid artifact blocks required visual proof instead of silently replacing it with weaker evidence.
 
