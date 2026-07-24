@@ -22,6 +22,7 @@ import {
   newestManagedComment,
   parseImplementationMetadata,
   privilegedCandidatePaths,
+  runCommand,
   skipsNoMistakesForCost,
   trustedManagedComment,
   upsertManagedComment
@@ -29,6 +30,15 @@ import {
 
 const marker = "<!-- agent-triage:v1 -->";
 const config = { repo: { owner: "repo-owner", name: "repo" } };
+
+test("runCommand accepts an explicit capture limit for bounded delegated output", () => {
+  const result = runCommand(process.execPath, ["-e", "process.stdout.write('x'.repeat(1_500_000))"], {
+    maxBuffer: 2 * 1024 * 1024
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout.length, 1_500_000);
+});
 
 function comment(id, login, body = `${marker}\nbody`, updatedAt = `2026-07-13T00:00:0${id}Z`) {
   return { id, body, updated_at: updatedAt, user: { login } };

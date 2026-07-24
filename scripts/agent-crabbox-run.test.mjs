@@ -9,11 +9,13 @@ import {
   browserRouteMarker,
   browserRouteMarkerArgs,
   buildRunArgs,
+  emitImplementationOutput,
   gifEncoderBootstrapCommands,
   parseTimingReport,
   providerChildEnvironment,
   recoverLeaseHandle,
   runCrabboxLane,
+  restoreImplementationOutput,
   selectCrabboxProvider,
   validateBrowserLaunchOutput,
   validateBrowserRouteMarker,
@@ -324,8 +326,8 @@ test("credential-free visual dry-run requests Crabbox desktop and browser", () =
   assert.equal(result.crabboxCommand.some((value) => /TOKEN|API_KEY/.test(value)), false);
 });
 
-test("remote implementation forwards only invocation auth and downloads generated outputs", () => {
-  const args = buildRunArgs({
+test("Vercel implementation uses a bounded stdout handoff instead of unsupported downloads", () => {
+  const vercelArgs = buildRunArgs({
     provider: "vercel-sandbox",
     command: "run worker",
     visual: false,
@@ -334,13 +336,46 @@ test("remote implementation forwards only invocation auth and downloads generate
   });
 
   assert.deepEqual(
-    args.filter((value, index) => args[index - 1] === "--allow-env"),
+    vercelArgs.filter((value, index) => vercelArgs[index - 1] === "--allow-env"),
     ["CODEX_API_KEY"]
   );
-  assert.ok(args.includes(".agent-output/codex.patch=.agent-output/codex.patch"));
-  assert.ok(args.includes(".agent-output/implementation.md=.agent-output/implementation.md"));
-  assert.equal(args.includes("--stop-after"), false);
-  assert.equal(args.includes("GH_TOKEN"), false);
+  assert.equal(vercelArgs.includes("--download"), false);
+  assert.match(vercelArgs.at(-1), /--emit-implementation-output$/);
+  assert.equal(vercelArgs.includes("--stop-after"), false);
+  assert.equal(vercelArgs.includes("GH_TOKEN"), false);
+
+  const directArgs = buildRunArgs({
+    provider: "hetzner",
+    command: "run worker",
+    visual: false,
+    lane: "implementRemote",
+    leasePath: "/tmp/unused.json"
+  });
+  assert.ok(directArgs.includes(".agent-output/codex.patch=.agent-output/codex.patch"));
+  assert.ok(directArgs.includes(".agent-output/implementation.md=.agent-output/implementation.md"));
+});
+
+test("delegated implementation output restores only the two bounded trusted files", (t) => {
+  const remote = mkdtempSync(join(tmpdir(), "vet-agent-remote-output-"));
+  const local = mkdtempSync(join(tmpdir(), "vet-agent-local-output-"));
+  t.after(() => {
+    rmSync(remote, { recursive: true, force: true });
+    rmSync(local, { recursive: true, force: true });
+  });
+  mkdirSync(join(remote, ".agent-output"));
+  writeFileSync(join(remote, ".agent-output/codex.patch"), "diff --git a/a b/a\n");
+  writeFileSync(join(remote, ".agent-output/implementation.md"), "Implemented the issue.\n");
+
+  const output = `worker log\n${emitImplementationOutput(remote)}\n`;
+  const restored = restoreImplementationOutput(output, local);
+
+  assert.deepEqual(restored, [
+    join(local, ".agent-output/codex.patch"),
+    join(local, ".agent-output/implementation.md")
+  ]);
+  assert.equal(readFileSync(restored[0], "utf8"), "diff --git a/a b/a\n");
+  assert.equal(readFileSync(restored[1], "utf8"), "Implemented the issue.\n");
+  assert.throws(() => restoreImplementationOutput("no handoff", local), /handoff marker/);
 });
 
 test("delegated Vercel runs rely on one-shot cleanup instead of stop-after", () => {
