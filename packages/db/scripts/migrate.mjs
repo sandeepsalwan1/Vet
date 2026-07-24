@@ -96,13 +96,15 @@ try {
     legacyBaselineComplete
   });
 
-  for (const file of baseline) {
-    await sql`
-      insert into app_schema_migrations (filename, checksum)
-      values (${file}, ${checksums.get(file)})
-    `;
-  }
   if (baseline.length > 0) {
+    await sql.begin(async (transaction) => {
+      for (const file of baseline) {
+        await transaction`
+          insert into app_schema_migrations (filename, checksum)
+          values (${file}, ${checksums.get(file)})
+        `;
+      }
+    });
     console.log(`baselined ${baseline.length} existing migrations`);
   }
 
