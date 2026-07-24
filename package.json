@@ -44,7 +44,7 @@
     "jscpd": "^5.0.12",
     "knip": "^6.26.0",
     "tsx": "^4.23.0",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.2"
   },
   "overrides": {
     "@hono/node-server": "2.0.11",
