@@ -77,7 +77,6 @@ Main routes:
 - `/api/client-account-claim`, `/api/client-journey`, `/api/client-journey/staff`, `/api/notifications/client-journey`
 
 hi this works
-
 Issue 26 note:
 This repository tracks one deployed Vet app.
 The README now includes five added lines.
