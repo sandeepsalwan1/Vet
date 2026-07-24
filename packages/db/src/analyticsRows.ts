@@ -48,7 +48,7 @@ export type ClientAnalyticsSnapshot = {
   };
   followup: {
     emailAfterHours: number;
-    callAfterHours: number;
+    callAfterEmailHours: number;
     emailsSent: number;
     awaitingResponse: number;
     callsDue: number;

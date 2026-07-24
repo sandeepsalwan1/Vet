@@ -68,7 +68,7 @@ Central Veterinary Hospital is one Next.js app backed by Postgres workspace pack
 2. The Admin-only analytics route calculates median and 90th-percentile stage time without substituting estimates for missing timestamps.
 3. Completed visit stages drive returning-client and rebooking rates; journey responses drive satisfaction and pet-health rates.
 4. A recovery email is scheduled after the configured pet-check delay.
-5. An unanswered sent email enters the Admin call queue at the configured call deadline, while a recorded pet-health response removes it from that queue.
+5. An unanswered sent email enters the Admin call queue after the configured no-reply delay, while a recorded pet-health response removes it from that queue.
 
 ### Agent Workflow
 

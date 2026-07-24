@@ -90,9 +90,8 @@ export async function getClientAnalytics(input: {
   const clinicId = await resolveClinicId(input.clinicId);
   const settings = await getClientJourneySettings({ clinicId });
   const emailAfterHours = settings.petCheckDelayHours;
-  const callAfterHours = Math.max(settings.followupCallDelayHours, emailAfterHours + 1);
-  // Start the unanswered-email window at actual delivery, not its planned send time.
-  const callGapHours = callAfterHours - emailAfterHours;
+  // Start the no-reply window at actual delivery, not the visit or planned send time.
+  const callAfterEmailHours = settings.followupCallDelayHours;
 
   const [
     waitRows,
@@ -234,7 +233,7 @@ export async function getClientAnalytics(input: {
           where message.status = 'sent'
             and response.id is null
             and coalesce(message.sent_at, message.scheduled_for)
-              + (${callGapHours} * interval '1 hour') <= now()
+              + (${callAfterEmailHours} * interval '1 hour') <= now()
         )::int as calls_due
       from client_journey_messages message
       left join client_journey_responses response
@@ -258,7 +257,7 @@ export async function getClientAnalytics(input: {
         message.appointment_id,
         coalesce(message.sent_at, message.scheduled_for) as email_sent_at,
         coalesce(message.sent_at, message.scheduled_for)
-          + (${callGapHours} * interval '1 hour') as call_due_at
+          + (${callAfterEmailHours} * interval '1 hour') as call_due_at
       from client_journey_messages message
       left join client_journey_responses response
         on response.clinic_id = message.clinic_id
@@ -284,7 +283,7 @@ export async function getClientAnalytics(input: {
         and coalesce(message.sent_at, message.scheduled_for)
           >= now() - (${input.rangeDays} * interval '1 day')
         and coalesce(message.sent_at, message.scheduled_for)
-          + (${callGapHours} * interval '1 hour') <= now()
+          + (${callAfterEmailHours} * interval '1 hour') <= now()
       order by call_due_at asc
       limit 40
     `,
@@ -362,7 +361,7 @@ export async function getClientAnalytics(input: {
     },
     followup: {
       emailAfterHours,
-      callAfterHours,
+      callAfterEmailHours,
       emailsSent: followup.emails_sent,
       awaitingResponse: followup.awaiting_response,
       callsDue: followup.calls_due,

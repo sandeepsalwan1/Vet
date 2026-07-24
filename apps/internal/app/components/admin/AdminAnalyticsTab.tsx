@@ -389,7 +389,7 @@ export function AdminAnalyticsTab({ session }: { session: AdminSession }) {
               <CardHeader>
                 <CardTitle>Recovery follow-up</CardTitle>
                 <CardDescription>
-                  Email after {snapshot.followup.emailAfterHours} hours. Call after {snapshot.followup.callAfterHours} hours only when the client has not answered.
+                  Email after {snapshot.followup.emailAfterHours} hours. Call {snapshot.followup.callAfterEmailHours} hours later only when the client has not answered.
                 </CardDescription>
                 <CardAction className="flex gap-2">
                   <Badge variant="secondary">
