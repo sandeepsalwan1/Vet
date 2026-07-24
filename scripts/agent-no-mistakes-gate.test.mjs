@@ -4,12 +4,17 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { implementationCommitMessage, parseImplementationMetadata } from "./agent-lib.mjs";
+import {
+  implementationCommitMessage,
+  issueSnapshotSha256,
+  parseImplementationMetadata,
+} from "./agent-lib.mjs";
 
 import {
   applyNativeFixPatch,
   assertNativeFixPatchExcludesSecrets,
   assertTrustedAgentPull,
+  assertTrustedIntentSource,
   composeEffectiveIntent,
   createNativeFixPatch,
   finalizeNativeFixPublication,
@@ -1180,6 +1185,51 @@ test("trusted gate scope rejects forks, manual branches, and policy changes", ()
       ]),
     /privileged candidate paths/,
   );
+});
+
+test("trusted intent recheck preserves immutable commit provenance", () => {
+  const sourceIssue = {
+    number: 42,
+    state: "open",
+    title: "Fix flow",
+    body: "Do the work",
+  };
+  const metadata = {
+    sourceIssue: 42,
+    sourceLabels: ["agent:automerge"],
+    automergeEligible: true,
+    issueSnapshotSha256: issueSnapshotSha256(sourceIssue),
+  };
+  const pull = trustedPull({
+    body: `<!-- agent-implementation:v1 -->
+Agent implementation metadata:
+\`\`\`json
+${JSON.stringify(metadata)}
+\`\`\``,
+  });
+  let commitReads = 0;
+
+  const trust = assertTrustedIntentSource(
+    config,
+    { pull, files: safeFiles },
+    { sourceIssue },
+    {
+      ghApiJson: () => {
+        commitReads += 1;
+        return [{
+          commit: {
+            message: implementationCommitMessage(
+              "chore: implement agent issue #42",
+              metadata,
+            ),
+          },
+        }];
+      },
+    },
+  );
+
+  assert.equal(trust.sourceIssue, 42);
+  assert.equal(commitReads, 1);
 });
 
 test("no-mistakes refuses non-bot agent PR authors", () => {
