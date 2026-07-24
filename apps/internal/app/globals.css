@@ -2450,12 +2450,76 @@ button:hover {
   gap: 12px;
 }
 
-.bootWordmark {
-  width: min(360px, 76vw);
-  height: auto;
-  display: block;
+.clinicWordmark {
+  width: min(390px, 78vw);
   margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
   filter: drop-shadow(0 10px 26px rgba(9, 38, 30, 0.16));
+}
+
+.clinicWordmarkMark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.clinicWordmarkMark svg {
+  width: 28px;
+  height: 28px;
+}
+
+.clinicWordmarkCopy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.clinicWordmarkCopy strong {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: clamp(22px, 5vw, 31px);
+  line-height: 1.04;
+  text-wrap: balance;
+}
+
+.clinicWordmarkCopy small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.clinicResolutionPanel {
+  justify-items: center;
+  text-align: center;
+}
+
+.clinicResolutionPanel > svg {
+  width: 32px;
+  height: 32px;
+  color: var(--primary);
+}
+
+.clinicResolutionPanel h1,
+.clinicResolutionPanel p {
+  margin: 0;
+}
+
+.clinicResolutionPanel h1 {
+  font-family: var(--font-display);
+  font-size: 28px;
+}
+
+.clinicResolutionPanel p {
+  color: var(--muted);
 }
 
 .bootLine {
@@ -2941,8 +3005,8 @@ textarea:not([data-slot]):focus {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   VETAGENT EXPERIENCE — Auth, Customer, Veterinarian, Admin
-   New CSS below — extends the base design system without modifying existing rules
+   VETAGENT EXPERIENCE: Auth, Customer, Veterinarian, Admin
+   New CSS below extends the base design system without modifying existing rules
    ══════════════════════════════════════════════════════════════════════════════ */
 
 /* ── Font variables ──────────────────────────────────────────────────────────── */
@@ -4450,7 +4514,7 @@ textarea:not([data-slot]):focus {
   white-space: nowrap;
 }
 
-/* Approve — solid filled, clearly the primary action */
+/* Approve: solid filled, clearly the primary action */
 .vetApproveBtn {
   background: var(--green-strong);
   color: #ffffff;
@@ -4462,7 +4526,7 @@ textarea:not([data-slot]):focus {
   border-color: #127a40;
 }
 
-/* Reject — ghost, clearly secondary */
+/* Reject: ghost, clearly secondary */
 .vetRejectBtn {
   background: transparent;
   border-color: #c0392b;

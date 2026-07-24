@@ -117,7 +117,7 @@ export async function handleClientRequest(
       {
         ...parsed.data,
         clinicId,
-        hospitalName: options.hospitalName || process.env.HOSPITAL_NAME || "Central Veterinary Hospital",
+        hospitalName: options.hospitalName || process.env.HOSPITAL_NAME || "Veterinary Hospital",
         source: "client_form",
         status: "pending_review",
         priority: "low",

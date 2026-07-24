@@ -17,11 +17,11 @@ type ClinicBrandResponse = {
 };
 
 export async function readClinicBrand(): Promise<ClinicBrand> {
-  const data = await fetch("/api/clinic", { cache: "no-store" })
-    .then((response) => response.json() as Promise<ClinicBrandResponse>)
-    .catch((): ClinicBrandResponse => ({}));
+  const response = await fetch("/api/clinic", { cache: "no-store" });
+  if (!response.ok) throw new Error("Clinic is unavailable.");
+  const data = await response.json() as ClinicBrandResponse;
   const clinic = data.clinic;
-  if (!clinic?.clinicId || !clinic.name) return defaultClinicBrand;
+  if (!clinic?.clinicId || !clinic.name) throw new Error("Clinic is unavailable.");
   return {
     clinicId: clinic.clinicId,
     slug: clinic.slug ?? defaultClinicBrand.slug,

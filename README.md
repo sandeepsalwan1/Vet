@@ -1,8 +1,11 @@
-# VetAgent / Central Veterinary Hospital MVP
+# Vet
 
 https://vetagent-internal.onrender.com
 
 One deployed Render app in an npm workspace monorepo, backed by Supabase Postgres.
+`centralvet.eepish.com` serves Central Veterinary Hospital.
+`tricityvet.eepish.com` serves Tri-City Veterinary Hospital.
+They are separate tenants with separate branding, settings, and data.
 
 - `apps/internal`: unified public client flows, staff task board, and agent routes.
 - `packages/agents`: agent runtimes, tool registry, and domain tool groups.
@@ -39,9 +42,9 @@ Demo accounts:
 
 - Pet owner: `maya@example.com` / `demo1234` (Maya Parker + Biscuit; check-in matches seeded appointment data)
 - New-client record claim: `maya.parker@example.com` + `Biscuit` (development shows the verification code; production never does)
-- Staff: `staff@centralvet.demo` / `staff1234`
-- Veterinarian: `vet@centralvet.demo` / `vet1234` or direct board passcode `135790`
-- Admin: `admin@centralvet.demo` / `admin1234` or direct board passcode `246810`
+- Staff: `staff@clinic.demo` / `staff1234`
+- Veterinarian: `vet@clinic.demo` / `vet1234` or direct board passcode `135790`
+- Admin: `admin@clinic.demo` / `admin1234` or direct board passcode `246810`
 - Disable built-in demo passcodes with `DEMO_ACCOUNTS=disabled`; rejected manager account sessions fall back to the passcode board.
 
 Agent runtime:

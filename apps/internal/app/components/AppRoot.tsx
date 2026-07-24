@@ -1,12 +1,12 @@
 "use client";
 
-import Image from "next/image";
 import { useEffect, useState } from "react";
 import { getSession, logout, type AccountSession } from "../lib/accountStore";
 import { validateAccountTeamSession } from "../lib/authClient";
 import { AdminDashboard } from "./admin/AdminDashboard";
 import { AuthScreen, type Audience } from "./auth/AuthScreen";
 import { ClinicProvider, useClinicBrand } from "./ClinicContext";
+import { ClinicWordmark } from "./ClinicWordmark";
 import { CustomerExperience } from "./customer/CustomerExperience";
 import { TaskBoard } from "./TaskBoard";
 import {
@@ -15,9 +15,9 @@ import {
 } from "./taskBoardBrowserState";
 
 // Two doors, one app:
-// - "/"      → pet owners (the chat portal)
-// - "/staff" → the clinic team (task board for staff/vets, dashboard for admins)
-// Each door only signs in its own audience; a session for the other door is
+// - "/" is for pet owners.
+// - "/staff" is for the clinic team.
+// Each door only signs in its own audience. A session for the other door is
 // bounced to where it belongs so the two surfaces never blur together.
 type View =
   | { kind: "loading" }
@@ -127,15 +127,7 @@ function AppRootContent({ audience }: { audience: Audience }) {
     return (
       <main className="entryShell">
         <section className="entryPanel bootPanel">
-          <Image
-            className="bootWordmark"
-            src="/central-vet-loading.svg"
-            alt={clinic.name}
-            width={360}
-            height={92}
-            priority
-            unoptimized
-          />
+          <ClinicWordmark name={clinic.name} />
           <p className="bootLine">{view.kind === "redirecting" ? "Taking you there…" : "Opening…"}</p>
         </section>
       </main>

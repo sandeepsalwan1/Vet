@@ -1,4 +1,5 @@
 export { getSql, MissingDatabaseUrlError } from "./connection";
+export { UnknownClinicHostnameError } from "./clinicRouting";
 export {
   getClientAnalytics,
   recordClientVisitStage

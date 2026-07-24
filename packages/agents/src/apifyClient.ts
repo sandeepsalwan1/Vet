@@ -1,5 +1,5 @@
 // General-purpose Apify runtime client.
-// Any agent or tool can run any Apify actor through runApifyActor — it is not
+// Any agent or tool can run any Apify actor through runApifyActor. It is not
 // tied to pricing or any single use case. Designed to never throw: it returns
 // null on misconfiguration, timeout, or actor failure so callers can fall back
 // to deterministic mock data and emit an observable fallback event.

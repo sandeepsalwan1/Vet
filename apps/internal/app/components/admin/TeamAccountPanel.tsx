@@ -170,7 +170,7 @@ export function TeamAccountPanel({ session, onLogout, onOpenTaskBoard, embedded 
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="dr.smith@centralvet.com"
+                  placeholder="doctor@clinic.example"
                   required
                 />
               </label>

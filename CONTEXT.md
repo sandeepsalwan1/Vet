@@ -1,4 +1,4 @@
-# Central Veterinary Hospital Context
+# Vet Product Context
 
 ## Language
 
@@ -88,6 +88,11 @@ _Avoid_: Automatic medical advice
 Tenant-configured clinic branding, history, sender identity, domain, messaging defaults, and PIMS provider.
 The current profile is Tri-City; it is not a product-wide hardcode.
 _Avoid_: Global clinic branding
+
+**Hospital tenant**:
+One clinic identity with its own domains, branding, settings, accounts, and data.
+Central Veterinary Hospital and Tri-City Veterinary Hospital are distinct hospital tenants.
+_Avoid_: Domain alias between hospitals, shared hospital branding
 
 **PIMS-ready boundary**:
 A real-product integration seam for Cornerstone, AVImark, and other clinic systems, with staff fallback until a provider adapter is connected.
