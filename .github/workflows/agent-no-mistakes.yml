@@ -114,7 +114,7 @@ jobs:
             > "$payload_file"
           printf 'head_sha=%s\n' "$head_sha" >> "$GITHUB_OUTPUT"
           gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$head_sha" --input "$payload_file" >/dev/null
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: main
           persist-credentials: false
@@ -171,12 +171,12 @@ jobs:
     env:
       DOCKER_IMAGE: node:22-bookworm@sha256:a25c9934ff6382cd4f08b6bc26c82bf4ea69b1e6f8dabfb2ead457374127c365
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: main
           path: trusted
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.head_sha }}
           path: candidate
@@ -366,7 +366,7 @@ jobs:
       issues: write
       statuses: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0

@@ -24,7 +24,7 @@ jobs:
       checks: read
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: main
           persist-credentials: false
@@ -64,7 +64,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.allocate-concurrency.outputs.head-sha }}
           persist-credentials: false
@@ -114,7 +114,7 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: main
           persist-credentials: false
