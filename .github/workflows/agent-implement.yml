@@ -68,7 +68,7 @@ jobs:
           --issue-number "${{ inputs.issue-number }}"
           --write-prompt .agent-output/implement-prompt.md
           --json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agent-implementation-context-${{ inputs.issue-number }}
           path: |
@@ -158,7 +158,7 @@ jobs:
             --create-patch .agent-output/codex.patch --json
         run: node scripts/agent-crabbox-run.mjs --lane implementRemote --command "$REMOTE_COMMAND" --json
       - id: implementation-artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: steps.generate.outcome == 'success'
         with:
           name: agent-implementation-${{ inputs.issue-number }}
@@ -167,7 +167,7 @@ jobs:
           if-no-files-found: error
       - name: Upload redacted remote diagnostics
         if: always() && (steps.generate.outcome != 'success' || steps.implementation-artifact.outcome != 'success')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-implementation-remote-diagnostics-${{ inputs.issue-number }}
           path: |
@@ -221,7 +221,7 @@ jobs:
           output-file: .agent-output/implementation.md
       - name: Create patch artifact
         run: node scripts/agent-implement.mjs --issue-number "${{ inputs.issue-number }}" --create-patch .agent-output/codex.patch --json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agent-implementation-${{ inputs.issue-number }}
           path: .agent-output/*
@@ -332,7 +332,7 @@ jobs:
           --prepared-metadata "$RUNNER_TEMP/implementation-prepared.json"
           --write-manifest .agent-output/integrity.json
           --json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agent-implementation-validated-${{ inputs.issue-number }}
           path: |

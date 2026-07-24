@@ -45,7 +45,7 @@ jobs:
           node scripts/agent-proposer-context.mjs
           --output .agent-output/proposer-context.json
           --json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agent-proposer-context
           path: .agent-output/proposer-context.json
@@ -99,7 +99,7 @@ jobs:
           allow-bots: true
           codex-args: '["--output-schema",".agent/schemas/proposals.schema.json"]'
           output-file: .agent-output/proposals.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agent-proposals
           path: .agent-output/proposals.json
