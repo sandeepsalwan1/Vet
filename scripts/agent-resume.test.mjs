@@ -138,7 +138,10 @@ test("resume workflow serializes per issue and calls zero-model triage", () => {
   assert.match(workflow, /group: agent-resume-\$\{\{ inputs\.issue-number \}\}/);
   assert.match(workflow, /cancel-in-progress: false/);
   assert.match(workflow, /node scripts\/agent-resume\.mjs/);
-  assert.match(workflow, /uses: \.\/\.github\/workflows\/agent-triage\.yml/);
+  assert.match(
+    workflow,
+    /triage:\n[\s\S]*?permissions:\n      actions: write\n      contents: read\n      issues: write\n[\s\S]*?uses: \.\/\.github\/workflows\/agent-triage\.yml/
+  );
   assert.match(workflow, /resume-comment-id:/);
   assert.doesNotMatch(workflow, /openai\/codex-action|model:|effort:/);
 });

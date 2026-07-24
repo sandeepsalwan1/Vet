@@ -50,6 +50,10 @@ jobs:
     name: resume deterministic triage
     needs: validate
     if: needs.validate.outputs.should-resume == 'true'
+    permissions:
+      actions: write
+      contents: read
+      issues: write
     uses: ./.github/workflows/agent-triage.yml
     with:
       issue-number: ${{ inputs.issue-number }}
