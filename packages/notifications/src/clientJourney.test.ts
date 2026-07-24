@@ -157,6 +157,34 @@ test("next-day pet check contains urgent-care guidance", () => {
   assert.match(message.body, /seek emergency veterinary care now/);
 });
 
+test("pet check uses a saved preference email and skips unavailable channels", () => {
+  const [emailMessage] = planPetCheckMessage({
+    settings,
+    profile: { ...profile, email: null },
+    preferences: {
+      ...preferences,
+      email: "updated@example.com",
+      phone: null,
+      smsConsent: false
+    },
+    appointmentId: appointment.id
+  });
+  assert.equal(emailMessage.channel, "email");
+
+  assert.deepEqual(planPetCheckMessage({
+    settings,
+    profile: { ...profile, email: null, phone: "" },
+    preferences: {
+      ...preferences,
+      email: null,
+      phone: null,
+      emailEnabled: false,
+      smsConsent: false
+    },
+    appointmentId: appointment.id
+  }), []);
+});
+
 test("SMS destinations use carrier-independent E.164 numbers", () => {
   assert.equal(smsDestinationFor("(555) 123-4567"), "+15551234567");
   assert.equal(smsDestinationFor("5551234567@attacker.example"), "");

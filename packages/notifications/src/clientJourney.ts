@@ -206,9 +206,14 @@ export function planPetCheckMessage(args: {
   preferences: ClientContactPreferences;
   appointmentId: string | null;
 }) {
-  const channel = args.preferences.emailEnabled && args.profile.email
+  const email = args.preferences.email ?? args.profile.email;
+  const phone = args.preferences.phone ?? args.profile.phone;
+  const channel = args.preferences.emailEnabled && email
     ? "email" as const
-    : "sms" as const;
+    : args.preferences.smsConsent && phone
+      ? "sms" as const
+      : null;
+  if (!channel) return [];
   return [{
     messageType: "pet_health_check",
     channel,
