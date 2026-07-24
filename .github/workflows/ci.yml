@@ -181,7 +181,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.resolve.outputs.candidate_sha }}
-      - uses: actions/dependency-review-action@v4
+      - uses: actions/dependency-review-action@v5
         with:
           base-ref: ${{ needs.resolve.outputs.base_sha }}
           head-ref: ${{ needs.resolve.outputs.candidate_sha }}
