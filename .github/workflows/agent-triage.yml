@@ -6,6 +6,10 @@ on:
       issue-number:
         required: true
         type: number
+      resume-comment-id:
+        required: false
+        type: number
+        default: 0
     secrets:
       OPENAI_API_KEY:
         required: false
@@ -52,6 +56,7 @@ jobs:
           --issue-number "${{ inputs.issue-number }}"
           --prepare
           --lightweight
+          --resume-comment-id "${{ inputs.resume-comment-id || 0 }}"
           --write-manifest .agent-output/triage-manifest.json
           --json
       - uses: actions/upload-artifact@v4

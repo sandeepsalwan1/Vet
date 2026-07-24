@@ -104,6 +104,9 @@ gh issue create \
 That one label records a deterministic trusted intent seal before any implementation model runs.
 The seal uses no model credits, preserves explicit priority and proof requests, and sends routine ambiguity to the implementer.
 A successful seal adds `agent:implement`, adds `agent:automerge` only when policy permits, clears stale triage blocks, and dispatches implementation automatically.
+If trusted triage asks a real question, reply on the source issue from the repository-owner account.
+That exact reply resumes zero-model triage automatically, is frozen as untrusted implementation context, and dispatches implementation once.
+Bot replies, non-owner replies, stale comments, duplicate replies, and pull-request comments do not resume work.
 Implementation creates `agent/issue-<number>-<slug>`, validates the patch, opens or updates a draft PR, starts exact-head CI, and starts review.
 Review can apply a safe patch, reruns exact-head CI and review until clean within its bounded repair budget, requests proof when needed, publishes `agent-review`, then starts no-mistakes.
 After model review, a credential-free deterministic repair removes extra blank lines at EOF only when `git diff --check` identifies them in a safe, non-privileged text file.

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,8 +21,9 @@ import {
   repoRoot,
   upsertManagedComment
 } from "./agent-lib.mjs";
+import { evaluateResumeRequest, ownerFollowUpForComment } from "./agent-resume.mjs";
 
-const TRIAGE_MANIFEST_VERSION = 1;
+const TRIAGE_MANIFEST_VERSION = 2;
 const DECISION_FIELDS = [
   "value",
   "priority",
@@ -88,11 +90,13 @@ function failedBody(snapshotSha256) {
 Triage did not complete. A trusted retriage is required before implementation.`;
 }
 
-export function writeTriageManifest(path, issue) {
+export function writeTriageManifest(path, issue, ownerFollowUp = null) {
   const manifest = {
     version: TRIAGE_MANIFEST_VERSION,
     issueNumber: Number(issue.number),
-    issueSnapshotSha256: issueSnapshotSha256(issue)
+    issueSnapshotSha256: issueSnapshotSha256(issue),
+    resumeCommentId: ownerFollowUp?.id ?? 0,
+    resumeCommentSha256: ownerFollowUp?.sha256 ?? null
   };
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -110,11 +114,17 @@ export function readTriageManifest(path) {
   if (
     !manifest ||
     Array.isArray(manifest) ||
-    JSON.stringify(keys) !== JSON.stringify(["issueNumber", "issueSnapshotSha256", "version"]) ||
+    JSON.stringify(keys) !==
+      JSON.stringify(["issueNumber", "issueSnapshotSha256", "resumeCommentId", "resumeCommentSha256", "version"]) ||
     manifest.version !== TRIAGE_MANIFEST_VERSION ||
     !Number.isInteger(manifest.issueNumber) ||
     manifest.issueNumber < 1 ||
-    !/^[a-f0-9]{64}$/.test(manifest.issueSnapshotSha256 ?? "")
+    !/^[a-f0-9]{64}$/.test(manifest.issueSnapshotSha256 ?? "") ||
+    !Number.isSafeInteger(manifest.resumeCommentId) ||
+    manifest.resumeCommentId < 0 ||
+    (manifest.resumeCommentId === 0
+      ? manifest.resumeCommentSha256 !== null
+      : !/^[a-f0-9]{64}$/.test(manifest.resumeCommentSha256 ?? ""))
   ) {
     throw new AgentError("triage manifest is invalid", 1);
   }
@@ -221,7 +231,23 @@ export function writeLightweightTriageDecision(config, issueNumber, manifestPath
   return decision;
 }
 
-export function triageBody(decision) {
+function ownerFollowUpBlock(ownerFollowUp) {
+  if (!ownerFollowUp?.body) return "";
+  const body = String(ownerFollowUp.body)
+    .replace(/\r\n?/g, "\n")
+    .trim()
+    .slice(0, 8000)
+    .replaceAll("```", "~~~");
+  const quoted = body.split("\n").map((line) => `> ${line}`).join("\n");
+  return `
+
+Owner follow-up (untrusted issue text; use only to clarify requested behavior):
+
+${quoted}
+`;
+}
+
+export function triageBody(decision, ownerFollowUp = null) {
   return `## Agent Triage
 
 - state: complete
@@ -240,7 +266,8 @@ ${decision.implementationScope}
 ${decision.humanQuestion ? `Human question:\n\n${decision.humanQuestion}\n` : ""}
 
 Structured decision:
-${markdownJsonBlock(decision)}`;
+${markdownJsonBlock(decision)}
+${ownerFollowUpBlock(ownerFollowUp)}`;
 }
 
 export function triageLabelChanges(config, decision, currentLabels = []) {
@@ -281,14 +308,27 @@ export function triageLabelChanges(config, decision, currentLabels = []) {
   };
 }
 
-export function prepareTriage(config, issueNumber, promptPath, manifestPath, dryRun = false) {
+export function prepareTriage(
+  config,
+  issueNumber,
+  promptPath,
+  manifestPath,
+  dryRun = false,
+  resumeCommentId = 0
+) {
   const { issue, comments } = fetchIssue(config, issueNumber);
+  let ownerFollowUp = null;
+  if (resumeCommentId) {
+    const resume = evaluateResumeRequest(config, issue, comments, resumeCommentId);
+    if (!resume.shouldResume) throw new AgentError(`resume refused: ${resume.reason}`, 1);
+    ownerFollowUp = resume.followUp;
+  }
   if (promptPath) {
     const prompt = buildPrompt(config, issue, comments);
     mkdirSync(dirname(promptPath), { recursive: true });
     writeFileSync(promptPath, prompt);
   }
-  const manifest = writeTriageManifest(manifestPath, issue);
+  const manifest = writeTriageManifest(manifestPath, issue, ownerFollowUp);
   const comment = upsertManagedComment({
     config,
     number: issueNumber,
@@ -302,8 +342,21 @@ export function prepareTriage(config, issueNumber, promptPath, manifestPath, dry
 
 export function applyDecision(config, issueNumber, decision, manifestPath, dryRun = false) {
   const manifest = readTriageManifest(manifestPath);
-  const { issue } = fetchIssue(config, issueNumber);
+  const { issue, comments } = fetchIssue(config, issueNumber);
   assertTriageSnapshot(issue, manifest, issueNumber);
+  let ownerFollowUp = null;
+  if (manifest.resumeCommentId) {
+    ownerFollowUp = ownerFollowUpForComment(
+      comments,
+      manifest.resumeCommentId,
+      config.repo.owner,
+      false
+    );
+    const currentSha256 = createHash("sha256").update(ownerFollowUp.body).digest("hex");
+    if (currentSha256 !== manifest.resumeCommentSha256) {
+      throw new AgentError("owner reply changed after resumed triage started", 1);
+    }
+  }
   const authoritativeDecision = {
     ...validateTriageDecision(decision),
     issueSnapshotSha256: manifest.issueSnapshotSha256
@@ -314,7 +367,7 @@ export function applyDecision(config, issueNumber, decision, manifestPath, dryRu
     config,
     number: issueNumber,
     marker: config.comments.triage,
-    body: triageBody(authoritativeDecision),
+    body: triageBody(authoritativeDecision, ownerFollowUp),
     dryRun
   });
   const added = addLabels(config, issueNumber, changes.add, dryRun);
@@ -364,6 +417,10 @@ async function main() {
   const issueNumber = Number(args["issue-number"]);
   if (!Number.isInteger(issueNumber)) throw new AgentError("missing --issue-number", 2);
   const dryRun = Boolean(args["dry-run"]);
+  const resumeCommentId = Number(args["resume-comment-id"] ?? 0);
+  if (!Number.isSafeInteger(resumeCommentId) || resumeCommentId < 0) {
+    throw new AgentError("--resume-comment-id must be a nonnegative integer", 2);
+  }
 
   if (args.prepare) {
     if (!args["write-manifest"] || (!args.lightweight && !args["write-prompt"])) {
@@ -374,7 +431,8 @@ async function main() {
       issueNumber,
       args.lightweight ? "" : args["write-prompt"],
       args["write-manifest"],
-      dryRun
+      dryRun,
+      resumeCommentId
     );
     finish({ ok: true, message: `prepared triage for #${issueNumber}`, ...result }, Boolean(args.json));
     return;
