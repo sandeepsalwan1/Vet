@@ -1,0 +1,10 @@
+<svg width="720" height="184" viewBox="0 0 720 184" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Central Veterinary Hospital</title>
+  <desc id="desc">Central Veterinary Hospital wordmark for loading screens.</desc>
+  <rect width="720" height="184" rx="34" fill="#F6F0E4"/>
+  <path d="M97 46c25.9 0 47 21.1 47 47s-21.1 47-47 47-47-21.1-47-47 21.1-47 47-47Zm0 18.2c-15.9 0-28.8 12.9-28.8 28.8S81.1 121.8 97 121.8s28.8-12.9 28.8-28.8S112.9 64.2 97 64.2Z" fill="#1B4D3B"/>
+  <path d="M79.5 85.5c7-6.9 19.5-6.9 26.5 0l12.1 12.1-12.1 12.1c-7 6.9-19.5 6.9-26.5 0L67.4 97.6l12.1-12.1Z" fill="#D9B06F"/>
+  <path d="M79 97.5h35" stroke="#F6F0E4" stroke-width="9" stroke-linecap="round"/>
+  <text x="176" y="84" fill="#123A2D" font-family="Georgia, 'Times New Roman', serif" font-size="42" font-weight="700" letter-spacing="0.2px">Central Veterinary</text>
+  <text x="176" y="127" fill="#1B4D3B" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="28" font-weight="600" letter-spacing="4px">HOSPITAL</text>
+</svg>

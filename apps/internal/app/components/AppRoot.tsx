@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useState } from "react";
 import { getSession, logout, type AccountSession } from "../lib/accountStore";
 import { validateAccountTeamSession } from "../lib/authClient";
@@ -126,9 +127,16 @@ function AppRootContent({ audience }: { audience: Audience }) {
     return (
       <main className="entryShell">
         <section className="entryPanel bootPanel">
-          <p className="eyebrow">{clinic.name}</p>
-          <h1>{view.kind === "redirecting" ? "Taking you there…" : "Opening…"}</h1>
-          <div className="bootBar" aria-hidden="true" />
+          <Image
+            className="bootWordmark"
+            src="/central-vet-loading.svg"
+            alt={clinic.name}
+            width={360}
+            height={92}
+            priority
+            unoptimized
+          />
+          <p className="bootLine">{view.kind === "redirecting" ? "Taking you there…" : "Opening…"}</p>
         </section>
       </main>
     );
