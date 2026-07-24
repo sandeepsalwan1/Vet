@@ -54,20 +54,20 @@ export const DEMO_ACCOUNTS = [
   {
     role: "staff" as const,
     name: "Front Desk",
-    email: "staff@centralvet.demo",
+    email: "staff@clinic.demo",
     password: "staff1234"
   },
   {
     role: "veterinarian" as const,
     name: "Dr. Shiv",
-    email: "vet@centralvet.demo",
+    email: "vet@clinic.demo",
     password: "vet1234",
     passcode: DEMO_PASSCODES.veterinarian
   },
   {
     role: "admin" as const,
     name: "Clinic Admin",
-    email: "admin@centralvet.demo",
+    email: "admin@clinic.demo",
     password: "admin1234",
     passcode: DEMO_PASSCODES.admin
   }

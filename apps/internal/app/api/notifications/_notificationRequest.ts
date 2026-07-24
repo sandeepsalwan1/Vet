@@ -132,7 +132,7 @@ export async function monthlyAgentEmailResponse(request: Request) {
     cadence: "monthly",
     period,
     recipients: envList(process.env.MONTHLY_AGENT_EMAIL_RECIPIENTS),
-    subject: process.env.MONTHLY_AGENT_EMAIL_SUBJECT || `${clinic.name} monthly agent email`,
+    subject: `${clinic.name} monthly agent email`,
     message: process.env.MONTHLY_AGENT_EMAIL_MESSAGE ||
       "This is the monthly VetAgent email path check."
   });

@@ -34,7 +34,7 @@ services:
       - key: VET_VETERINARIAN_PASSCODE
         sync: false
       - key: HOSPITAL_NAME
-        value: Central Veterinary Hospital
+        value: Veterinary Hospital
       - key: APP_TIME_ZONE
         value: America/Los_Angeles
       - key: MOCK_MODE
@@ -66,7 +66,7 @@ services:
       - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_FROM
-        value: Central Veterinary Hospital <notifications@eepish.com>
+        value: Clinic Notifications <notifications@eepish.com>
       - key: DOCTOR_NOTIFICATION_EMAILS
         sync: false
       - key: TEST_NOTIFICATION_EMAIL
@@ -75,8 +75,6 @@ services:
         value: disabled
       - key: MONTHLY_AGENT_EMAIL_RECIPIENTS
         sync: false
-      - key: MONTHLY_AGENT_EMAIL_SUBJECT
-        value: Central Veterinary Hospital monthly agent email
       - key: MONTHLY_AGENT_EMAIL_MESSAGE
         value: This is the monthly VetAgent email path check.
       - key: SMS_NOTIFICATION_RECIPIENTS

@@ -1,4 +1,4 @@
-// MOCK ACCOUNT STORE — localStorage backend
+// MOCK ACCOUNT STORE: localStorage backend
 // All functions are async to mirror the future REST interface.
 // Replace implementations with real API calls when the backend is ready.
 // SECURITY NOTE: mockHash is NOT cryptographic. Replace with bcrypt server-side.

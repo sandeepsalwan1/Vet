@@ -8,7 +8,10 @@ read_when:
 
 # Architecture
 
-Central Veterinary Hospital is one Next.js app backed by Postgres workspace packages. Public client flows, staff tools, and agent routes share one deployed surface and one tenant-scoped data model.
+Vet is one Next.js app backed by Postgres workspace packages.
+Public client flows, staff tools, and agent routes share one deployed surface and a tenant-scoped data model.
+Central Veterinary Hospital and Tri-City Veterinary Hospital are separate tenants.
+Their domains, branding, settings, and data must never fall back to one another.
 
 ## Design Principles
 
@@ -100,7 +103,7 @@ See `docs/agent-architecture.md` for runtime, authorization, and safety boundari
 2. `.agent` owns policy, prompts, schemas, and configured checks.
 3. `scripts/agent-*.mjs` own GitHub decisions and mutations; workflow YAML supplies permissions and job separation.
 4. Codex jobs receive read access and produce structured output or patches. Separate jobs apply writes.
-5. CI, review, proof when required, and a real no-mistakes status gate automerge.
+5. CI, review, proof when required, and either no-mistakes or an explicit exact-head owner bypass gate automerge.
 
 See `docs/agent-automation.md` for the verified workflow contract.
 

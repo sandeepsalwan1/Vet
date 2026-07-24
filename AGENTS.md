@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Central Veterinary Hospital MVP: one deployed Next.js app, Postgres-backed npm workspace.
+Vet: one deployed Next.js app, Postgres-backed npm workspace.
 
 ## Repo Map
 
@@ -49,6 +49,7 @@ Central Veterinary Hospital MVP: one deployed Next.js app, Postgres-backed npm w
 - New shared behavior belongs in a package only when two callers need the seam.
 - Agent cost: use the cheapest model that reliably satisfies each lane contract; increase model or reasoning only after measured failure.
 - Treat clinic branding, messaging cadence/channels, and PIMS provider as tenant configuration; Tri-City is the current design-partner profile, not a product-wide hardcode.
+- `centralvet.eepish.com` is Central Veterinary Hospital; `tricityvet.eepish.com` is Tri-City Veterinary Hospital. Never alias, merge, or share branding or data between them.
 - Build for a real product, not a demo; mock and local proof paths must remain replaceable by tenant-scoped Cornerstone, AVImark, or other PIMS adapters.
 - No secrets in docs, logs, tests, screenshots, or proof files.
 

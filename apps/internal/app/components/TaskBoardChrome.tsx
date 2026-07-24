@@ -1,11 +1,11 @@
 "use client";
 
 import type { AppRole } from "@central-vet/db";
-import Image from "next/image";
 import { Check, Pencil, ShieldCheck } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { authenticateActorSession } from "../lib/authClient";
 import { useClinicBrand } from "./ClinicContext";
+import { ClinicWordmark } from "./ClinicWordmark";
 import { roleLabel } from "./taskBoardDisplay";
 import type { TaskBoardSession as Session } from "./taskBoardTypes";
 
@@ -73,15 +73,7 @@ export function BootScreen() {
   return (
     <main className="entryShell">
       <section className="entryPanel bootPanel">
-        <Image
-          className="bootWordmark"
-          src="/central-vet-loading.svg"
-          alt={clinic.name}
-          width={360}
-          height={92}
-          priority
-          unoptimized
-        />
+        <ClinicWordmark name={clinic.name} />
         <div className="bootLine">Opening board</div>
       </section>
     </main>

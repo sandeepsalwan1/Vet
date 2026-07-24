@@ -119,7 +119,7 @@ export function StaffPortal({ onAuth, onOpenPasscodeBoard }: StaffPortalProps) {
           type="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          placeholder="doctor@centralvet.com"
+          placeholder="doctor@clinic.example"
           autoFocus
           required
         />

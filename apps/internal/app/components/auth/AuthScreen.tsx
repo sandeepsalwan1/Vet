@@ -22,7 +22,7 @@ const COPY = {
     Icon: PawPrint,
     sub: "Pet Portal",
     title: ["Care that", "goes further"],
-    tagline: "Book visits, refills, and records — one simple place for you and your pet.",
+    tagline: "Book visits, refills, and records in one simple place for you and your pet.",
     features: ["Book a visit anytime", "Refills in a tap", "Records always on hand"],
     crossHref: "/staff",
     crossLabel: "Clinic staff sign in"
@@ -31,7 +31,7 @@ const COPY = {
     Icon: Stethoscope,
     sub: "Team Portal",
     title: ["Your whole", "day, one place"],
-    tagline: "Tasks, approvals, and your AI assistant — one calm clinic dashboard.",
+    tagline: "Tasks, approvals, and your AI assistant in one calm clinic dashboard.",
     features: ["One shared task board", "AI ops assistant", "Approvals at a glance"],
     crossHref: "/",
     crossLabel: "Pet owner sign in"

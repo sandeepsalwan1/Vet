@@ -149,7 +149,7 @@ export async function sendDueClientJourneyMessages(options?: {
 }
 
 const systemActor = { name: "System", role: "admin" as const };
-const defaultClinicName = "Central Veterinary Hospital";
+const defaultClinicName = "Veterinary Hospital";
 
 async function clinicNameFor(clinicId: string | null | undefined) {
   if (!clinicId) return process.env.HOSPITAL_NAME || defaultClinicName;

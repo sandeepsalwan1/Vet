@@ -1,4 +1,7 @@
-import { MissingDatabaseUrlError } from "@central-vet/db";
+import {
+  MissingDatabaseUrlError,
+  UnknownClinicHostnameError
+} from "@central-vet/db";
 import { NextResponse } from "next/server";
 
 export const noStoreHeaders = {
@@ -30,6 +33,14 @@ export function logError(event: string, error: unknown, fields?: LogFields) {
 }
 
 export function dbError(error: unknown, fields?: LogFields) {
+  if (error instanceof UnknownClinicHostnameError) {
+    logWarn("clinic_hostname_unmapped", fields);
+    return NextResponse.json(
+      { error: "Clinic is not configured for this domain." },
+      { status: 421 }
+    );
+  }
+
   if (error instanceof MissingDatabaseUrlError) {
     logWarn("database_missing_url", fields);
     return NextResponse.json(

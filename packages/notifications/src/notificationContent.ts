@@ -1,6 +1,6 @@
 import type { Task } from "@central-vet/db";
 
-const defaultClinicName = "Central Veterinary Hospital";
+const defaultClinicName = "Veterinary Hospital";
 
 function escapeHtml(value: string | null | undefined) {
   return String(value ?? "")

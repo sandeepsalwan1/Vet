@@ -91,7 +91,7 @@ function intentFor(kind: AgentKind, input: AgentInput, options: RunAgentOptions)
 // HYBRID DESIGN (intentional, demo-safe).
 // The real ADK LlmAgent above executes for real: it reasons, calls FunctionTools
 // (the same typed registry as the deterministic path), and its tool calls + events
-// are mirrored into runtime.toolCalls / runtime.workflowEvents and persisted — so
+// are mirrored into runtime.toolCalls / runtime.workflowEvents and persisted, so
 // run-detail proves the ADK agent invoked tools (e.g. an `adk_tool_call`
 // book_appointment/send_followup_outreach plus an agent_tool_calls row with the
 // ADK args).

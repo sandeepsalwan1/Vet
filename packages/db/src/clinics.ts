@@ -4,6 +4,7 @@ import {
   normalizeClinic,
   type ClinicRow
 } from "./clinicRows";
+import { resolveMappedClinicForHostname } from "./clinicRouting";
 
 export type ClinicContext = {
   clinicId: string;
@@ -14,25 +15,6 @@ export type ClinicContext = {
 };
 
 const defaultClinicSlug = "central-vet";
-const eepishSuffixes = [".vet.eepish.com", ".eepish.com"];
-
-function cleanHostname(host: string | null | undefined) {
-  const value = host?.split(",")[0]?.trim().toLowerCase() ?? "";
-  return value.replace(/:\d+$/, "");
-}
-
-function slugFromKnownHost(hostname: string) {
-  if (!hostname || hostname === "localhost" || hostname === "127.0.0.1") {
-    return process.env.DEFAULT_CLINIC_SLUG || defaultClinicSlug;
-  }
-  for (const suffix of eepishSuffixes) {
-    if (hostname.endsWith(suffix)) {
-      const slug = hostname.slice(0, -suffix.length).split(".").pop();
-      if (slug) return slug;
-    }
-  }
-  return null;
-}
 
 async function defaultClinic() {
   const slug = process.env.DEFAULT_CLINIC_SLUG || defaultClinicSlug;
@@ -86,9 +68,8 @@ export async function getClinicById(id: string) {
 }
 
 export async function resolveClinicForHostname(host: string | null | undefined): Promise<ClinicContext> {
-  const hostname = cleanHostname(host);
   const sql = getSql();
-  if (hostname) {
+  return resolveMappedClinicForHostname(host, async (hostname) => {
     const domainRows = await sql<ClinicRow[]>`
       select clinic.id, clinic.slug, clinic.name, clinic.time_zone, clinic.status, clinic.created_at, clinic.updated_at
       from clinic_domains domain
@@ -97,37 +78,6 @@ export async function resolveClinicForHostname(host: string | null | undefined):
         and clinic.status = 'active'
       limit 1
     `;
-    if (domainRows[0]) {
-      const clinic = normalizeClinic(domainRows[0]);
-      return {
-        clinicId: clinic.id,
-        slug: clinic.slug,
-        name: clinic.name,
-        timeZone: clinic.timeZone,
-        hostname
-      };
-    }
-
-    const slug = slugFromKnownHost(hostname);
-    if (slug) {
-      const slugRows = await sql<ClinicRow[]>`
-        select ${sql.unsafe(clinicColumns)}
-        from clinics
-        where slug = ${slug}
-          and status = 'active'
-        limit 1
-      `;
-      if (slugRows[0]) {
-        const clinic = normalizeClinic(slugRows[0]);
-        return {
-          clinicId: clinic.id,
-          slug: clinic.slug,
-          name: clinic.name,
-          timeZone: clinic.timeZone,
-          hostname
-        };
-      }
-    }
-  }
-  return getDefaultClinicContext();
+    return domainRows[0] ? normalizeClinic(domainRows[0]) : null;
+  });
 }

@@ -131,14 +131,7 @@ export async function isEndOfDayAlertsEnabled(options?: { clinicId?: string | nu
     where key = ${scopedKey(clinicId, endOfDayAlertsKey)}
     limit 1
   `;
-  if (rows[0]) return rows[0].value === "true";
-  const fallback = await sql<{ value: string }[]>`
-    select value
-    from app_settings
-    where key = ${endOfDayAlertsKey}
-    limit 1
-  `;
-  return fallback[0]?.value === "true";
+  return rows[0]?.value === "true";
 }
 
 export async function listRecipientProfiles(options?: {
@@ -148,22 +141,12 @@ export async function listRecipientProfiles(options?: {
   const sql = getSql();
   const clinicId = await resolveClinicId(options?.clinicId);
   const scopedPrefix = scopedProfileKeyPrefix(clinicId);
-  const [legacyRows, scopedRows] = await Promise.all([
-    sql<SettingRow[]>`
-      select key, value
-      from app_settings
-      where key like ${`${profileKeyPrefix}%`}
-    `,
-    sql<SettingRow[]>`
-      select key, value
-      from app_settings
-      where key like ${`${scopedPrefix}%`}
-    `
-  ]);
-  const byId = profileSettingsById(legacyRows, profileKeyPrefix);
-  for (const [profileId, value] of profileSettingsById(scopedRows, scopedPrefix)) {
-    byId.set(profileId, value);
-  }
+  const scopedRows = await sql<SettingRow[]>`
+    select key, value
+    from app_settings
+    where key like ${`${scopedPrefix}%`}
+  `;
+  const byId = profileSettingsById(scopedRows, scopedPrefix);
   const profiles = defaultProfiles.map((profile) =>
     normalizeProfile(byId.get(profile.profileId), profile)
   );

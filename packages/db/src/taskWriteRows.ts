@@ -45,7 +45,7 @@ export function taskInsertRow(input: CreateTaskInput, actor: Actor, clinicId: st
     hospital_name:
       input.hospitalName?.trim() ||
       process.env.HOSPITAL_NAME ||
-      "Central Veterinary Hospital",
+      "Veterinary Hospital",
     status: input.status,
     source: input.source,
     client_name: cleanTaskText(input.clientName),
