@@ -644,12 +644,17 @@ function fetchTrustedPull(config, prNumber, dependencies = {}) {
   return { ...snapshot, trust };
 }
 
-function assertTrustedIntentSource(config, snapshot, context) {
-  return assertSharedTrustedAgentPull(snapshot.pull, config, {
-    files: snapshot.files,
-    sourceIssue: context.sourceIssue,
-    rejectPrivilegedPaths: true,
-  });
+export function assertTrustedIntentSource(config, snapshot, context, dependencies = {}) {
+  return assertSharedTrustedAgentPull(
+    snapshot.pull,
+    config,
+    {
+      files: snapshot.files,
+      sourceIssue: context.sourceIssue,
+      rejectPrivilegedPaths: true,
+    },
+    dependencies,
+  );
 }
 
 function fetchIntentContext(config, sourceIssueNumber) {
@@ -1187,7 +1192,7 @@ async function main() {
       throw new AgentError("PR head changed before no-mistakes preparation", 1);
     }
     const context = fetchIntentContext(config, trust.sourceIssue);
-    assertTrustedIntentSource(config, snapshot, context);
+    assertTrustedIntentSource(config, snapshot, context, { ghApiJson });
     const status = markPending(config, pull, dryRun);
     setGitHubOutput({ head_sha: pull.head.sha, head_ref: pull.head.ref });
     finish(
@@ -1208,7 +1213,7 @@ async function main() {
       throw new AgentError("PR head changed after the pending status", 1);
     }
     const context = fetchIntentContext(config, trust.sourceIssue);
-    assertTrustedIntentSource(config, snapshot, context);
+    assertTrustedIntentSource(config, snapshot, context, { ghApiJson });
     const intent = composeEffectiveIntent({ callerIntent: args.intent, ...context });
     if (!dryRun) writePrivateFile(args["intent-file"], `${intent}\n`);
     finish(
@@ -1321,7 +1326,7 @@ async function main() {
     const snapshot = fetchTrustedPull(config, prNumber, { ghApiJson });
     const { pull, trust } = snapshot;
     const context = fetchIntentContext(config, trust.sourceIssue);
-    assertTrustedIntentSource(config, snapshot, context);
+    assertTrustedIntentSource(config, snapshot, context, { ghApiJson });
     let artifact = setupFailureArtifact(expectedHead);
     if (pull.head.sha !== expectedHead) {
       artifact = {
