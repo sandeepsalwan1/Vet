@@ -27,6 +27,9 @@ import {
 const VISUAL_LANES = new Set(["visualProof", "gifProof"]);
 const LOCAL_CONTAINER_VISUAL_IMAGE =
   "node:22-bookworm@sha256:5647be709086c696ff32edaaf1c70cd26d1da6ab2b39c32f3c7b4c4a31957e37";
+const IMPLEMENTATION_OUTPUT_MARKER = "AGENT_CRABBOX_IMPLEMENTATION_OUTPUT_V1 ";
+const MAX_IMPLEMENTATION_OUTPUT_BYTES = 2_500_000;
+const IMPLEMENTATION_OUTPUT_FILES = ["codex.patch", "implementation.md"];
 
 function redactSecrets(text, config, env = process.env) {
   let redacted = String(text ?? "");
@@ -310,17 +313,21 @@ export function validateCollectedArtifacts(
 
 export function buildRunArgs({ provider, command, visual, lane, leasePath, noSync = false }) {
   const args = ["run", "--provider", provider, "--timing-json", "--timing-record", "off"];
+  let remoteCommand = command;
   if (visual && provider === "local-container") args.push("--local-container-image", LOCAL_CONTAINER_VISUAL_IMAGE);
   if (noSync) args.push("--no-sync");
   if (lane === "implementRemote") {
-    args.push(
-      "--allow-env",
-      "CODEX_API_KEY",
-      "--download",
-      ".agent-output/codex.patch=.agent-output/codex.patch",
-      "--download",
-      ".agent-output/implementation.md=.agent-output/implementation.md"
-    );
+    args.push("--allow-env", "CODEX_API_KEY");
+    if (provider === "vercel-sandbox") {
+      remoteCommand = `${command} && node scripts/agent-crabbox-run.mjs --emit-implementation-output`;
+    } else {
+      args.push(
+        "--download",
+        ".agent-output/codex.patch=.agent-output/codex.patch",
+        "--download",
+        ".agent-output/implementation.md=.agent-output/implementation.md"
+      );
+    }
   }
   if (visual) {
     args.push("--desktop", "--browser", "--keep", "--keep-on-failure");
@@ -328,8 +335,87 @@ export function buildRunArgs({ provider, command, visual, lane, leasePath, noSyn
   } else if (provider !== "vercel-sandbox") {
     args.push("--stop-after", "always");
   }
-  args.push("--", "sh", "-lc", command);
+  args.push("--", "sh", "-lc", remoteCommand);
   return args;
+}
+
+export function emitImplementationOutput(workdir = repoRoot()) {
+  const files = {};
+  let totalBytes = 0;
+  for (const name of IMPLEMENTATION_OUTPUT_FILES) {
+    const path = join(workdir, ".agent-output", name);
+    let info;
+    try {
+      info = lstatSync(path);
+    } catch {
+      throw new AgentError(`Crabbox implementation output is missing: ${path}`, 1);
+    }
+    if (!info.isFile() || info.isSymbolicLink() || info.size <= 0) {
+      throw new AgentError(`Crabbox implementation output is not a nonempty regular file: ${path}`, 1);
+    }
+    totalBytes += info.size;
+    if (totalBytes > MAX_IMPLEMENTATION_OUTPUT_BYTES) {
+      throw new AgentError("Crabbox implementation output exceeds the delegated handoff limit", 1);
+    }
+    files[name] = readFileSync(path).toString("base64");
+  }
+  return `${IMPLEMENTATION_OUTPUT_MARKER}${JSON.stringify({ version: 1, files })}`;
+}
+
+export function restoreImplementationOutput(output, workdir = repoRoot()) {
+  const markerIndex = String(output ?? "").lastIndexOf(IMPLEMENTATION_OUTPUT_MARKER);
+  if (markerIndex === -1) throw new AgentError("Crabbox delegated output has no trusted handoff marker", 1);
+  const encoded = String(output)
+    .slice(markerIndex + IMPLEMENTATION_OUTPUT_MARKER.length)
+    .split(/\r?\n/, 1)[0];
+  let envelope;
+  try {
+    envelope = JSON.parse(encoded);
+  } catch {
+    throw new AgentError("Crabbox delegated output handoff is not valid JSON", 1);
+  }
+  if (
+    envelope?.version !== 1 ||
+    !envelope.files ||
+    Array.isArray(envelope.files) ||
+    JSON.stringify(Object.keys(envelope.files).sort()) !== JSON.stringify([...IMPLEMENTATION_OUTPUT_FILES].sort())
+  ) {
+    throw new AgentError("Crabbox delegated output handoff has an invalid shape", 1);
+  }
+
+  let totalBytes = 0;
+  const decoded = [];
+  for (const name of IMPLEMENTATION_OUTPUT_FILES) {
+    const value = envelope.files[name];
+    if (typeof value !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+      throw new AgentError(`Crabbox delegated ${name} handoff is not canonical base64`, 1);
+    }
+    const contents = Buffer.from(value, "base64");
+    if (!contents.length || contents.toString("base64") !== value) {
+      throw new AgentError(`Crabbox delegated ${name} handoff is invalid`, 1);
+    }
+    totalBytes += contents.length;
+    if (totalBytes > MAX_IMPLEMENTATION_OUTPUT_BYTES) {
+      throw new AgentError("Crabbox delegated output exceeds the handoff limit", 1);
+    }
+    decoded.push([name, contents]);
+  }
+
+  const outputDir = join(workdir, ".agent-output");
+  mkdirSync(outputDir, { recursive: true });
+  const restored = [];
+  for (const [name, contents] of decoded) {
+    const path = join(outputDir, name);
+    if (existsSync(path)) {
+      const info = lstatSync(path);
+      if (!info.isFile() || info.isSymbolicLink()) {
+        throw new AgentError(`Crabbox delegated output target is not a regular file: ${path}`, 1);
+      }
+    }
+    writeFileSync(path, contents, { mode: 0o600 });
+    restored.push(path);
+  }
+  return restored;
 }
 
 function verifySession(session, timing, provider) {
@@ -550,7 +636,12 @@ export function runCrabboxLane({
   let failure = "";
 
   try {
-    run = runCommand("crabbox", args, { check: false, env: childEnv, cwd: workdir });
+    run = runCommand("crabbox", args, {
+      check: false,
+      env: childEnv,
+      cwd: workdir,
+      maxBuffer: 8 * 1024 * 1024
+    });
     writeFileSync(logPath, redactSecrets(`${run.stdout}\n${run.stderr}`, config, env), { mode: 0o600 });
     timing = validateTimingReport(parseTimingReport(`${run.stderr}\n${run.stdout}`), selection.provider);
     leaseId = timing.leaseId;
@@ -559,12 +650,16 @@ export function runCrabboxLane({
     }
 
     if (lane === "implementRemote") {
-      for (const path of [
-        join(workdir, ".agent-output/codex.patch"),
-        join(workdir, ".agent-output/implementation.md")
-      ]) {
-        if (!existsSync(path)) throw new AgentError(`Crabbox implementation output is missing: ${path}`, 1);
-        artifacts.push(path);
+      if (selection.provider === "vercel-sandbox") {
+        artifacts.push(...restoreImplementationOutput(run.stdout, workdir));
+      } else {
+        for (const path of [
+          join(workdir, ".agent-output/codex.patch"),
+          join(workdir, ".agent-output/implementation.md")
+        ]) {
+          if (!existsSync(path)) throw new AgentError(`Crabbox implementation output is missing: ${path}`, 1);
+          artifacts.push(path);
+        }
       }
     }
 
@@ -712,6 +807,10 @@ export function runCrabboxLane({
 
 export async function main() {
   const args = parseArgs();
+  if (args["emit-implementation-output"]) {
+    process.stdout.write(`${emitImplementationOutput()}\n`);
+    return;
+  }
   const config = loadConfig();
   const dryRun = Boolean(args["dry-run"]);
   const lane = args.lane ?? "ciRemote";

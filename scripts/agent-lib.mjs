@@ -103,6 +103,7 @@ export function runCommand(command, args = [], options = {}) {
     env: options.env ?? process.env,
     encoding: "utf8",
     input: options.input,
+    maxBuffer: options.maxBuffer,
     stdio: options.stdio ?? "pipe"
   });
   if (result.error) {
