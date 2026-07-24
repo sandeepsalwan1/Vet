@@ -175,7 +175,10 @@ gh pr edit <pr-number> --repo "$REPO" --add-label agent:proof
 CI proof can run on GitHub Actions.
 UI or GIF proof prefers a credentialed Crabbox provider that passed a live smoke plus its readiness variable.
 Without one, Crabbox uses its credential-free `local-container` provider on the GitHub runner with `--desktop` and `--browser`.
-The lane launches each affected route, checks desktop health, records the actual provider and lease, and collects authentic route-bound screenshots or requested video/GIF artifacts.
+For GIF proof, recording starts before browser navigation so transient startup states are captured instead of only the settled page.
+The lane checks each affected route, desktop health, actual provider, lease, and route-bound media.
+The managed GitHub comment links the downloadable Actions artifact and keeps runner-only paths in a collapsed diagnostic section.
+Visual proof fails closed when no reviewable artifact URL is published.
 This fallback spends GitHub Actions time only and does not require the user's laptop or a paid provider key.
 A missing Docker runtime, failed desktop bootstrap, or invalid artifact blocks required visual proof instead of silently replacing it with weaker evidence.
 
