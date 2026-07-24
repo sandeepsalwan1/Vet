@@ -255,6 +255,7 @@ test("triage generation is deterministic and uses no model credits", () => {
   assert.doesNotMatch(prepare, /--validate-backend|backend-model|backend-effort/);
   assert.match(prepare, /--prepare[\s\S]*--lightweight/);
   assert.match(prepare, /--resume-comment-id/);
+  assert.match(workflow, /permissions:\n  actions: write\n  contents: read\n  issues: write/);
   assert.doesNotMatch(prepare, /triage-prompt/);
   assert.match(generate, /permissions:\n      contents: read\n      issues: read/);
   assert.doesNotMatch(generate, /(?:actions|issues|pull-requests|statuses): write/);

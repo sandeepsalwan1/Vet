@@ -20,7 +20,9 @@ on:
         type: number
 
 permissions:
+  actions: write
   contents: read
+  issues: write
 
 concurrency:
   group: agent-triage-${{ inputs.issue-number }}
