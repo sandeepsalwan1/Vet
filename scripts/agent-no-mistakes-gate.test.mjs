@@ -34,6 +34,7 @@ import {
   normalizeGateArtifact,
   parseAxiResult,
   resolvePullMergeBase,
+  resolveTrustedDefaultCommit,
   runNoMistakesGate,
   sanitizedGateArtifact,
   selectTrustedManagedTriageComment,
@@ -139,6 +140,10 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
     workflow,
     /merge_base_tree: \$\{\{ steps\.prepare\.outputs\.merge_base_tree \}\}/,
   );
+  assert.match(
+    workflow,
+    /default_tree: \$\{\{ steps\.prepare\.outputs\.default_tree \}\}/,
+  );
   assert.match(workflow, /head_tree: \$\{\{ steps\.prepare\.outputs\.head_tree \}\}/);
   assert.match(workflow, /--create-exact-parent-bundle/);
   assert.match(
@@ -147,10 +152,16 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
   );
   assert.match(
     workflow,
+    /--default-sha "\$\{\{ needs\.prepare\.outputs\.default_sha \}\}"/,
+  );
+  assert.match(
+    workflow,
     /--seed-exact-repository[\s\S]*?--expected-tree "\$expected_tree"[\s\S]*?--branch "\$head_ref"/,
   );
   assert.match(workflow, /--origin-bundle "\$origin_bundle"/);
   assert.match(workflow, /--expected-parent-tree "\$expected_parent_tree"/);
+  assert.match(workflow, /--expected-default-tree "\$expected_default_tree"/);
+  assert.match(workflow, /--default-branch "\$default_branch"/);
   assert.doesNotMatch(workflow, /https:\/\/github\.com\/\$\{\{ github\.repository \}\}\.git/);
   assert.match(workflow, /--expected-source-tree "\$expected_tree"/);
   assert.match(workflow, /--intent-file \.agent-output\/no-mistakes-intent/);
@@ -278,6 +289,25 @@ test("remote synthetic parent is the immutable pull-request merge base", () => {
       ),
     /no exact merge base/,
   );
+});
+
+test("remote bundle trusts the current exact default-branch tree", () => {
+  const sha = "5".repeat(40);
+  const tree = "6".repeat(40);
+  const requestedPaths = [];
+  const resolved = resolveTrustedDefaultCommit(config, {
+    ghApiJson: (path) => {
+      requestedPaths.push(path);
+      if (path.endsWith("/commits/main")) return { sha };
+      return { sha, tree: { sha: tree } };
+    },
+  });
+
+  assert.deepEqual(resolved, { branch: "main", sha, tree });
+  assert.deepEqual(requestedPaths, [
+    "repos/owner/repo/commits/main",
+    `repos/owner/repo/git/commits/${sha}`,
+  ]);
 });
 
 test("cached no-mistakes results resume only a passing gate", () => {

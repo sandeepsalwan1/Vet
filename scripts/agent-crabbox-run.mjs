@@ -593,30 +593,54 @@ function copyTrackedTree(sourceRoot, destinationRoot, label) {
 
 export function createExactParentBundle(
   workdir,
-  { parentSha = "" } = {}
+  {
+    parentSha = "",
+    defaultSha = "",
+    defaultBranch = "main"
+  } = {}
 ) {
   const root = resolveCrabboxWorkdir(workdir);
-  if (!/^[0-9a-f]{40}$/.test(parentSha)) {
-    throw new AgentError("Crabbox parent SHA must be a full Git commit SHA", 2);
+  if (
+    !/^[0-9a-f]{40}$/.test(parentSha) ||
+    !/^[0-9a-f]{40}$/.test(defaultSha)
+  ) {
+    throw new AgentError(
+      "Crabbox parent and trusted default SHAs must be full Git commits",
+      2
+    );
   }
+  runCommand("git", ["check-ref-format", "--branch", defaultBranch]);
+  const defaultRef = `refs/heads/${defaultBranch}`;
+  const bundleRefs = [EXACT_PARENT_REF, defaultRef];
   const outputDir = requireRealDirectory(
     join(root, ".agent-output"),
     "exact parent output directory"
   );
   const outputPath = join(outputDir, EXACT_PARENT_BUNDLE);
   const temporaryPath = `${outputPath}.tmp-${process.pid}`;
-  if (existsSync(outputPath) || existsSync(temporaryPath)) {
+  const temporaryRepo = join(
+    outputDir,
+    `.no-mistakes-parent-repo-${process.pid}`
+  );
+  if (
+    existsSync(outputPath) ||
+    existsSync(temporaryPath) ||
+    existsSync(temporaryRepo)
+  ) {
     throw new AgentError("Crabbox exact parent bundle already exists", 1);
   }
-  runCommand("git", ["cat-file", "-e", `${parentSha}^{commit}`], { cwd: root });
-  const parentTree = runCommand(
-    "git",
-    ["rev-parse", `${parentSha}^{tree}`],
-    { cwd: root }
-  ).stdout.trim();
-  if (!/^[0-9a-f]{40}$/.test(parentTree)) {
-    throw new AgentError("Crabbox exact parent has no full Git tree SHA", 1);
-  }
+  const treeFor = (sha, label) => {
+    runCommand("git", ["cat-file", "-e", `${sha}^{commit}`], { cwd: root });
+    const tree = runCommand("git", ["rev-parse", `${sha}^{tree}`], {
+      cwd: root
+    }).stdout.trim();
+    if (!/^[0-9a-f]{40}$/.test(tree)) {
+      throw new AgentError(`Crabbox ${label} has no full Git tree SHA`, 1);
+    }
+    return tree;
+  };
+  const parentTree = treeFor(parentSha, "exact parent");
+  const defaultTree = treeFor(defaultSha, "trusted default");
   const identity = {
     ...process.env,
     GIT_AUTHOR_NAME: "Agent Parent Bundler",
@@ -626,29 +650,78 @@ export function createExactParentBundle(
     GIT_COMMITTER_EMAIL: "agent-workspace@example.invalid",
     GIT_COMMITTER_DATE: "2000-01-01T00:00:00Z"
   };
-  const syntheticParent = runCommand("git", ["commit-tree", parentTree], {
-    cwd: root,
-    env: identity,
-    input: "chore: seal no-mistakes parent\n"
-  }).stdout.trim();
-  if (!/^[0-9a-f]{40}$/.test(syntheticParent)) {
-    throw new AgentError("Crabbox synthetic parent commit is invalid", 1);
-  }
-  const existingRef = runCommand(
-    "git",
-    ["show-ref", "--verify", "--quiet", EXACT_PARENT_REF],
-    { cwd: root, check: false }
+  const syntheticCommit = (tree, message) => {
+    const sha = runCommand("git", ["commit-tree", tree], {
+      cwd: root,
+      env: identity,
+      input: `${message}\n`
+    }).stdout.trim();
+    if (!/^[0-9a-f]{40}$/.test(sha)) {
+      throw new AgentError("Crabbox synthetic bundle commit is invalid", 1);
+    }
+    return sha;
+  };
+  const syntheticParent = syntheticCommit(
+    parentTree,
+    "chore: seal no-mistakes parent"
   );
-  if (existingRef.status === 0) {
-    throw new AgentError("Crabbox exact parent ref already exists", 1);
+  const syntheticDefault = syntheticCommit(
+    defaultTree,
+    "chore: seal trusted default"
+  );
+  const exportParentRef =
+    `refs/agent/no-mistakes-export-parent-${process.pid}`;
+  const exportDefaultRef =
+    `refs/agent/no-mistakes-export-default-${process.pid}`;
+  const exportRefs = [exportParentRef, exportDefaultRef];
+  for (const ref of exportRefs) {
+    const existing = runCommand(
+      "git",
+      ["show-ref", "--verify", "--quiet", ref],
+      { cwd: root, check: false }
+    );
+    if (existing.status === 0) {
+      throw new AgentError("Crabbox temporary export ref already exists", 1);
+    }
   }
-  runCommand("git", ["update-ref", EXACT_PARENT_REF, syntheticParent], {
-    cwd: root
-  });
   try {
-    runCommand("git", ["bundle", "create", temporaryPath, EXACT_PARENT_REF], {
+    runCommand("git", ["update-ref", exportParentRef, syntheticParent], {
       cwd: root
     });
+    runCommand("git", ["update-ref", exportDefaultRef, syntheticDefault], {
+      cwd: root
+    });
+    runCommand("git", ["init", "--quiet", "--bare", temporaryRepo], {
+      cwd: root
+    });
+    runCommand(
+      "git",
+      [
+        "--git-dir",
+        temporaryRepo,
+        "fetch",
+        "--quiet",
+        root,
+        exportParentRef,
+        exportDefaultRef
+      ],
+      { cwd: root }
+    );
+    runCommand(
+      "git",
+      ["--git-dir", temporaryRepo, "update-ref", EXACT_PARENT_REF, syntheticParent],
+      { cwd: root }
+    );
+    runCommand(
+      "git",
+      ["--git-dir", temporaryRepo, "update-ref", defaultRef, syntheticDefault],
+      { cwd: root }
+    );
+    runCommand(
+      "git",
+      ["--git-dir", temporaryRepo, "bundle", "create", temporaryPath, ...bundleRefs],
+      { cwd: root }
+    );
     const info = lstatSync(temporaryPath);
     if (
       !info.isFile() ||
@@ -665,13 +738,21 @@ export function createExactParentBundle(
       path: outputPath,
       parent: syntheticParent,
       parentTree,
+      trustedDefault: syntheticDefault,
+      defaultBranch,
+      defaultTree,
       bytes: info.size
     };
   } finally {
-    runCommand("git", ["update-ref", "-d", EXACT_PARENT_REF], {
-      cwd: root,
-      check: false
-    });
+    for (const ref of exportRefs) {
+      runCommand("git", ["update-ref", "-d", ref], {
+        cwd: root,
+        check: false
+      });
+    }
+    if (existsSync(temporaryRepo)) {
+      rmSync(temporaryRepo, { recursive: true });
+    }
     if (existsSync(temporaryPath)) rmSync(temporaryPath);
   }
 }
@@ -682,24 +763,40 @@ export function seedExactRemoteRepository(
     expectedTree = "",
     branch = "",
     originBundle = "",
-    expectedParentTree = ""
+    expectedParentTree = "",
+    expectedDefaultTree = "",
+    defaultBranch = "main"
   } = {}
 ) {
   const root = resolveCrabboxWorkdir(workdir);
   if (expectedTree && !/^[0-9a-f]{40}$/.test(expectedTree)) {
     throw new AgentError("Crabbox expected tree must be a full Git tree SHA", 2);
   }
-  if (Boolean(originBundle) !== Boolean(expectedParentTree)) {
+  const bundleFields = [
+    Boolean(originBundle),
+    Boolean(expectedParentTree),
+    Boolean(expectedDefaultTree)
+  ];
+  if (bundleFields.some(Boolean) && !bundleFields.every(Boolean)) {
     throw new AgentError(
-      "Crabbox exact repository requires both origin bundle and parent tree",
+      "Crabbox exact repository requires origin, parent, and trusted default trees",
       2
     );
   }
-  if (expectedParentTree && !/^[0-9a-f]{40}$/.test(expectedParentTree)) {
-    throw new AgentError("Crabbox parent tree must be a full Git tree SHA", 2);
+  if (
+    (expectedParentTree && !/^[0-9a-f]{40}$/.test(expectedParentTree)) ||
+    (expectedDefaultTree && !/^[0-9a-f]{40}$/.test(expectedDefaultTree))
+  ) {
+    throw new AgentError(
+      "Crabbox parent and trusted default trees must be full Git tree SHAs",
+      2
+    );
   }
+  runCommand("git", ["check-ref-format", "--branch", defaultBranch]);
+  const defaultRef = `refs/heads/${defaultBranch}`;
   let bundlePath = "";
   let parentSha = "";
+  let defaultSha = "";
   if (originBundle) {
     const expectedBundlePath = join(root, ".agent-output", EXACT_PARENT_BUNDLE);
     const requestedBundlePath = resolve(originBundle);
@@ -716,16 +813,26 @@ export function seedExactRemoteRepository(
       throw new AgentError("Crabbox exact parent bundle is invalid or too large", 1);
     }
     bundlePath = realpathSync(expectedBundlePath);
-    const heads = runCommand("git", ["bundle", "list-heads", bundlePath], {
+    const headLines = runCommand("git", ["bundle", "list-heads", bundlePath], {
       cwd: root
     }).stdout.trim().split(/\r?\n/);
-    const match = heads.length === 1
-      ? heads[0].match(/^([0-9a-f]{40}) refs\/agent\/no-mistakes-parent$/)
-      : null;
-    if (!match) {
-      throw new AgentError("Crabbox exact parent bundle has an invalid ref", 1);
+    const heads = new Map();
+    for (const line of headLines) {
+      const match = line.match(/^([0-9a-f]{40}) (refs\/[A-Za-z0-9._/-]+)$/);
+      if (!match || heads.has(match[2])) {
+        throw new AgentError("Crabbox exact parent bundle has an invalid ref", 1);
+      }
+      heads.set(match[2], match[1]);
     }
-    parentSha = match[1];
+    if (
+      heads.size !== 2 ||
+      !heads.has(EXACT_PARENT_REF) ||
+      !heads.has(defaultRef)
+    ) {
+      throw new AgentError("Crabbox exact parent bundle has invalid refs", 1);
+    }
+    parentSha = heads.get(EXACT_PARENT_REF);
+    defaultSha = heads.get(defaultRef);
   }
   const candidateBranch = branch || "agent/exact-candidate";
   runCommand("git", ["check-ref-format", "--branch", candidateBranch]);
@@ -741,6 +848,28 @@ export function seedExactRemoteRepository(
   if (bundlePath) {
     runCommand("git", ["bundle", "verify", bundlePath], { cwd: root });
     runCommand("git", ["remote", "add", "origin", bundlePath], { cwd: root });
+    const defaultTrackingRef = `refs/remotes/origin/${defaultBranch}`;
+    runCommand(
+      "git",
+      ["fetch", "--quiet", "origin", `${defaultRef}:${defaultTrackingRef}`],
+      { cwd: root }
+    );
+    const fetchedDefault = runCommand(
+      "git",
+      ["rev-parse", defaultTrackingRef],
+      { cwd: root }
+    ).stdout.trim();
+    const fetchedDefaultTree = runCommand(
+      "git",
+      ["rev-parse", `${defaultTrackingRef}^{tree}`],
+      { cwd: root }
+    ).stdout.trim();
+    if (
+      fetchedDefault !== defaultSha ||
+      fetchedDefaultTree !== expectedDefaultTree
+    ) {
+      throw new AgentError("Crabbox trusted default bundle tree does not match", 1);
+    }
     runCommand("git", ["fetch", "--quiet", "origin", EXACT_PARENT_REF], {
       cwd: root
     });
@@ -1751,7 +1880,9 @@ export async function main() {
     const result = createExactParentBundle(
       args["input-workdir"] ?? repoRoot(),
       {
-        parentSha: String(args["parent-sha"] ?? "")
+        parentSha: String(args["parent-sha"] ?? ""),
+        defaultSha: String(args["default-sha"] ?? ""),
+        defaultBranch: String(args["default-branch"] ?? "main")
       }
     );
     finish(
@@ -1767,7 +1898,9 @@ export async function main() {
         expectedTree: String(args["expected-tree"] ?? ""),
         branch: String(args.branch ?? ""),
         originBundle: String(args["origin-bundle"] ?? ""),
-        expectedParentTree: String(args["expected-parent-tree"] ?? "")
+        expectedParentTree: String(args["expected-parent-tree"] ?? ""),
+        expectedDefaultTree: String(args["expected-default-tree"] ?? ""),
+        defaultBranch: String(args["default-branch"] ?? "main")
       }
     );
     finish(

@@ -83,6 +83,9 @@ jobs:
       issues: read
       statuses: write
     outputs:
+      default_branch: ${{ steps.prepare.outputs.default_branch }}
+      default_sha: ${{ steps.prepare.outputs.default_sha }}
+      default_tree: ${{ steps.prepare.outputs.default_tree }}
       merge_base_sha: ${{ steps.prepare.outputs.merge_base_sha }}
       merge_base_tree: ${{ steps.prepare.outputs.merge_base_tree }}
       backend_effort: ${{ steps.backend.outputs.effort }}
@@ -213,6 +216,8 @@ jobs:
           --create-exact-parent-bundle
           --input-workdir "$GITHUB_WORKSPACE/target"
           --parent-sha "${{ needs.prepare.outputs.merge_base_sha }}"
+          --default-sha "${{ needs.prepare.outputs.default_sha }}"
+          --default-branch "${{ needs.prepare.outputs.default_branch }}"
           --json
       - name: Stage trusted remote input
         run: >-
@@ -254,6 +259,8 @@ jobs:
             agent_key="$CODEX_API_KEY"; unset CODEX_API_KEY OPENAI_API_KEY;
             external_head="${{ needs.prepare.outputs.head_sha }}";
             expected_parent_tree="${{ needs.prepare.outputs.merge_base_tree }}";
+            expected_default_tree="${{ needs.prepare.outputs.default_tree }}";
+            default_branch="${{ needs.prepare.outputs.default_branch }}";
             expected_tree="${{ needs.prepare.outputs.head_tree }}";
             head_ref="${{ needs.prepare.outputs.head_ref }}";
             origin_bundle="$PWD/.agent-output/no-mistakes-parent.bundle";
@@ -282,7 +289,9 @@ jobs:
             --expected-tree "$expected_tree"
             --branch "$head_ref"
             --origin-bundle "$origin_bundle"
-            --expected-parent-tree "$expected_parent_tree" --json &&
+            --expected-parent-tree "$expected_parent_tree"
+            --expected-default-tree "$expected_default_tree"
+            --default-branch "$default_branch" --json &&
             npm ci --ignore-scripts --no-audit --no-fund &&
             npm run typecheck &&
             npm run build &&

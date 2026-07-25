@@ -913,6 +913,26 @@ export function resolvePullMergeBase(config, pull, dependencies = {}) {
   return { sha: mergeBaseSha, tree: mergeBaseTree };
 }
 
+export function resolveTrustedDefaultCommit(config, dependencies = {}) {
+  const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  const root = `repos/${config.repo.owner}/${config.repo.name}`;
+  const branch = String(config.repo.defaultBranch ?? "");
+  if (!/^[A-Za-z0-9._/-]+$/.test(branch)) {
+    throw new AgentError("no-mistakes trusted default branch is invalid", 1);
+  }
+  const tip = apiJson(`${root}/commits/${branch}`);
+  const sha = String(tip?.sha ?? "");
+  if (!/^[0-9a-f]{40}$/.test(sha)) {
+    throw new AgentError("no-mistakes trusted default branch has no exact commit", 1);
+  }
+  const commit = apiJson(`${root}/git/commits/${sha}`);
+  const tree = String(commit?.tree?.sha ?? "");
+  if (commit?.sha !== sha || !/^[0-9a-f]{40}$/.test(tree)) {
+    throw new AgentError("no-mistakes trusted default commit has no Git tree", 1);
+  }
+  return { branch, sha, tree };
+}
+
 export function assertTrustedIntentSource(config, snapshot, context, dependencies = {}) {
   return assertSharedTrustedAgentPull(
     snapshot.pull,
@@ -1726,6 +1746,7 @@ async function main() {
       throw new AgentError("PR head changed before no-mistakes preparation", 1);
     }
     const mergeBase = resolvePullMergeBase(config, pull, { ghApiJson });
+    const trustedDefault = resolveTrustedDefaultCommit(config, { ghApiJson });
     const context = fetchIntentContext(config, trust.sourceIssue, pull);
     assertTrustedIntentSource(config, snapshot, context, { ghApiJson });
     const commit = ghApiJson(
@@ -1769,6 +1790,9 @@ async function main() {
     }));
     const status = replay.skipModel ? null : markPending(config, pull, dryRun);
     setGitHubOutput({
+      default_branch: trustedDefault.branch,
+      default_sha: trustedDefault.sha,
+      default_tree: trustedDefault.tree,
       merge_base_sha: mergeBase.sha,
       merge_base_tree: mergeBase.tree,
       head_sha: pull.head.sha,

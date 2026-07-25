@@ -781,7 +781,7 @@ test("delegated workspace seals trusted and target files into one syncable git t
   );
 });
 
-test("exact remote repository uses one sealed history-free parent bundle", (t) => {
+test("exact remote repository separates review parent from trusted default", (t) => {
   const root = mkdtempSync(join(tmpdir(), "vet-agent-exact-origin-"));
   const base = join(root, "base");
   const target = join(root, "target");
@@ -806,8 +806,21 @@ test("exact remote repository uses one sealed history-free parent bundle", (t) =
   git(base, "commit", "--quiet", "-m", "base");
   const baseSha = git(base, "rev-parse", "HEAD");
   const baseTree = git(base, "rev-parse", "HEAD^{tree}");
+  writeFileSync(join(base, "trusted-default.txt"), "current\n");
+  git(base, "add", "--all");
+  git(base, "commit", "--quiet", "-m", "advance default");
+  const defaultSha = git(base, "rev-parse", "HEAD");
+  const defaultTree = git(base, "rev-parse", "HEAD^{tree}");
   mkdirSync(join(base, ".agent-output"));
-  const parent = createExactParentBundle(base, { parentSha: baseSha });
+  const parent = createExactParentBundle(base, {
+    parentSha: baseSha,
+    defaultSha,
+    defaultBranch: "main"
+  });
+  assert.equal(
+    git(base, "for-each-ref", "--format=%(refname)", "refs/agent/no-mistakes-export"),
+    ""
+  );
 
   writeFileSync(join(target, "candidate.txt"), "after\n");
   git(target, "add", "--all");
@@ -825,12 +838,16 @@ test("exact remote repository uses one sealed history-free parent bundle", (t) =
     expectedTree: targetTree,
     branch: "agent/test",
     originBundle: join(candidate, ".agent-output/no-mistakes-parent.bundle"),
-    expectedParentTree: baseTree
+    expectedParentTree: baseTree,
+    expectedDefaultTree: defaultTree,
+    defaultBranch: "main"
   });
   assert.equal(seeded.tree, targetTree);
   assert.equal(seeded.branch, "agent/test");
   assert.equal(git(candidate, "rev-parse", "HEAD^"), parent.parent);
   assert.equal(git(candidate, "rev-list", "--count", "HEAD^"), "1");
+  assert.equal(git(candidate, "rev-parse", "origin/main^{tree}"), defaultTree);
+  assert.equal(git(candidate, "rev-list", "--count", "origin/main"), "1");
   assert.equal(
     git(candidate, "remote", "get-url", "origin"),
     realpathSync(join(candidate, ".agent-output/no-mistakes-parent.bundle"))
