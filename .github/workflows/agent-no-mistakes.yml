@@ -344,6 +344,17 @@ jobs:
           --remote-harness trusted/scripts/agent-crabbox-run.mjs
           --record-file "$RUNNER_TEMP/agent-no-mistakes-workspace/candidate/.agent-output/no-mistakes-remote.json"
           --json
+      - name: Classify isolated setup
+        id: classify-setup
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          result="$RUNNER_TEMP/agent-no-mistakes-workspace/candidate/.agent-output/result.json"
+          outcome="$(jq -er '.outcome | select(type == "string")' "$result")"
+          case "$outcome" in
+            setup-failed|model-interrupted) exit 1 ;;
+          esac
       - name: Upload sanitized gate result and native fix
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -357,7 +368,10 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
       - name: Upload redacted remote diagnostics
-        if: always() && steps.gate.outcome != 'success'
+        if: >-
+          always() &&
+          (steps.gate.outcome != 'success' ||
+          steps.classify-setup.outcome != 'success')
         uses: actions/upload-artifact@v4
         with:
           name: no-mistakes-remote-diagnostics-${{ inputs.pr-number }}

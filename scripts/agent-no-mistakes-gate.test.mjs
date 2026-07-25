@@ -168,6 +168,14 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
     workflow,
     /if node \.\.\/trusted\/scripts\/agent-no-mistakes-gate\.mjs[\s\S]*?--write-setup-failure[\s\S]*?--emit-output-lane noMistakesRemote; then[\s\S]*?exit 0;/,
   );
+  assert.match(
+    workflow,
+    /name: Classify isolated setup[\s\S]*?setup-failed\|model-interrupted\) exit 1/,
+  );
+  assert.match(
+    workflow,
+    /steps\.gate\.outcome != 'success' \|\|[\s\S]*?steps\.classify-setup\.outcome != 'success'/,
+  );
   assert.match(workflow, /--approval-state "\$\{\{ inputs\.approval \}\}"/);
   assert.match(
     workflow,
