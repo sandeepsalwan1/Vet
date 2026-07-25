@@ -243,10 +243,12 @@ export function AdminNotificationsTab({ session }: { session: AdminSession }) {
 
   if (!snapshot || !draft) {
     return (
-      <main className="flex flex-1 items-center justify-center gap-2 p-6 text-muted-foreground">
-        <BellRing />
-        <p>{error || "Loading notifications…"}</p>
-        {error ? <Button variant="outline" onClick={() => void load()}>Try again</Button> : null}
+      <main className="adminMain adminNotificationsMain">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <BellRing />
+          <p>{error || "Loading notifications…"}</p>
+          {error ? <Button variant="outline" onClick={() => void load()}>Try again</Button> : null}
+        </div>
       </main>
     );
   }
@@ -273,8 +275,8 @@ export function AdminNotificationsTab({ session }: { session: AdminSession }) {
   ];
 
   return (
-    <main className="flex min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 md:p-6">
+    <main className="adminMain adminNotificationsMain">
+      <div className="flex w-full flex-col gap-4">
         <header className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="font-heading text-2xl font-semibold tracking-tight">Notifications</h2>
