@@ -121,6 +121,9 @@ jobs:
         with:
           name: agent-implementation-context-${{ inputs.issue-number }}
           path: .agent-output
+      - name: Capture exact implementation tree
+        id: source-tree
+        run: printf 'tree=%s\n' "$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
       - name: Stage trusted remote input
         run: node scripts/agent-crabbox-run.mjs --stage-input-lane implementRemote --json
       - uses: ./.github/actions/setup-crabbox
@@ -142,11 +145,9 @@ jobs:
             node scripts/agent-crabbox-run.mjs
             --restore-input-lane implementRemote --json &&
             agent_key="$CODEX_API_KEY"; unset CODEX_API_KEY OPENAI_API_KEY;
-            git init --quiet &&
-            git config user.name "Agent Worker" &&
-            git config user.email "agent@example.invalid" &&
-            git add --all &&
-            git commit --quiet --no-verify -m "chore: seed remote workspace" &&
+            node scripts/agent-crabbox-run.mjs
+            --seed-exact-repository
+            --expected-tree "${{ steps.source-tree.outputs.tree }}" --json &&
             npm install --global --ignore-scripts --no-audit --no-fund @openai/codex@0.144.1 &&
             codex debug prompt-input 'skill discovery probe'
             > /tmp/vet-worker-prompt-input.json &&

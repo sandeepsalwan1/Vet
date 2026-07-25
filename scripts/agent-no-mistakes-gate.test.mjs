@@ -33,13 +33,18 @@ import {
   noMistakesCommentMarker,
   normalizeGateArtifact,
   parseAxiResult,
+  resolvePullMergeBase,
+  resolveTrustedDefaultCommit,
+  repairLedgerOutcome,
   runNoMistakesGate,
   sanitizedGateArtifact,
   selectTrustedManagedTriageComment,
+  setupFailureRecoveryEligible,
   setupFailureArtifact,
   terminalHeadBinding,
   validateNoMistakesRemoteRecord,
   validatedHeadMatches,
+  writeCodexTurnMarkerWrapper,
   writeSetupFailureResult,
 } from "./agent-no-mistakes-gate.mjs";
 
@@ -101,6 +106,10 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
 
   assert.match(workflow, /--validate-backend --lane no-mistakes --json/);
   assert.match(workflow, /--lane noMistakesRemote/);
+  assert.match(
+    workflow,
+    /prepare:\n[\s\S]*?permissions:\n[\s\S]*?issues: write/,
+  );
   assert.match(workflow, /--stage-input-lane noMistakesRemote/);
   assert.match(
     workflow,
@@ -109,7 +118,7 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
   assert.match(workflow, /--restore-input-lane noMistakesRemote/);
   assert.ok(
     workflow.indexOf("--restore-input-lane noMistakesRemote") <
-      workflow.indexOf("cd target;")
+      workflow.indexOf("cd candidate;")
   );
   assert.match(workflow, /uses: \.\/trusted\/\.github\/actions\/setup-crabbox/);
   assert.match(workflow, /node trusted\/scripts\/agent-crabbox-run\.mjs/);
@@ -122,22 +131,67 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
   );
   assert.match(
     workflow,
-    /--delegated-workdir "\$RUNNER_TEMP\/agent-no-mistakes-workspace\/target"/
+    /--delegated-workdir "\$RUNNER_TEMP\/agent-no-mistakes-workspace\/candidate"/
   );
   assert.match(workflow, /--remote-harness trusted\/scripts\/agent-crabbox-run\.mjs/);
   assert.match(
     workflow,
-    /--record-file "\$RUNNER_TEMP\/agent-no-mistakes-workspace\/target\/\.agent-output\/no-mistakes-remote\.json"/
+    /--record-file "\$RUNNER_TEMP\/agent-no-mistakes-workspace\/candidate\/\.agent-output\/no-mistakes-remote\.json"/
+  );
+  assert.match(
+    workflow,
+    /merge_base_sha: \$\{\{ steps\.prepare\.outputs\.merge_base_sha \}\}/,
+  );
+  assert.match(
+    workflow,
+    /merge_base_tree: \$\{\{ steps\.prepare\.outputs\.merge_base_tree \}\}/,
+  );
+  assert.match(
+    workflow,
+    /default_tree: \$\{\{ steps\.prepare\.outputs\.default_tree \}\}/,
   );
   assert.match(workflow, /head_tree: \$\{\{ steps\.prepare\.outputs\.head_tree \}\}/);
-  assert.match(workflow, /test "\$\(git rev-parse HEAD\^\{tree\}\)" = "\$expected_tree"/);
+  assert.match(workflow, /--create-exact-parent-bundle/);
+  assert.match(
+    workflow,
+    /--parent-sha "\$\{\{ needs\.prepare\.outputs\.merge_base_sha \}\}"/,
+  );
+  assert.match(
+    workflow,
+    /--default-sha "\$\{\{ needs\.prepare\.outputs\.default_sha \}\}"/,
+  );
+  assert.match(
+    workflow,
+    /--seed-exact-repository[\s\S]*?--expected-tree "\$expected_tree"[\s\S]*?--branch "\$head_ref"/,
+  );
+  assert.match(workflow, /--origin-bundle "\$origin_bundle"/);
+  assert.match(workflow, /--expected-parent-tree "\$expected_parent_tree"/);
+  assert.match(workflow, /--expected-default-tree "\$expected_default_tree"/);
+  assert.match(workflow, /--default-branch "\$default_branch"/);
+  assert.doesNotMatch(workflow, /https:\/\/github\.com\/\$\{\{ github\.repository \}\}\.git/);
   assert.match(workflow, /--expected-source-tree "\$expected_tree"/);
   assert.match(workflow, /--intent-file \.agent-output\/no-mistakes-intent/);
+  assert.match(workflow, /--model-started-file "\$model_started_file"/);
+  assert.match(workflow, /--write-codex-wrapper/);
+  assert.match(
+    workflow,
+    /--agent-path \/tmp\/no-mistakes-home\/codex-turn-marker/,
+  );
   assert.match(workflow, /trap preserve_setup_failure EXIT/);
   assert.match(workflow, /--write-setup-failure/);
+  assert.doesNotMatch(workflow, /\n\s+--write-setup-failure/);
+  assert.doesNotMatch(workflow, /\n\s+--emit-output-lane noMistakesRemote/);
   assert.match(
     workflow,
     /if node \.\.\/trusted\/scripts\/agent-no-mistakes-gate\.mjs[\s\S]*?--write-setup-failure[\s\S]*?--emit-output-lane noMistakesRemote; then[\s\S]*?exit 0;/,
+  );
+  assert.match(
+    workflow,
+    /name: Classify isolated setup[\s\S]*?setup-failed\|model-interrupted\) exit 1/,
+  );
+  assert.match(
+    workflow,
+    /steps\.gate\.outcome != 'success' \|\|[\s\S]*?steps\.classify-setup\.outcome != 'success'/,
   );
   assert.match(workflow, /--approval-state "\$\{\{ inputs\.approval \}\}"/);
   assert.match(
@@ -168,7 +222,7 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
   );
   assert.match(
     workflow,
-    /path: \|\n\s+\$\{\{ runner\.temp \}\}\/agent-no-mistakes-workspace\/target\/\.agent-output\/result\.json\n\s+\$\{\{ runner\.temp \}\}\/agent-no-mistakes-workspace\/target\/\.agent-output\/fix\.patch\n\s+\$\{\{ runner\.temp \}\}\/agent-no-mistakes-workspace\/target\/\.agent-output\/model-usage\.json\n\s+\$\{\{ runner\.temp \}\}\/agent-no-mistakes-workspace\/target\/\.agent-output\/no-mistakes-remote\.json/,
+    /path: \|\n\s+\$\{\{ runner\.temp \}\}\/agent-no-mistakes-workspace\/candidate\/\.agent-output\/result\.json\n\s+\$\{\{ runner\.temp \}\}\/agent-no-mistakes-workspace\/candidate\/\.agent-output\/fix\.patch\n\s+\$\{\{ runner\.temp \}\}\/agent-no-mistakes-workspace\/candidate\/\.agent-output\/model-usage\.json\n\s+\$\{\{ runner\.temp \}\}\/agent-no-mistakes-workspace\/candidate\/\.agent-output\/no-mistakes-remote\.json/,
   );
   assert.match(workflow, /--remote-record "\$RUNNER_TEMP\/no-mistakes-result\/no-mistakes-remote\.json"/);
   assert.match(gate, /"--skip",\s+"rebase,test,document,lint,push,pr,ci"/);
@@ -207,19 +261,167 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
   assert.match(gate, /createNativeFixPatch/);
 });
 
+test("remote synthetic parent is the immutable pull-request merge base", () => {
+  const baseTip = "1".repeat(40);
+  const mergeBase = "2".repeat(40);
+  const head = "3".repeat(40);
+  const mergeBaseTree = "4".repeat(40);
+  const requestedPaths = [];
+  const resolved = resolvePullMergeBase(
+    config,
+    { base: { sha: baseTip }, head: { sha: head } },
+    {
+      ghApiJson: (path) => {
+        requestedPaths.push(path);
+        if (path.includes("/compare/")) {
+          return { merge_base_commit: { sha: mergeBase } };
+        }
+        return { sha: mergeBase, tree: { sha: mergeBaseTree } };
+      },
+    },
+  );
+
+  assert.deepEqual(resolved, { sha: mergeBase, tree: mergeBaseTree });
+  assert.deepEqual(requestedPaths, [
+    `repos/owner/repo/compare/${baseTip}...${head}`,
+    `repos/owner/repo/git/commits/${mergeBase}`,
+  ]);
+  assert.throws(
+    () =>
+      resolvePullMergeBase(
+        config,
+        { base: { sha: baseTip }, head: { sha: head } },
+        { ghApiJson: () => ({ merge_base_commit: { sha: "invalid" } }) },
+      ),
+    /no exact merge base/,
+  );
+});
+
+test("remote bundle trusts the current exact default-branch tree", () => {
+  const sha = "5".repeat(40);
+  const tree = "6".repeat(40);
+  const requestedPaths = [];
+  const resolved = resolveTrustedDefaultCommit(config, {
+    ghApiJson: (path) => {
+      requestedPaths.push(path);
+      if (path.endsWith("/commits/main")) return { sha };
+      return { sha, tree: { sha: tree } };
+    },
+  });
+
+  assert.deepEqual(resolved, { branch: "main", sha, tree });
+  assert.deepEqual(requestedPaths, [
+    "repos/owner/repo/commits/main",
+    `repos/owner/repo/git/commits/${sha}`,
+  ]);
+});
+
 test("cached no-mistakes results resume only a passing gate", () => {
   assert.deepEqual(noMistakesReplayState(null), {
     skipModel: false,
     replayPassed: false,
   });
-  assert.deepEqual(noMistakesReplayState({ outcome: "checks-passed" }), {
+  assert.deepEqual(noMistakesReplayState({ outcome: "passed-proven" }), {
     skipModel: true,
     replayPassed: true,
+  });
+  assert.deepEqual(noMistakesReplayState({ outcome: "checks-passed" }), {
+    skipModel: false,
+    replayPassed: false,
   });
   assert.deepEqual(noMistakesReplayState({ outcome: "ask-user" }), {
     skipModel: true,
     replayPassed: false,
   });
+  assert.deepEqual(noMistakesReplayState({ outcome: "setup-failed" }), {
+    skipModel: false,
+    replayPassed: false,
+  });
+  assert.deepEqual(noMistakesReplayState({ outcome: "passed-recovered" }), {
+    skipModel: true,
+    replayPassed: true,
+  });
+  assert.equal(
+    repairLedgerOutcome({ status: "passed", outcome: "passed" }),
+    "passed-proven",
+  );
+  assert.equal(
+    repairLedgerOutcome({ status: "failed", outcome: "passed" }),
+    "failed",
+  );
+});
+
+test("same-head setup recovery restores only inherited automerge once", () => {
+  const head = "7".repeat(40);
+  const inputDigest = "8".repeat(64);
+  const findingDigest = "9".repeat(64);
+  const ledger = {
+    version: 1,
+    intentDigest: "a".repeat(64),
+    revisionCount: 0,
+    revisions: [],
+    evaluations: [{
+      lane: "no-mistakes",
+      head,
+      inputDigest,
+      findingDigest,
+      outcome: "setup-failed",
+    }],
+    findings: [],
+  };
+  const recoveryConfig = {
+    labels: { automerge: "agent:automerge" },
+  };
+  const sourceIssue = { labels: [{ name: "agent:automerge" }] };
+  const eligible = (currentLedger) =>
+    setupFailureRecoveryEligible({
+      config: recoveryConfig,
+      ledger: currentLedger,
+      head,
+      inputDigest,
+      passProven: true,
+      sourceIssue,
+    });
+
+  assert.equal(eligible(ledger), true);
+  assert.equal(
+    setupFailureRecoveryEligible({
+      config: recoveryConfig,
+      ledger,
+      head,
+      inputDigest,
+      passProven: false,
+      sourceIssue,
+    }),
+    false,
+  );
+  ledger.evaluations.push({
+    lane: "no-mistakes",
+    head,
+    inputDigest,
+    findingDigest,
+    outcome: "passed",
+  });
+  assert.equal(eligible(ledger), true);
+  ledger.evaluations.push({
+    lane: "no-mistakes",
+    head,
+    inputDigest,
+    findingDigest,
+    outcome: "passed-recovered",
+  });
+  assert.equal(eligible(ledger), false);
+  assert.equal(
+    setupFailureRecoveryEligible({
+      config: recoveryConfig,
+      ledger: { ...ledger, evaluations: ledger.evaluations.slice(0, 2) },
+      head,
+      inputDigest,
+      passProven: true,
+      sourceIssue: { labels: [] },
+    }),
+    false,
+  );
 });
 
 test("early no-mistakes setup failures produce terminal sanitized artifacts", (t) => {
@@ -238,6 +440,70 @@ test("early no-mistakes setup failures produce terminal sanitized artifacts", (t
   assert.deepEqual(written.artifact, setupFailureArtifact(HEAD));
   assert.equal(JSON.parse(readFileSync(resultFile)).outcome, "setup-failed");
   assert.deepEqual(JSON.parse(readFileSync(usageFile)).calls, []);
+});
+
+test("interrupted started model is terminal and usage-incomplete", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "vet-no-mistakes-interrupted-"));
+  const resultFile = join(dir, "result.json");
+  const usageFile = join(dir, "usage.json");
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const written = writeSetupFailureResult({
+    expectedHead: HEAD,
+    resultFile,
+    usageFile,
+    model: "gpt-5.4-mini",
+    effort: "medium",
+    modelStarted: true,
+  });
+  assert.equal(written.artifact.outcome, "model-interrupted");
+  assert.equal(
+    normalizeGateArtifact(written.artifact, HEAD).outcome,
+    "model-interrupted",
+  );
+  assert.equal(JSON.parse(readFileSync(usageFile)).complete, false);
+  assert.deepEqual(noMistakesReplayState({ outcome: "model-interrupted" }), {
+    skipModel: true,
+    replayPassed: false,
+  });
+});
+
+test("model start marker follows Codex turn start, not process startup", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "vet-codex-turn-marker-"));
+  const codexPath = join(dir, "codex");
+  const wrapperPath = join(dir, "codex-turn-marker");
+  const markerPath = join(dir, "model-started");
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(
+    codexPath,
+    '#!/usr/bin/env node\nprocess.stdout.write(process.env.CODEX_TEST_EVENTS ?? "");\n',
+    { mode: 0o700 },
+  );
+  writeCodexTurnMarkerWrapper({
+    outputFile: wrapperPath,
+    codexPath,
+    markerPath,
+  });
+
+  const preModelEvents = '{"type":"thread.started","thread_id":"test"}\n';
+  const preModel = spawnSync(wrapperPath, [], {
+    encoding: "utf8",
+    env: { ...process.env, CODEX_TEST_EVENTS: preModelEvents },
+  });
+  assert.equal(preModel.status, 0);
+  assert.equal(preModel.stdout, preModelEvents);
+  assert.equal(existsSync(markerPath), false);
+
+  const startedEvents =
+    `${preModelEvents}{"type":"turn.started"}\n` +
+    '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}\n';
+  const started = spawnSync(wrapperPath, [], {
+    encoding: "utf8",
+    env: { ...process.env, CODEX_TEST_EVENTS: startedEvents },
+  });
+  assert.equal(started.status, 0);
+  assert.equal(started.stdout, startedEvents);
+  assert.equal(readFileSync(markerPath, "utf8"), "started\n");
 });
 
 test("no-mistakes stats export preserves exact per-invocation token deltas", () => {
@@ -271,13 +537,24 @@ test("isolated no-mistakes config binds the selected model and excludes credenti
   const value = noMistakesConfig({
     model: "gpt-5.4-mini",
     effort: "medium",
+    agentPath: "/tmp/codex-turn-marker",
   });
   assert.match(value, /gpt-5\.4-mini/);
+  assert.match(value, /agent_path_override:\n  codex: "\/tmp\/codex-turn-marker"/);
   assert.match(value, /model_reasoning_effort/);
   assert.match(value, /shell_environment_policy\.exclude/);
   assert.match(value, /Do not invoke skills, autoreview, no-mistakes/);
   assert.throws(
     () => noMistakesConfig({ model: "bad value", effort: "medium" }),
+    /configuration is invalid/,
+  );
+  assert.throws(
+    () =>
+      noMistakesConfig({
+        model: "gpt-5.4-mini",
+        effort: "medium",
+        agentPath: "relative-wrapper",
+      }),
     /configuration is invalid/,
   );
 });
@@ -963,6 +1240,28 @@ test("isolated review environment blocker receives one fresh daemon retry", () =
   assert.equal(parseAxiResult(result.stdout, result.status).status, "passed");
 });
 
+test("started model suppresses a fresh no-mistakes retry", () => {
+  const commands = [];
+  let started = false;
+  let calls = 0;
+  const result = runNoMistakesGate("Validate the PR", "/repo", {
+    runCommand: (command, args) => {
+      commands.push([command, args]);
+      return { status: 0 };
+    },
+    spawnSync: () => {
+      calls += 1;
+      started = true;
+      return { stdout: environmentBlockOutput(), stderr: "", status: 0 };
+    },
+    modelStarted: () => started,
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(result.attempts, 1);
+  assert.deepEqual(commands, [["no-mistakes", ["init"]]]);
+});
+
 test("isolated test environment blocker receives one fresh daemon retry", () => {
   const gate = {
     status: "blocked",
@@ -1242,6 +1541,14 @@ test("terminal failures block while exact-head auto-fix findings receive bounded
   assert.deepEqual(
     gateLabelChanges(labelConfig, { status: "passed", outcome: "passed", userApproved: false }),
     { add: [], remove: [] },
+  );
+  assert.deepEqual(
+    gateLabelChanges(
+      labelConfig,
+      { status: "passed", outcome: "passed", userApproved: false },
+      { recoveredSetupFailure: true },
+    ),
+    { add: ["agent:automerge"], remove: ["agent:blocked"] },
   );
   for (const artifact of [
     { status: "failed", outcome: "failed" },

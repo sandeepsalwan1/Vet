@@ -80,9 +80,14 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-      issues: read
+      issues: write
       statuses: write
     outputs:
+      default_branch: ${{ steps.prepare.outputs.default_branch }}
+      default_sha: ${{ steps.prepare.outputs.default_sha }}
+      default_tree: ${{ steps.prepare.outputs.default_tree }}
+      merge_base_sha: ${{ steps.prepare.outputs.merge_base_sha }}
+      merge_base_tree: ${{ steps.prepare.outputs.merge_base_tree }}
       backend_effort: ${{ steps.backend.outputs.effort }}
       backend_model: ${{ steps.backend.outputs.model }}
       concurrency_group: ${{ steps.concurrency.outputs.group }}
@@ -205,6 +210,15 @@ jobs:
         with:
           name: no-mistakes-context-${{ inputs.pr-number }}
           path: target/.agent-output
+      - name: Seal exact no-mistakes parent
+        run: >-
+          node trusted/scripts/agent-crabbox-run.mjs
+          --create-exact-parent-bundle
+          --input-workdir "$GITHUB_WORKSPACE/target"
+          --parent-sha "${{ needs.prepare.outputs.merge_base_sha }}"
+          --default-sha "${{ needs.prepare.outputs.default_sha }}"
+          --default-branch "${{ needs.prepare.outputs.default_branch }}"
+          --json
       - name: Stage trusted remote input
         run: >-
           node trusted/scripts/agent-crabbox-run.mjs
@@ -239,14 +253,19 @@ jobs:
             set -e;
             node trusted/scripts/agent-crabbox-run.mjs
             --restore-input-lane noMistakesRemote
-            --input-workdir target --json;
-            cd target;
+            --input-workdir candidate --json;
+            cd candidate;
             export AGENT_TARGET_ROOT="$PWD";
             agent_key="$CODEX_API_KEY"; unset CODEX_API_KEY OPENAI_API_KEY;
             external_head="${{ needs.prepare.outputs.head_sha }}";
+            expected_parent_tree="${{ needs.prepare.outputs.merge_base_tree }}";
+            expected_default_tree="${{ needs.prepare.outputs.default_tree }}";
+            default_branch="${{ needs.prepare.outputs.default_branch }}";
             expected_tree="${{ needs.prepare.outputs.head_tree }}";
             head_ref="${{ needs.prepare.outputs.head_ref }}";
+            origin_bundle="$PWD/.agent-output/no-mistakes-parent.bundle";
             result_file=.agent-output/result.json;
+            model_started_file=.agent-output/model-started;
             mkdir -p .agent-output;
             preserve_setup_failure() {
               exit_code=$?;
@@ -255,16 +274,8 @@ jobs:
                 [ ! -s "$result_file" ] ||
                 [ ! -s .agent-output/model-usage.json ]; then
                 unset agent_key CODEX_API_KEY OPENAI_API_KEY;
-                if node ../trusted/scripts/agent-no-mistakes-gate.mjs
-                  --write-setup-failure
-                  --expected-head "$external_head"
-                  --result-file "$result_file"
-                  --usage-file .agent-output/model-usage.json
-                  --model "${{ needs.prepare.outputs.backend_model }}"
-                  --effort "${{ needs.prepare.outputs.backend_effort }}"
-                  --json >/dev/null 2>&1 &&
-                  node ../trusted/scripts/agent-crabbox-run.mjs
-                  --emit-output-lane noMistakesRemote; then
+                if node ../trusted/scripts/agent-no-mistakes-gate.mjs --write-setup-failure --expected-head "$external_head" --result-file "$result_file" --usage-file .agent-output/model-usage.json --model-started-file "$model_started_file" --model "${{ needs.prepare.outputs.backend_model }}" --effort "${{ needs.prepare.outputs.backend_effort }}" --json >/dev/null 2>&1 &&
+                  node ../trusted/scripts/agent-crabbox-run.mjs --emit-output-lane noMistakesRemote; then
                   exit 0;
                 fi;
                 if [ "$exit_code" -eq 0 ]; then exit_code=1; fi;
@@ -272,14 +283,15 @@ jobs:
               exit "$exit_code";
             };
             trap preserve_setup_failure EXIT;
-            git init --quiet &&
-            git config user.name "no-mistakes Gate" &&
-            git config user.email "no-mistakes@example.invalid" &&
-            git add --all &&
-            git commit --quiet --allow-empty --no-verify -m "chore: seed exact gate head" &&
-            source_head="$(git rev-parse HEAD)" &&
-            test "$(git rev-parse HEAD^{tree})" = "$expected_tree" &&
-            git switch -C "$head_ref" "$source_head" &&
+            node ../trusted/scripts/agent-crabbox-run.mjs
+            --seed-exact-repository
+            --input-workdir "$PWD"
+            --expected-tree "$expected_tree"
+            --branch "$head_ref"
+            --origin-bundle "$origin_bundle"
+            --expected-parent-tree "$expected_parent_tree"
+            --expected-default-tree "$expected_default_tree"
+            --default-branch "$default_branch" --json &&
             npm ci --ignore-scripts --no-audit --no-fund &&
             npm run typecheck &&
             npm run build &&
@@ -294,8 +306,15 @@ jobs:
             tar -xzf /tmp/no-mistakes.tar.gz -C /tmp/no-mistakes-bin &&
             chmod 755 /tmp/no-mistakes-bin/no-mistakes &&
             export PATH="/tmp/no-mistakes-bin:$PATH" &&
+            codex_path=$(command -v codex) &&
+            model_started_path="$PWD/$model_started_file" &&
+            node ../trusted/scripts/agent-no-mistakes-gate.mjs
+            --write-codex-wrapper /tmp/no-mistakes-home/codex-turn-marker
+            --codex-path "$codex_path"
+            --model-started-file "$model_started_path" --json &&
             node ../trusted/scripts/agent-no-mistakes-gate.mjs
             --write-config /tmp/no-mistakes-home/config.yaml
+            --agent-path /tmp/no-mistakes-home/codex-turn-marker
             --model "${{ needs.prepare.outputs.backend_model }}"
             --effort "${{ needs.prepare.outputs.backend_effort }}" --json &&
             approval_flag="";
@@ -310,6 +329,7 @@ jobs:
             --expected-head "$external_head"
             --expected-source-tree "$expected_tree"
             --expected-ref "$head_ref"
+            --model-started-file "$model_started_file"
             --intent-file .agent-output/no-mistakes-intent
             --fix-patch .agent-output/fix.patch
             --result-file .agent-output/result.json
@@ -329,30 +349,44 @@ jobs:
           --lane noMistakesRemote
           --command "$REMOTE_COMMAND"
           --workdir "$RUNNER_TEMP/agent-no-mistakes-workspace"
-          --delegated-workdir "$RUNNER_TEMP/agent-no-mistakes-workspace/target"
+          --delegated-workdir "$RUNNER_TEMP/agent-no-mistakes-workspace/candidate"
           --remote-harness trusted/scripts/agent-crabbox-run.mjs
-          --record-file "$RUNNER_TEMP/agent-no-mistakes-workspace/target/.agent-output/no-mistakes-remote.json"
+          --record-file "$RUNNER_TEMP/agent-no-mistakes-workspace/candidate/.agent-output/no-mistakes-remote.json"
           --json
+      - name: Classify isolated setup
+        id: classify-setup
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          result="$RUNNER_TEMP/agent-no-mistakes-workspace/candidate/.agent-output/result.json"
+          outcome="$(jq -er '.outcome | select(type == "string")' "$result")"
+          case "$outcome" in
+            setup-failed|model-interrupted) exit 1 ;;
+          esac
       - name: Upload sanitized gate result and native fix
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: no-mistakes-result-${{ inputs.pr-number }}
           path: |
-            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/result.json
-            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/fix.patch
-            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/model-usage.json
-            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/no-mistakes-remote.json
+            ${{ runner.temp }}/agent-no-mistakes-workspace/candidate/.agent-output/result.json
+            ${{ runner.temp }}/agent-no-mistakes-workspace/candidate/.agent-output/fix.patch
+            ${{ runner.temp }}/agent-no-mistakes-workspace/candidate/.agent-output/model-usage.json
+            ${{ runner.temp }}/agent-no-mistakes-workspace/candidate/.agent-output/no-mistakes-remote.json
           if-no-files-found: ignore
           retention-days: 1
       - name: Upload redacted remote diagnostics
-        if: always() && steps.gate.outcome != 'success'
+        if: >-
+          always() &&
+          (steps.gate.outcome != 'success' ||
+          steps.classify-setup.outcome != 'success')
         uses: actions/upload-artifact@v4
         with:
           name: no-mistakes-remote-diagnostics-${{ inputs.pr-number }}
           path: |
-            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/crabbox-noMistakesRemote-*.json
-            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/crabbox-noMistakesRemote-*.log
+            ${{ runner.temp }}/agent-no-mistakes-workspace/candidate/.agent-output/crabbox-noMistakesRemote-*.json
+            ${{ runner.temp }}/agent-no-mistakes-workspace/candidate/.agent-output/crabbox-noMistakesRemote-*.log
           include-hidden-files: true
           if-no-files-found: warn
 

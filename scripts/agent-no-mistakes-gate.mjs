@@ -1,8 +1,15 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   AgentError,
@@ -14,6 +21,7 @@ import {
   getPullSnapshot,
   ghApiJson,
   implementationCommitMessage,
+  issueLabels,
   loadConfig,
   markdownJsonBlock,
   newestManagedComment,
@@ -50,6 +58,10 @@ const STATUS_CONTEXT = "no-mistakes";
 export const MAX_INFRASTRUCTURE_RETRIES = 1;
 export const MAX_GATE_REPAIR_ATTEMPTS = MAX_SEMANTIC_REVISIONS;
 const PASSING_OUTCOMES = new Set(["checks-passed", "passed"]);
+const REPLAY_PASSING_OUTCOMES = new Set([
+  "passed-proven",
+  "passed-recovered",
+]);
 const ALLOWED_OUTCOMES = new Set([
   ...PASSING_OUTCOMES,
   "failed",
@@ -61,6 +73,7 @@ const ALLOWED_OUTCOMES = new Set([
   "native-fix",
   "unpublished-changes",
   "setup-failed",
+  "model-interrupted",
 ]);
 const PUBLIC_FINDING_SUMMARIES = new Map([
   [
@@ -89,10 +102,51 @@ const PUBLIC_FAILURE_STAGES = new Set([
 ]);
 
 export function noMistakesReplayState(evaluation) {
+  const outcome = String(evaluation?.outcome ?? "");
+  const replayPassed = REPLAY_PASSING_OUTCOMES.has(outcome);
   return {
-    skipModel: Boolean(evaluation),
-    replayPassed: PASSING_OUTCOMES.has(String(evaluation?.outcome ?? "")),
+    skipModel:
+      replayPassed ||
+      (Boolean(evaluation) &&
+        !PASSING_OUTCOMES.has(outcome) &&
+        outcome !== "setup-failed"),
+    replayPassed,
   };
+}
+
+export function repairLedgerOutcome(artifact) {
+  const outcome = String(artifact?.outcome ?? "");
+  if (artifact?.status === "passed") return "passed-proven";
+  return PASSING_OUTCOMES.has(outcome) ? "failed" : outcome;
+}
+
+export function setupFailureRecoveryEligible({
+  config,
+  ledger,
+  head,
+  inputDigest,
+  passProven,
+  sourceIssue,
+}) {
+  if (
+    !passProven ||
+    !issueLabels(sourceIssue).includes(config.labels.automerge) ||
+    openRepairFindings(ledger).length > 0
+  ) {
+    return false;
+  }
+  const history = ledger.evaluations.filter(
+    (evaluation) =>
+      evaluation.lane === "no-mistakes" &&
+      evaluation.head === head &&
+      evaluation.inputDigest === inputDigest,
+  );
+  const lastRecovered = history.findLastIndex(
+    (evaluation) => evaluation.outcome === "passed-recovered",
+  );
+  return history.findLastIndex(
+    (evaluation) => evaluation.outcome === "setup-failed",
+  ) > lastRecovered;
 }
 
 function readApprovalState(value) {
@@ -160,17 +214,22 @@ ${JSON.stringify(implementationAddendum, null, 2)}`;
   return effective;
 }
 
-export function noMistakesConfig({ model, effort }) {
+export function noMistakesConfig({ model, effort, agentPath = "" }) {
   const resolvedModel = String(model ?? "").trim();
   const resolvedEffort = String(effort ?? "").trim();
+  const resolvedAgentPath = String(agentPath ?? "").trim();
   if (
     !CODEX_MODEL_PATTERN.test(resolvedModel) ||
-    !CODEX_EFFORTS.has(resolvedEffort)
+    !CODEX_EFFORTS.has(resolvedEffort) ||
+    (resolvedAgentPath && !isAbsolute(resolvedAgentPath))
   ) {
     throw new AgentError("no-mistakes model configuration is invalid", 2);
   }
+  const agentPathConfig = resolvedAgentPath
+    ? `agent_path_override:\n  codex: ${JSON.stringify(resolvedAgentPath)}\n`
+    : "";
   return `agent: codex
-session_reuse: false
+${agentPathConfig}session_reuse: false
 intent:
   enabled: false
 auto_fix:
@@ -872,6 +931,53 @@ function fetchTrustedPull(config, prNumber, dependencies = {}) {
   return { ...snapshot, trust };
 }
 
+export function resolvePullMergeBase(config, pull, dependencies = {}) {
+  const baseSha = String(pull?.base?.sha ?? "");
+  const headSha = String(pull?.head?.sha ?? "");
+  if (!/^[0-9a-f]{40}$/.test(baseSha) || !/^[0-9a-f]{40}$/.test(headSha)) {
+    throw new AgentError("no-mistakes pull comparison requires exact commit SHAs", 1);
+  }
+  const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  const comparison = apiJson(
+    `repos/${config.repo.owner}/${config.repo.name}/compare/${baseSha}...${headSha}`,
+  );
+  const mergeBaseSha = String(comparison?.merge_base_commit?.sha ?? "");
+  if (!/^[0-9a-f]{40}$/.test(mergeBaseSha)) {
+    throw new AgentError("no-mistakes pull comparison has no exact merge base", 1);
+  }
+  const commit = apiJson(
+    `repos/${config.repo.owner}/${config.repo.name}/git/commits/${mergeBaseSha}`,
+  );
+  const mergeBaseTree = String(commit?.tree?.sha ?? "");
+  if (
+    commit?.sha !== mergeBaseSha ||
+    !/^[0-9a-f]{40}$/.test(mergeBaseTree)
+  ) {
+    throw new AgentError("no-mistakes merge base has no trusted Git tree", 1);
+  }
+  return { sha: mergeBaseSha, tree: mergeBaseTree };
+}
+
+export function resolveTrustedDefaultCommit(config, dependencies = {}) {
+  const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  const root = `repos/${config.repo.owner}/${config.repo.name}`;
+  const branch = String(config.repo.defaultBranch ?? "");
+  if (!/^[A-Za-z0-9._/-]+$/.test(branch)) {
+    throw new AgentError("no-mistakes trusted default branch is invalid", 1);
+  }
+  const tip = apiJson(`${root}/commits/${branch}`);
+  const sha = String(tip?.sha ?? "");
+  if (!/^[0-9a-f]{40}$/.test(sha)) {
+    throw new AgentError("no-mistakes trusted default branch has no exact commit", 1);
+  }
+  const commit = apiJson(`${root}/git/commits/${sha}`);
+  const tree = String(commit?.tree?.sha ?? "");
+  if (commit?.sha !== sha || !/^[0-9a-f]{40}$/.test(tree)) {
+    throw new AgentError("no-mistakes trusted default commit has no Git tree", 1);
+  }
+  return { branch, sha, tree };
+}
+
 export function assertTrustedIntentSource(config, snapshot, context, dependencies = {}) {
   return assertSharedTrustedAgentPull(
     snapshot.pull,
@@ -1005,6 +1111,9 @@ function artifactBlocker(artifact, repairAttempt = 0, repairDecision = null) {
   if (artifact.outcome === "setup-failed") {
     return "isolated no-mistakes setup did not produce a valid result";
   }
+  if (artifact.outcome === "model-interrupted") {
+    return "no-mistakes stopped after model execution began; automatic replay was suppressed";
+  }
   return "no-mistakes did not return a passing terminal outcome";
 }
 
@@ -1046,9 +1155,16 @@ ${markdownJsonBlock({
 export function gateLabelChanges(
   config,
   artifact,
-  { repairAttempt = 0, repairDecision = null } = {},
+  {
+    repairAttempt = 0,
+    repairDecision = null,
+    recoveredSetupFailure = false,
+  } = {},
 ) {
-  if (artifact?.status === "passed" && artifact?.userApproved) {
+  if (
+    artifact?.status === "passed" &&
+    (artifact?.userApproved || recoveredSetupFailure)
+  ) {
     return {
       add: [config.labels.automerge],
       remove: [config.labels.blocked],
@@ -1273,6 +1389,7 @@ function recordTerminal({
   mutatePull = true,
   repairAttempt = 0,
   repairDecision = null,
+  recoveredSetupFailure = false,
   remote = null,
   dryRun = false,
 }) {
@@ -1299,6 +1416,7 @@ function recordTerminal({
   const labelChanges = gateLabelChanges(config, artifact, {
     repairAttempt,
     repairDecision,
+    recoveredSetupFailure,
   });
   const labels = {
     added: addLabels(config, pull.number, labelChanges.add, dryRun),
@@ -1358,6 +1476,7 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
         "reattaching to the active no-mistakes run after a transient client timeout\n",
       ));
   const maxReattachments = dependencies.maxReattachments ?? 12;
+  const modelStarted = dependencies.modelStarted ?? (() => false);
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     execute("no-mistakes", ["init"], { cwd: repoDir, env });
@@ -1404,6 +1523,7 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
     if (
       attempt === 1 &&
       !reattachExhausted &&
+      !modelStarted() &&
       (isRetryableReviewEnvironmentBlock(parsed) ||
         isRetryableTestEnvironmentBlock(parsed) ||
         isRetryableInvalidOutput(parsed) ||
@@ -1421,11 +1541,97 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
   throw new AgentError("no-mistakes retry limit was exhausted", 1);
 }
 
-function writePrivateFile(path, content) {
+function writePrivateFile(path, content, mode = 0o600) {
   const target = resolve(path);
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, content, { mode: 0o600 });
+  writeFileSync(target, content, { mode });
+  chmodSync(target, mode);
   return target;
+}
+
+export function codexTurnMarkerWrapper({ codexPath, markerPath }) {
+  const resolvedCodexPath = String(codexPath ?? "").trim();
+  const resolvedMarkerPath = String(markerPath ?? "").trim();
+  if (
+    !isAbsolute(resolvedCodexPath) ||
+    !existsSync(resolvedCodexPath) ||
+    !isAbsolute(resolvedMarkerPath) ||
+    !existsSync(dirname(resolvedMarkerPath))
+  ) {
+    throw new AgentError("no-mistakes Codex marker paths are invalid", 2);
+  }
+  return `#!/usr/bin/env node
+import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+
+const codexPath = ${JSON.stringify(resolvedCodexPath)};
+const markerPath = ${JSON.stringify(resolvedMarkerPath)};
+const child = spawn(codexPath, process.argv.slice(2), {
+  env: process.env,
+  stdio: ["inherit", "pipe", "inherit"],
+});
+let markerError = false;
+let marked = false;
+let pending = "";
+
+child.stdout.on("data", (chunk) => {
+  process.stdout.write(chunk);
+  if (marked || markerError) return;
+  pending += chunk.toString("utf8");
+  let newline = pending.indexOf("\\n");
+  while (newline !== -1) {
+    const line = pending.slice(0, newline);
+    pending = pending.slice(newline + 1);
+    try {
+      if (JSON.parse(line)?.type === "turn.started") {
+        writeFileSync(markerPath, "started\\n", { mode: 0o600 });
+        marked = true;
+        pending = "";
+        return;
+      }
+    } catch (error) {
+      if (error?.code) {
+        markerError = true;
+        process.stderr.write("Codex model-start marker could not be written\\n");
+        child.kill("SIGTERM");
+        return;
+      }
+    }
+    newline = pending.indexOf("\\n");
+  }
+  if (pending.length > 1_048_576) pending = pending.slice(-65_536);
+});
+
+child.once("error", () => {
+  markerError = true;
+  process.stderr.write("Codex invocation could not start\\n");
+});
+child.once("close", (code, signal) => {
+  if (signal) {
+    process.kill(process.pid, signal);
+    return;
+  }
+  process.exit(
+    markerError || !Number.isInteger(code) || code < 0 ? 1 : code,
+  );
+});
+`;
+}
+
+export function writeCodexTurnMarkerWrapper({
+  outputFile,
+  codexPath,
+  markerPath,
+}) {
+  const resolvedOutputFile = String(outputFile ?? "").trim();
+  if (!isAbsolute(resolvedOutputFile)) {
+    throw new AgentError("missing no-mistakes Codex wrapper path", 2);
+  }
+  return writePrivateFile(
+    resolvedOutputFile,
+    codexTurnMarkerWrapper({ codexPath, markerPath }),
+    0o700,
+  );
 }
 
 function readExpectedHead(value) {
@@ -1452,11 +1658,11 @@ function readRepairAttempt(value) {
   return attempt;
 }
 
-export function setupFailureArtifact(expectedHead) {
+export function setupFailureArtifact(expectedHead, { modelStarted = false } = {}) {
   return {
     version: ARTIFACT_VERSION,
     status: "failed",
-    outcome: "setup-failed",
+    outcome: modelStarted ? "model-interrupted" : "setup-failed",
     expectedHead,
     validatedHead: "",
     runId: "",
@@ -1473,11 +1679,14 @@ export function writeSetupFailureResult({
   usageFile = "",
   model = "",
   effort = "",
+  modelStarted = false,
 }) {
   if (!resultFile) {
     throw new AgentError("missing no-mistakes setup failure result path", 2);
   }
-  const artifact = setupFailureArtifact(readExpectedHead(expectedHead));
+  const artifact = setupFailureArtifact(readExpectedHead(expectedHead), {
+    modelStarted,
+  });
   const resultPath = writePrivateFile(
     resultFile,
     `${JSON.stringify(artifact, null, 2)}\n`,
@@ -1492,7 +1701,7 @@ export function writeSetupFailureResult({
         lane: "no-mistakes",
         model,
         effort,
-        complete: true,
+        complete: !modelStarted,
         calls: [],
       }, null, 2)}\n`,
     );
@@ -1513,6 +1722,9 @@ async function main() {
       usageFile: args["usage-file"],
       model: args.model,
       effort: args.effort,
+      modelStarted:
+        Boolean(args["model-started-file"]) &&
+        existsSync(resolve(String(args["model-started-file"]))),
     });
     finish(
       {
@@ -1526,10 +1738,27 @@ async function main() {
     return;
   }
 
+  if (args["write-codex-wrapper"]) {
+    const path = writeCodexTurnMarkerWrapper({
+      outputFile: args["write-codex-wrapper"],
+      codexPath: args["codex-path"],
+      markerPath: args["model-started-file"],
+    });
+    finish(
+      { ok: true, message: "wrote Codex turn marker wrapper", path },
+      Boolean(args.json),
+    );
+    return;
+  }
+
   if (args["write-config"]) {
     const path = writePrivateFile(
       args["write-config"],
-      noMistakesConfig({ model: args.model, effort: args.effort }),
+      noMistakesConfig({
+        model: args.model,
+        effort: args.effort,
+        agentPath: args["agent-path"],
+      }),
     );
     finish(
       { ok: true, message: "wrote isolated no-mistakes configuration", path },
@@ -1570,6 +1799,8 @@ async function main() {
     if (pull.head.sha !== expectedHead) {
       throw new AgentError("PR head changed before no-mistakes preparation", 1);
     }
+    const mergeBase = resolvePullMergeBase(config, pull, { ghApiJson });
+    const trustedDefault = resolveTrustedDefaultCommit(config, { ghApiJson });
     const context = fetchIntentContext(config, trust.sourceIssue, pull);
     assertTrustedIntentSource(config, snapshot, context, { ghApiJson });
     const commit = ghApiJson(
@@ -1587,7 +1818,7 @@ async function main() {
       if (!dryRun) writePrivateFile(args["intent-file"], `${intent}\n`);
     }
     const comments = getIssueComments(config, prNumber);
-    const repairLedger = loadRepairLedger(
+    let repairLedger = loadRepairLedger(
       comments,
       context.intentCapsule.intentDigest,
       config.repo.owner,
@@ -1606,13 +1837,60 @@ async function main() {
           : "not-approved",
       }],
     });
-    const replay = noMistakesReplayState(repairEvaluationFor(repairLedger, {
+    const replayEvaluation = repairEvaluationFor(repairLedger, {
       lane: "no-mistakes",
       head: expectedHead,
       inputDigest,
-    }));
+    });
+    let replay = noMistakesReplayState(replayEvaluation);
+    const recoveredSetupFailure =
+      replay.replayPassed &&
+      setupFailureRecoveryEligible({
+        config,
+        ledger: repairLedger,
+        head: expectedHead,
+        inputDigest,
+        passProven: replayEvaluation.outcome === "passed-proven",
+        sourceIssue: context.sourceIssue,
+      });
+    let recoveryLabels = null;
+    let recoveryLedgerComment = null;
+    if (recoveredSetupFailure) {
+      const changes = gateLabelChanges(
+        config,
+        { status: "passed", outcome: replayEvaluation.outcome },
+        { recoveredSetupFailure: true },
+      );
+      recoveryLabels = {
+        added: addLabels(config, pull.number, changes.add, dryRun),
+        removed: removeLabels(config, pull.number, changes.remove, dryRun),
+      };
+      repairLedger = recordRepairEvaluation(repairLedger, {
+        lane: "no-mistakes",
+        head: expectedHead,
+        inputDigest,
+        findings: [],
+        outcome: "passed-recovered",
+      }).ledger;
+      recoveryLedgerComment = saveRepairLedger({
+        config,
+        prNumber,
+        ledger: repairLedger,
+        dryRun,
+      });
+      replay = noMistakesReplayState(repairEvaluationFor(repairLedger, {
+        lane: "no-mistakes",
+        head: expectedHead,
+        inputDigest,
+      }));
+    }
     const status = replay.skipModel ? null : markPending(config, pull, dryRun);
     setGitHubOutput({
+      default_branch: trustedDefault.branch,
+      default_sha: trustedDefault.sha,
+      default_tree: trustedDefault.tree,
+      merge_base_sha: mergeBase.sha,
+      merge_base_tree: mergeBase.tree,
       head_sha: pull.head.sha,
       head_ref: pull.head.ref,
       head_tree: headTree,
@@ -1627,6 +1905,9 @@ async function main() {
           ? `no-mistakes already evaluated for PR #${prNumber}`
           : `no-mistakes pending for PR #${prNumber}`,
         status,
+        recoveredSetupFailure,
+        recoveryLabels,
+        recoveryLedgerComment,
         ...replay,
       },
       Boolean(args.json),
@@ -1705,9 +1986,17 @@ async function main() {
     const intent = readFileSync(resolve(args["intent-file"]), "utf8").trim();
     if (!intent) throw new AgentError("trusted gate intent file is empty", 1);
     const userApproved = Boolean(args["user-approved"]);
+    const modelStartedFile = String(args["model-started-file"] ?? "").trim();
+    if (!modelStartedFile) {
+      throw new AgentError("missing no-mistakes model-started marker path", 2);
+    }
+    if (existsSync(resolve(modelStartedFile))) {
+      throw new AgentError("stale no-mistakes model-started marker", 1);
+    }
     const run = runNoMistakesGate(intent, repoDir, {
       expectedHead: actualHead,
       userApproved,
+      modelStarted: () => existsSync(resolve(modelStartedFile)),
     });
     const postRunHead = runCommand("git", ["rev-parse", "HEAD"], {
       cwd: repoDir,
@@ -1808,13 +2097,21 @@ async function main() {
         artifact = setupFailureArtifact(expectedHead);
       }
     }
+    const recoveredSetupFailure = setupFailureRecoveryEligible({
+      config,
+      ledger: repairLedger,
+      head: expectedHead,
+      inputDigest,
+      passProven: artifact.status === "passed",
+      sourceIssue: context.sourceIssue,
+    });
     const binding = terminalHeadBinding(expectedHead, pull.head.sha);
     const evaluation = recordRepairEvaluation(repairLedger, {
       lane: "no-mistakes",
       head: expectedHead,
       inputDigest,
       findings: artifact.status === "passed" ? [] : artifact.findings,
-      outcome: artifact.outcome,
+      outcome: repairLedgerOutcome(artifact),
     });
     repairLedger = evaluation.ledger;
     const repair = gateRepairDecision(artifact, repairAttempt, {
@@ -1869,9 +2166,19 @@ async function main() {
       ...binding,
       repairAttempt,
       repairDecision: repair,
+      recoveredSetupFailure,
       remote,
       dryRun,
     });
+    if (recoveredSetupFailure) {
+      repairLedger = recordRepairEvaluation(repairLedger, {
+        lane: "no-mistakes",
+        head: expectedHead,
+        inputDigest,
+        findings: [],
+        outcome: "passed-recovered",
+      }).ledger;
+    }
     const ledgerComment = saveRepairLedger({
       config,
       prNumber,

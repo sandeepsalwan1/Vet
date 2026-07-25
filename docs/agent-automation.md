@@ -37,7 +37,8 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
    These preflight retries cannot duplicate model work or consume a semantic revision because Codex has not started.
 6. The current installed worker adapter is Codex; unsupported or unimplemented backend selections fail before model execution.
 7. Review repeats the credential-free read/patch separation, applies safe fixes to the agent branch, waits for exact-head CI, and shares one three-revision semantic repair ledger with no-mistakes.
-   Review and no-mistakes seal tracked trusted-main and exact-candidate trees plus the bounded lane input into one temporary git workspace before Crabbox sync, while keeping their output handoff candidate-scoped.
+   Review and no-mistakes seal tracked trusted-main and exact-candidate trees plus the bounded lane input into one temporary git workspace before Crabbox sync, preserving tracked files that local ignore rules hide while keeping their output handoff candidate-scoped.
+   The sealed tree uses `candidate/` because Crabbox reserves `target/` as a default generated-output sync exclusion.
    If the no-mistakes client times out while its daemon is still reviewing, the gate reattaches to that exact active run instead of starting another model run.
    The no-mistakes client retries one malformed evaluator result inside the same isolated run; another malformed result blocks without starting a redundant full workflow.
    no-mistakes v1.40 receives the authoritative source issue and managed triage through `--intent`, performs native semantic review, and may run two native safe auto-fix rounds.
@@ -312,6 +313,9 @@ gh run list --repo "$REPO" --workflow agent-readiness.yml --limit 5
 
 Rerun a failed workflow on the unchanged head before creating a new issue.
 Managed comments, branches, pull requests, repair evaluations, proof results, and cost records reconcile by issue and exact head.
+A sealed no-mistakes `setup-failed` evaluation from before Codex emits `turn.started` may be superseded by a later exact-head result without consuming a semantic revision.
+An interruption after that model-turn signal is recorded separately and remains replay-cached to prevent duplicate paid work.
+Active-run reattachment may continue after that signal, but the outer no-mistakes helper cannot start a fresh daemon retry.
 Rerunning automerge for a merged pull request dispatches only missing exact-SHA CI, CodeQL, or Render verification.
 Provider retries stop once a remote command starts.
 This is the duplicate-model boundary for interruption recovery.
@@ -347,6 +351,7 @@ This is the duplicate-model boundary for interruption recovery.
 - Credentialed Crabbox providers require readiness proof; built-in `local-container` receives no provider credentials and passes a scheduled lifecycle smoke plus the same route, lease, desktop, media, and behavior checks when used for proof.
 - no-mistakes and proof statuses must reflect real execution; skip lanes use omission or the distinct `no-mistakes-bypass` status instead of faking success.
 - The credentialless no-mistakes gate runs semantic review and native safe auto-fix only.
+- Its local read-only origin seals the immutable pull-request merge-base tree as the review parent and the current default-branch tree as a separate trusted ref, without repository history or credentials.
 - It never rebases, edits privileged automation paths, lints, or publishes directly.
 - A trusted exact-head job alone may publish its sealed patch.
 - Deterministic scenario, API, and CLI checks may provide direct non-visual evidence when the trusted request calls for it.

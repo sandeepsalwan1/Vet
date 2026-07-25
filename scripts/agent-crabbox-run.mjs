@@ -12,6 +12,7 @@ import {
   readdirSync,
   readSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync
@@ -64,10 +65,15 @@ const DELEGATED_OUTPUTS = new Map([
 const DELEGATED_INPUTS = new Map([
   ["implementRemote", ["implement-prompt.md", "implementation-intent.json"]],
   ["reviewRemote", ["review-prompt.md", "review.schema.json"]],
-  ["noMistakesRemote", ["no-mistakes-intent"]]
+  ["noMistakesRemote", ["no-mistakes-intent", "no-mistakes-parent.bundle"]]
 ]);
 const MAX_DELEGATED_OUTPUT_BYTES = 2_500_000;
 const MAX_DELEGATED_INPUT_BYTES = 2_500_000;
+const MAX_EXACT_PARENT_BUNDLE_BYTES = 25_000_000;
+const EXACT_PARENT_BUNDLE = "no-mistakes-parent.bundle";
+const EXACT_PARENT_REF = "refs/agent/no-mistakes-parent";
+// Crabbox excludes generated directories named "target" from sync by default.
+const DELEGATED_CANDIDATE_DIRECTORY = "candidate";
 
 function redactSecrets(text, config, env = process.env) {
   let redacted = String(text ?? "");
@@ -527,7 +533,13 @@ function readDelegatedInputFiles(lane, directory, { exact = true } = {}) {
     if (!info.isFile() || info.isSymbolicLink() || info.size <= 0) {
       throw new AgentError(`Crabbox ${lane} input is not a valid regular file: ${path}`, 1);
     }
-    totalBytes += info.size;
+    if (name === "no-mistakes-parent.bundle") {
+      if (info.size > MAX_EXACT_PARENT_BUNDLE_BYTES) {
+        throw new AgentError("Crabbox exact parent bundle exceeds the handoff limit", 1);
+      }
+    } else {
+      totalBytes += info.size;
+    }
     if (totalBytes > MAX_DELEGATED_INPUT_BYTES) {
       throw new AgentError(`Crabbox ${lane} input exceeds the handoff limit`, 1);
     }
@@ -579,6 +591,354 @@ function copyTrackedTree(sourceRoot, destinationRoot, label) {
   return paths.length;
 }
 
+export function createExactParentBundle(
+  workdir,
+  {
+    parentSha = "",
+    defaultSha = "",
+    defaultBranch = "main"
+  } = {}
+) {
+  const root = resolveCrabboxWorkdir(workdir);
+  if (
+    !/^[0-9a-f]{40}$/.test(parentSha) ||
+    !/^[0-9a-f]{40}$/.test(defaultSha)
+  ) {
+    throw new AgentError(
+      "Crabbox parent and trusted default SHAs must be full Git commits",
+      2
+    );
+  }
+  runCommand("git", ["check-ref-format", "--branch", defaultBranch]);
+  const defaultRef = `refs/heads/${defaultBranch}`;
+  const bundleRefs = [EXACT_PARENT_REF, defaultRef];
+  const outputDir = requireRealDirectory(
+    join(root, ".agent-output"),
+    "exact parent output directory"
+  );
+  const outputPath = join(outputDir, EXACT_PARENT_BUNDLE);
+  const temporaryPath = `${outputPath}.tmp-${process.pid}`;
+  const temporaryRepo = join(
+    outputDir,
+    `.no-mistakes-parent-repo-${process.pid}`
+  );
+  if (
+    existsSync(outputPath) ||
+    existsSync(temporaryPath) ||
+    existsSync(temporaryRepo)
+  ) {
+    throw new AgentError("Crabbox exact parent bundle already exists", 1);
+  }
+  const treeFor = (sha, label) => {
+    runCommand("git", ["cat-file", "-e", `${sha}^{commit}`], { cwd: root });
+    const tree = runCommand("git", ["rev-parse", `${sha}^{tree}`], {
+      cwd: root
+    }).stdout.trim();
+    if (!/^[0-9a-f]{40}$/.test(tree)) {
+      throw new AgentError(`Crabbox ${label} has no full Git tree SHA`, 1);
+    }
+    return tree;
+  };
+  const parentTree = treeFor(parentSha, "exact parent");
+  const defaultTree = treeFor(defaultSha, "trusted default");
+  const identity = {
+    ...process.env,
+    GIT_AUTHOR_NAME: "Agent Parent Bundler",
+    GIT_AUTHOR_EMAIL: "agent-workspace@example.invalid",
+    GIT_AUTHOR_DATE: "2000-01-01T00:00:00Z",
+    GIT_COMMITTER_NAME: "Agent Parent Bundler",
+    GIT_COMMITTER_EMAIL: "agent-workspace@example.invalid",
+    GIT_COMMITTER_DATE: "2000-01-01T00:00:00Z"
+  };
+  const syntheticCommit = (tree, message) => {
+    const sha = runCommand("git", ["commit-tree", tree], {
+      cwd: root,
+      env: identity,
+      input: `${message}\n`
+    }).stdout.trim();
+    if (!/^[0-9a-f]{40}$/.test(sha)) {
+      throw new AgentError("Crabbox synthetic bundle commit is invalid", 1);
+    }
+    return sha;
+  };
+  const syntheticParent = syntheticCommit(
+    parentTree,
+    "chore: seal no-mistakes parent"
+  );
+  const syntheticDefault = syntheticCommit(
+    defaultTree,
+    "chore: seal trusted default"
+  );
+  const exportParentRef =
+    `refs/agent/no-mistakes-export-parent-${process.pid}`;
+  const exportDefaultRef =
+    `refs/agent/no-mistakes-export-default-${process.pid}`;
+  const exportRefs = [exportParentRef, exportDefaultRef];
+  for (const ref of exportRefs) {
+    const existing = runCommand(
+      "git",
+      ["show-ref", "--verify", "--quiet", ref],
+      { cwd: root, check: false }
+    );
+    if (existing.status === 0) {
+      throw new AgentError("Crabbox temporary export ref already exists", 1);
+    }
+  }
+  try {
+    runCommand("git", ["update-ref", exportParentRef, syntheticParent], {
+      cwd: root
+    });
+    runCommand("git", ["update-ref", exportDefaultRef, syntheticDefault], {
+      cwd: root
+    });
+    runCommand("git", ["init", "--quiet", "--bare", temporaryRepo], {
+      cwd: root
+    });
+    runCommand(
+      "git",
+      [
+        "--git-dir",
+        temporaryRepo,
+        "fetch",
+        "--quiet",
+        root,
+        exportParentRef,
+        exportDefaultRef
+      ],
+      { cwd: root }
+    );
+    runCommand(
+      "git",
+      ["--git-dir", temporaryRepo, "update-ref", EXACT_PARENT_REF, syntheticParent],
+      { cwd: root }
+    );
+    runCommand(
+      "git",
+      ["--git-dir", temporaryRepo, "update-ref", defaultRef, syntheticDefault],
+      { cwd: root }
+    );
+    runCommand(
+      "git",
+      ["--git-dir", temporaryRepo, "bundle", "create", temporaryPath, ...bundleRefs],
+      { cwd: root }
+    );
+    const info = lstatSync(temporaryPath);
+    if (
+      !info.isFile() ||
+      info.isSymbolicLink() ||
+      info.size <= 0 ||
+      info.size > MAX_EXACT_PARENT_BUNDLE_BYTES
+    ) {
+      throw new AgentError("Crabbox exact parent bundle is invalid or too large", 1);
+    }
+    runCommand("git", ["bundle", "verify", temporaryPath], { cwd: root });
+    chmodSync(temporaryPath, 0o600);
+    renameSync(temporaryPath, outputPath);
+    return {
+      path: outputPath,
+      parent: syntheticParent,
+      parentTree,
+      trustedDefault: syntheticDefault,
+      defaultBranch,
+      defaultTree,
+      bytes: info.size
+    };
+  } finally {
+    for (const ref of exportRefs) {
+      runCommand("git", ["update-ref", "-d", ref], {
+        cwd: root,
+        check: false
+      });
+    }
+    if (existsSync(temporaryRepo)) {
+      rmSync(temporaryRepo, { recursive: true });
+    }
+    if (existsSync(temporaryPath)) rmSync(temporaryPath);
+  }
+}
+
+export function seedExactRemoteRepository(
+  workdir,
+  {
+    expectedTree = "",
+    branch = "",
+    originBundle = "",
+    expectedParentTree = "",
+    expectedDefaultTree = "",
+    defaultBranch = "main"
+  } = {}
+) {
+  const root = resolveCrabboxWorkdir(workdir);
+  if (expectedTree && !/^[0-9a-f]{40}$/.test(expectedTree)) {
+    throw new AgentError("Crabbox expected tree must be a full Git tree SHA", 2);
+  }
+  const bundleFields = [
+    Boolean(originBundle),
+    Boolean(expectedParentTree),
+    Boolean(expectedDefaultTree)
+  ];
+  if (bundleFields.some(Boolean) && !bundleFields.every(Boolean)) {
+    throw new AgentError(
+      "Crabbox exact repository requires origin, parent, and trusted default trees",
+      2
+    );
+  }
+  if (
+    (expectedParentTree && !/^[0-9a-f]{40}$/.test(expectedParentTree)) ||
+    (expectedDefaultTree && !/^[0-9a-f]{40}$/.test(expectedDefaultTree))
+  ) {
+    throw new AgentError(
+      "Crabbox parent and trusted default trees must be full Git tree SHAs",
+      2
+    );
+  }
+  runCommand("git", ["check-ref-format", "--branch", defaultBranch]);
+  const defaultRef = `refs/heads/${defaultBranch}`;
+  let bundlePath = "";
+  let parentSha = "";
+  let defaultSha = "";
+  if (originBundle) {
+    const expectedBundlePath = join(root, ".agent-output", EXACT_PARENT_BUNDLE);
+    const requestedBundlePath = resolve(originBundle);
+    const info = lstatSync(requestedBundlePath);
+    if (realpathSync(requestedBundlePath) !== expectedBundlePath) {
+      throw new AgentError("Crabbox exact parent bundle path is invalid", 2);
+    }
+    if (
+      !info.isFile() ||
+      info.isSymbolicLink() ||
+      info.size <= 0 ||
+      info.size > MAX_EXACT_PARENT_BUNDLE_BYTES
+    ) {
+      throw new AgentError("Crabbox exact parent bundle is invalid or too large", 1);
+    }
+    bundlePath = realpathSync(expectedBundlePath);
+    const headLines = runCommand("git", ["bundle", "list-heads", bundlePath], {
+      cwd: root
+    }).stdout.trim().split(/\r?\n/);
+    const heads = new Map();
+    for (const line of headLines) {
+      const match = line.match(/^([0-9a-f]{40}) (refs\/[A-Za-z0-9._/-]+)$/);
+      if (!match || heads.has(match[2])) {
+        throw new AgentError("Crabbox exact parent bundle has an invalid ref", 1);
+      }
+      heads.set(match[2], match[1]);
+    }
+    if (
+      heads.size !== 2 ||
+      !heads.has(EXACT_PARENT_REF) ||
+      !heads.has(defaultRef)
+    ) {
+      throw new AgentError("Crabbox exact parent bundle has invalid refs", 1);
+    }
+    parentSha = heads.get(EXACT_PARENT_REF);
+    defaultSha = heads.get(defaultRef);
+  }
+  const candidateBranch = branch || "agent/exact-candidate";
+  runCommand("git", ["check-ref-format", "--branch", candidateBranch]);
+  runCommand("git", ["init", "--quiet"], { cwd: root });
+  runCommand("git", ["config", "user.name", "Agent Remote Workspace"], {
+    cwd: root
+  });
+  runCommand(
+    "git",
+    ["config", "user.email", "agent-workspace@example.invalid"],
+    { cwd: root }
+  );
+  if (bundlePath) {
+    runCommand("git", ["bundle", "verify", bundlePath], { cwd: root });
+    runCommand("git", ["remote", "add", "origin", bundlePath], { cwd: root });
+    const defaultTrackingRef = `refs/remotes/origin/${defaultBranch}`;
+    runCommand(
+      "git",
+      ["fetch", "--quiet", "origin", `${defaultRef}:${defaultTrackingRef}`],
+      { cwd: root }
+    );
+    const fetchedDefault = runCommand(
+      "git",
+      ["rev-parse", defaultTrackingRef],
+      { cwd: root }
+    ).stdout.trim();
+    const fetchedDefaultTree = runCommand(
+      "git",
+      ["rev-parse", `${defaultTrackingRef}^{tree}`],
+      { cwd: root }
+    ).stdout.trim();
+    if (
+      fetchedDefault !== defaultSha ||
+      fetchedDefaultTree !== expectedDefaultTree
+    ) {
+      throw new AgentError("Crabbox trusted default bundle tree does not match", 1);
+    }
+    runCommand("git", ["fetch", "--quiet", "origin", EXACT_PARENT_REF], {
+      cwd: root
+    });
+    const fetchedParent = runCommand("git", ["rev-parse", "FETCH_HEAD"], {
+      cwd: root
+    }).stdout.trim();
+    if (fetchedParent !== parentSha) {
+      throw new AgentError("Crabbox exact parent bundle fetched the wrong commit", 1);
+    }
+    const parentTree = runCommand("git", ["rev-parse", "FETCH_HEAD^{tree}"], {
+      cwd: root
+    }).stdout.trim();
+    if (parentTree !== expectedParentTree) {
+      throw new AgentError("Crabbox exact parent bundle tree does not match", 1);
+    }
+    runCommand(
+      "git",
+      ["symbolic-ref", "HEAD", `refs/heads/${candidateBranch}`],
+      { cwd: root }
+    );
+    runCommand("git", ["update-ref", "HEAD", "FETCH_HEAD"], { cwd: root });
+    runCommand("git", ["reset", "--mixed", "--quiet", "HEAD"], { cwd: root });
+  }
+  // A fresh index treats tracked-but-ignored source files as ignored.
+  // Force the controlled tree while excluding the private handoff state.
+  runCommand(
+    "git",
+    [
+      "add",
+      "--force",
+      "--all",
+      "--",
+      ".",
+      ":(exclude).agent-output",
+      ":(exclude).agent/remote-input"
+    ],
+    { cwd: root }
+  );
+  runCommand(
+    "git",
+    [
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "--no-verify",
+      "-m",
+      "chore: seed exact remote workspace"
+    ],
+    { cwd: root }
+  );
+  const tree = runCommand("git", ["rev-parse", "HEAD^{tree}"], {
+    cwd: root
+  }).stdout.trim();
+  if (expectedTree && tree !== expectedTree) {
+    throw new AgentError("candidate checkout does not match prepared PR tree", 1);
+  }
+  if (!bundlePath) {
+    runCommand("git", ["switch", "-C", candidateBranch, "HEAD"], { cwd: root });
+  }
+  return {
+    workdir: realpathSync(root),
+    head: runCommand("git", ["rev-parse", "HEAD"], { cwd: root }).stdout.trim(),
+    tree,
+    branch: runCommand("git", ["branch", "--show-current"], {
+      cwd: root
+    }).stdout.trim()
+  };
+}
+
 export function prepareDelegatedWorkspace({
   lane,
   trustedWorkdir,
@@ -606,13 +966,16 @@ export function prepareDelegatedWorkspace({
   );
   const targetFiles = copyTrackedTree(
     targetRoot,
-    join(bundleRoot, "target"),
+    join(bundleRoot, DELEGATED_CANDIDATE_DIRECTORY),
     "target"
   );
   const stagedInput = delegatedInputDirectory(targetRoot, lane);
   requireRealDirectory(stagedInput, `${lane} input staging path`);
   const files = readDelegatedInputFiles(lane, stagedInput);
-  const bundledInput = delegatedInputDirectory(join(bundleRoot, "target"), lane);
+  const bundledInput = delegatedInputDirectory(
+    join(bundleRoot, DELEGATED_CANDIDATE_DIRECTORY),
+    lane
+  );
   mkdirSync(bundledInput, { recursive: true, mode: 0o700 });
   for (const [name, contents] of files) {
     writeFileSync(join(bundledInput, name), contents, { mode: 0o600 });
@@ -626,7 +989,9 @@ export function prepareDelegatedWorkspace({
     ["config", "user.email", "agent-workspace@example.invalid"],
     { cwd: bundleRoot }
   );
-  runCommand("git", ["add", "--all"], { cwd: bundleRoot });
+  // Only copied tracked files and the bounded handoff exist here.
+  // Force-add preserves source files that remain tracked despite local ignore rules.
+  runCommand("git", ["add", "--force", "--all"], { cwd: bundleRoot });
   runCommand(
     "git",
     ["commit", "--quiet", "--no-verify", "-m", "chore: seal delegated workspace"],
@@ -635,7 +1000,7 @@ export function prepareDelegatedWorkspace({
   return {
     lane,
     workdir: realpathSync(bundleRoot),
-    targetWorkdir: realpathSync(join(bundleRoot, "target")),
+    targetWorkdir: realpathSync(join(bundleRoot, DELEGATED_CANDIDATE_DIRECTORY)),
     trustedFiles,
     targetFiles,
     inputFiles: files.map(([name]) => name)
@@ -1511,6 +1876,39 @@ export function runCrabboxLane(options) {
 
 export async function main() {
   const args = parseArgs();
+  if (args["create-exact-parent-bundle"]) {
+    const result = createExactParentBundle(
+      args["input-workdir"] ?? repoRoot(),
+      {
+        parentSha: String(args["parent-sha"] ?? ""),
+        defaultSha: String(args["default-sha"] ?? ""),
+        defaultBranch: String(args["default-branch"] ?? "main")
+      }
+    );
+    finish(
+      { ok: true, message: "created exact remote parent bundle", ...result },
+      Boolean(args.json)
+    );
+    return;
+  }
+  if (args["seed-exact-repository"]) {
+    const result = seedExactRemoteRepository(
+      args["input-workdir"] ?? repoRoot(),
+      {
+        expectedTree: String(args["expected-tree"] ?? ""),
+        branch: String(args.branch ?? ""),
+        originBundle: String(args["origin-bundle"] ?? ""),
+        expectedParentTree: String(args["expected-parent-tree"] ?? ""),
+        expectedDefaultTree: String(args["expected-default-tree"] ?? ""),
+        defaultBranch: String(args["default-branch"] ?? "main")
+      }
+    );
+    finish(
+      { ok: true, message: "seeded exact remote Git repository", ...result },
+      Boolean(args.json)
+    );
+    return;
+  }
   if (args["prepare-delegated-workspace"]) {
     if (
       !args["input-lane"] ||
