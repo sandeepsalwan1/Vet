@@ -40,6 +40,7 @@ import {
   terminalHeadBinding,
   validateNoMistakesRemoteRecord,
   validatedHeadMatches,
+  writeCodexTurnMarkerWrapper,
   writeSetupFailureResult,
 } from "./agent-no-mistakes-gate.mjs";
 
@@ -136,6 +137,12 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
   );
   assert.match(workflow, /--expected-source-tree "\$expected_tree"/);
   assert.match(workflow, /--intent-file \.agent-output\/no-mistakes-intent/);
+  assert.match(workflow, /--model-started-file "\$model_started_file"/);
+  assert.match(workflow, /--write-codex-wrapper/);
+  assert.match(
+    workflow,
+    /--agent-path \/tmp\/no-mistakes-home\/codex-turn-marker/,
+  );
   assert.match(workflow, /trap preserve_setup_failure EXIT/);
   assert.match(workflow, /--write-setup-failure/);
   assert.doesNotMatch(workflow, /\n\s+--write-setup-failure/);
@@ -225,6 +232,10 @@ test("cached no-mistakes results resume only a passing gate", () => {
     skipModel: true,
     replayPassed: false,
   });
+  assert.deepEqual(noMistakesReplayState({ outcome: "setup-failed" }), {
+    skipModel: false,
+    replayPassed: false,
+  });
 });
 
 test("early no-mistakes setup failures produce terminal sanitized artifacts", (t) => {
@@ -243,6 +254,70 @@ test("early no-mistakes setup failures produce terminal sanitized artifacts", (t
   assert.deepEqual(written.artifact, setupFailureArtifact(HEAD));
   assert.equal(JSON.parse(readFileSync(resultFile)).outcome, "setup-failed");
   assert.deepEqual(JSON.parse(readFileSync(usageFile)).calls, []);
+});
+
+test("interrupted started model is terminal and usage-incomplete", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "vet-no-mistakes-interrupted-"));
+  const resultFile = join(dir, "result.json");
+  const usageFile = join(dir, "usage.json");
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const written = writeSetupFailureResult({
+    expectedHead: HEAD,
+    resultFile,
+    usageFile,
+    model: "gpt-5.4-mini",
+    effort: "medium",
+    modelStarted: true,
+  });
+  assert.equal(written.artifact.outcome, "model-interrupted");
+  assert.equal(
+    normalizeGateArtifact(written.artifact, HEAD).outcome,
+    "model-interrupted",
+  );
+  assert.equal(JSON.parse(readFileSync(usageFile)).complete, false);
+  assert.deepEqual(noMistakesReplayState({ outcome: "model-interrupted" }), {
+    skipModel: true,
+    replayPassed: false,
+  });
+});
+
+test("model start marker follows Codex turn start, not process startup", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "vet-codex-turn-marker-"));
+  const codexPath = join(dir, "codex");
+  const wrapperPath = join(dir, "codex-turn-marker");
+  const markerPath = join(dir, "model-started");
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(
+    codexPath,
+    '#!/usr/bin/env node\nprocess.stdout.write(process.env.CODEX_TEST_EVENTS ?? "");\n',
+    { mode: 0o700 },
+  );
+  writeCodexTurnMarkerWrapper({
+    outputFile: wrapperPath,
+    codexPath,
+    markerPath,
+  });
+
+  const preModelEvents = '{"type":"thread.started","thread_id":"test"}\n';
+  const preModel = spawnSync(wrapperPath, [], {
+    encoding: "utf8",
+    env: { ...process.env, CODEX_TEST_EVENTS: preModelEvents },
+  });
+  assert.equal(preModel.status, 0);
+  assert.equal(preModel.stdout, preModelEvents);
+  assert.equal(existsSync(markerPath), false);
+
+  const startedEvents =
+    `${preModelEvents}{"type":"turn.started"}\n` +
+    '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}\n';
+  const started = spawnSync(wrapperPath, [], {
+    encoding: "utf8",
+    env: { ...process.env, CODEX_TEST_EVENTS: startedEvents },
+  });
+  assert.equal(started.status, 0);
+  assert.equal(started.stdout, startedEvents);
+  assert.equal(readFileSync(markerPath, "utf8"), "started\n");
 });
 
 test("no-mistakes stats export preserves exact per-invocation token deltas", () => {
@@ -276,13 +351,24 @@ test("isolated no-mistakes config binds the selected model and excludes credenti
   const value = noMistakesConfig({
     model: "gpt-5.4-mini",
     effort: "medium",
+    agentPath: "/tmp/codex-turn-marker",
   });
   assert.match(value, /gpt-5\.4-mini/);
+  assert.match(value, /agent_path_override:\n  codex: "\/tmp\/codex-turn-marker"/);
   assert.match(value, /model_reasoning_effort/);
   assert.match(value, /shell_environment_policy\.exclude/);
   assert.match(value, /Do not invoke skills, autoreview, no-mistakes/);
   assert.throws(
     () => noMistakesConfig({ model: "bad value", effort: "medium" }),
+    /configuration is invalid/,
+  );
+  assert.throws(
+    () =>
+      noMistakesConfig({
+        model: "gpt-5.4-mini",
+        effort: "medium",
+        agentPath: "relative-wrapper",
+      }),
     /configuration is invalid/,
   );
 });
@@ -966,6 +1052,28 @@ test("isolated review environment blocker receives one fresh daemon retry", () =
     ["no-mistakes", ["init"]],
   ]);
   assert.equal(parseAxiResult(result.stdout, result.status).status, "passed");
+});
+
+test("started model suppresses a fresh no-mistakes retry", () => {
+  const commands = [];
+  let started = false;
+  let calls = 0;
+  const result = runNoMistakesGate("Validate the PR", "/repo", {
+    runCommand: (command, args) => {
+      commands.push([command, args]);
+      return { status: 0 };
+    },
+    spawnSync: () => {
+      calls += 1;
+      started = true;
+      return { stdout: environmentBlockOutput(), stderr: "", status: 0 };
+    },
+    modelStarted: () => started,
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(result.attempts, 1);
+  assert.deepEqual(commands, [["no-mistakes", ["init"]]]);
 });
 
 test("isolated test environment blocker receives one fresh daemon retry", () => {

@@ -1,8 +1,15 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   AgentError,
@@ -61,6 +68,7 @@ const ALLOWED_OUTCOMES = new Set([
   "native-fix",
   "unpublished-changes",
   "setup-failed",
+  "model-interrupted",
 ]);
 const PUBLIC_FINDING_SUMMARIES = new Map([
   [
@@ -89,9 +97,10 @@ const PUBLIC_FAILURE_STAGES = new Set([
 ]);
 
 export function noMistakesReplayState(evaluation) {
+  const outcome = String(evaluation?.outcome ?? "");
   return {
-    skipModel: Boolean(evaluation),
-    replayPassed: PASSING_OUTCOMES.has(String(evaluation?.outcome ?? "")),
+    skipModel: Boolean(evaluation) && outcome !== "setup-failed",
+    replayPassed: PASSING_OUTCOMES.has(outcome),
   };
 }
 
@@ -160,17 +169,22 @@ ${JSON.stringify(implementationAddendum, null, 2)}`;
   return effective;
 }
 
-export function noMistakesConfig({ model, effort }) {
+export function noMistakesConfig({ model, effort, agentPath = "" }) {
   const resolvedModel = String(model ?? "").trim();
   const resolvedEffort = String(effort ?? "").trim();
+  const resolvedAgentPath = String(agentPath ?? "").trim();
   if (
     !CODEX_MODEL_PATTERN.test(resolvedModel) ||
-    !CODEX_EFFORTS.has(resolvedEffort)
+    !CODEX_EFFORTS.has(resolvedEffort) ||
+    (resolvedAgentPath && !isAbsolute(resolvedAgentPath))
   ) {
     throw new AgentError("no-mistakes model configuration is invalid", 2);
   }
+  const agentPathConfig = resolvedAgentPath
+    ? `agent_path_override:\n  codex: ${JSON.stringify(resolvedAgentPath)}\n`
+    : "";
   return `agent: codex
-session_reuse: false
+${agentPathConfig}session_reuse: false
 intent:
   enabled: false
 auto_fix:
@@ -1005,6 +1019,9 @@ function artifactBlocker(artifact, repairAttempt = 0, repairDecision = null) {
   if (artifact.outcome === "setup-failed") {
     return "isolated no-mistakes setup did not produce a valid result";
   }
+  if (artifact.outcome === "model-interrupted") {
+    return "no-mistakes stopped after model execution began; automatic replay was suppressed";
+  }
   return "no-mistakes did not return a passing terminal outcome";
 }
 
@@ -1358,6 +1375,7 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
         "reattaching to the active no-mistakes run after a transient client timeout\n",
       ));
   const maxReattachments = dependencies.maxReattachments ?? 12;
+  const modelStarted = dependencies.modelStarted ?? (() => false);
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     execute("no-mistakes", ["init"], { cwd: repoDir, env });
@@ -1404,6 +1422,7 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
     if (
       attempt === 1 &&
       !reattachExhausted &&
+      !modelStarted() &&
       (isRetryableReviewEnvironmentBlock(parsed) ||
         isRetryableTestEnvironmentBlock(parsed) ||
         isRetryableInvalidOutput(parsed) ||
@@ -1421,11 +1440,97 @@ export function runNoMistakesGate(intent, repoDir, dependencies = {}) {
   throw new AgentError("no-mistakes retry limit was exhausted", 1);
 }
 
-function writePrivateFile(path, content) {
+function writePrivateFile(path, content, mode = 0o600) {
   const target = resolve(path);
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, content, { mode: 0o600 });
+  writeFileSync(target, content, { mode });
+  chmodSync(target, mode);
   return target;
+}
+
+export function codexTurnMarkerWrapper({ codexPath, markerPath }) {
+  const resolvedCodexPath = String(codexPath ?? "").trim();
+  const resolvedMarkerPath = String(markerPath ?? "").trim();
+  if (
+    !isAbsolute(resolvedCodexPath) ||
+    !existsSync(resolvedCodexPath) ||
+    !isAbsolute(resolvedMarkerPath) ||
+    !existsSync(dirname(resolvedMarkerPath))
+  ) {
+    throw new AgentError("no-mistakes Codex marker paths are invalid", 2);
+  }
+  return `#!/usr/bin/env node
+import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+
+const codexPath = ${JSON.stringify(resolvedCodexPath)};
+const markerPath = ${JSON.stringify(resolvedMarkerPath)};
+const child = spawn(codexPath, process.argv.slice(2), {
+  env: process.env,
+  stdio: ["inherit", "pipe", "inherit"],
+});
+let markerError = false;
+let marked = false;
+let pending = "";
+
+child.stdout.on("data", (chunk) => {
+  process.stdout.write(chunk);
+  if (marked || markerError) return;
+  pending += chunk.toString("utf8");
+  let newline = pending.indexOf("\\n");
+  while (newline !== -1) {
+    const line = pending.slice(0, newline);
+    pending = pending.slice(newline + 1);
+    try {
+      if (JSON.parse(line)?.type === "turn.started") {
+        writeFileSync(markerPath, "started\\n", { mode: 0o600 });
+        marked = true;
+        pending = "";
+        return;
+      }
+    } catch (error) {
+      if (error?.code) {
+        markerError = true;
+        process.stderr.write("Codex model-start marker could not be written\\n");
+        child.kill("SIGTERM");
+        return;
+      }
+    }
+    newline = pending.indexOf("\\n");
+  }
+  if (pending.length > 1_048_576) pending = pending.slice(-65_536);
+});
+
+child.once("error", () => {
+  markerError = true;
+  process.stderr.write("Codex invocation could not start\\n");
+});
+child.once("close", (code, signal) => {
+  if (signal) {
+    process.kill(process.pid, signal);
+    return;
+  }
+  process.exit(
+    markerError || !Number.isInteger(code) || code < 0 ? 1 : code,
+  );
+});
+`;
+}
+
+export function writeCodexTurnMarkerWrapper({
+  outputFile,
+  codexPath,
+  markerPath,
+}) {
+  const resolvedOutputFile = String(outputFile ?? "").trim();
+  if (!isAbsolute(resolvedOutputFile)) {
+    throw new AgentError("missing no-mistakes Codex wrapper path", 2);
+  }
+  return writePrivateFile(
+    resolvedOutputFile,
+    codexTurnMarkerWrapper({ codexPath, markerPath }),
+    0o700,
+  );
 }
 
 function readExpectedHead(value) {
@@ -1452,11 +1557,11 @@ function readRepairAttempt(value) {
   return attempt;
 }
 
-export function setupFailureArtifact(expectedHead) {
+export function setupFailureArtifact(expectedHead, { modelStarted = false } = {}) {
   return {
     version: ARTIFACT_VERSION,
     status: "failed",
-    outcome: "setup-failed",
+    outcome: modelStarted ? "model-interrupted" : "setup-failed",
     expectedHead,
     validatedHead: "",
     runId: "",
@@ -1473,11 +1578,14 @@ export function writeSetupFailureResult({
   usageFile = "",
   model = "",
   effort = "",
+  modelStarted = false,
 }) {
   if (!resultFile) {
     throw new AgentError("missing no-mistakes setup failure result path", 2);
   }
-  const artifact = setupFailureArtifact(readExpectedHead(expectedHead));
+  const artifact = setupFailureArtifact(readExpectedHead(expectedHead), {
+    modelStarted,
+  });
   const resultPath = writePrivateFile(
     resultFile,
     `${JSON.stringify(artifact, null, 2)}\n`,
@@ -1492,7 +1600,7 @@ export function writeSetupFailureResult({
         lane: "no-mistakes",
         model,
         effort,
-        complete: true,
+        complete: !modelStarted,
         calls: [],
       }, null, 2)}\n`,
     );
@@ -1513,6 +1621,9 @@ async function main() {
       usageFile: args["usage-file"],
       model: args.model,
       effort: args.effort,
+      modelStarted:
+        Boolean(args["model-started-file"]) &&
+        existsSync(resolve(String(args["model-started-file"]))),
     });
     finish(
       {
@@ -1526,10 +1637,27 @@ async function main() {
     return;
   }
 
+  if (args["write-codex-wrapper"]) {
+    const path = writeCodexTurnMarkerWrapper({
+      outputFile: args["write-codex-wrapper"],
+      codexPath: args["codex-path"],
+      markerPath: args["model-started-file"],
+    });
+    finish(
+      { ok: true, message: "wrote Codex turn marker wrapper", path },
+      Boolean(args.json),
+    );
+    return;
+  }
+
   if (args["write-config"]) {
     const path = writePrivateFile(
       args["write-config"],
-      noMistakesConfig({ model: args.model, effort: args.effort }),
+      noMistakesConfig({
+        model: args.model,
+        effort: args.effort,
+        agentPath: args["agent-path"],
+      }),
     );
     finish(
       { ok: true, message: "wrote isolated no-mistakes configuration", path },
@@ -1705,9 +1833,17 @@ async function main() {
     const intent = readFileSync(resolve(args["intent-file"]), "utf8").trim();
     if (!intent) throw new AgentError("trusted gate intent file is empty", 1);
     const userApproved = Boolean(args["user-approved"]);
+    const modelStartedFile = String(args["model-started-file"] ?? "").trim();
+    if (!modelStartedFile) {
+      throw new AgentError("missing no-mistakes model-started marker path", 2);
+    }
+    if (existsSync(resolve(modelStartedFile))) {
+      throw new AgentError("stale no-mistakes model-started marker", 1);
+    }
     const run = runNoMistakesGate(intent, repoDir, {
       expectedHead: actualHead,
       userApproved,
+      modelStarted: () => existsSync(resolve(modelStartedFile)),
     });
     const postRunHead = runCommand("git", ["rev-parse", "HEAD"], {
       cwd: repoDir,

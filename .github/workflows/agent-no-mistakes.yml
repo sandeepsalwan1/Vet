@@ -247,6 +247,7 @@ jobs:
             expected_tree="${{ needs.prepare.outputs.head_tree }}";
             head_ref="${{ needs.prepare.outputs.head_ref }}";
             result_file=.agent-output/result.json;
+            model_started_file=.agent-output/model-started;
             mkdir -p .agent-output;
             preserve_setup_failure() {
               exit_code=$?;
@@ -255,7 +256,7 @@ jobs:
                 [ ! -s "$result_file" ] ||
                 [ ! -s .agent-output/model-usage.json ]; then
                 unset agent_key CODEX_API_KEY OPENAI_API_KEY;
-                if node ../trusted/scripts/agent-no-mistakes-gate.mjs --write-setup-failure --expected-head "$external_head" --result-file "$result_file" --usage-file .agent-output/model-usage.json --model "${{ needs.prepare.outputs.backend_model }}" --effort "${{ needs.prepare.outputs.backend_effort }}" --json >/dev/null 2>&1 &&
+                if node ../trusted/scripts/agent-no-mistakes-gate.mjs --write-setup-failure --expected-head "$external_head" --result-file "$result_file" --usage-file .agent-output/model-usage.json --model-started-file "$model_started_file" --model "${{ needs.prepare.outputs.backend_model }}" --effort "${{ needs.prepare.outputs.backend_effort }}" --json >/dev/null 2>&1 &&
                   node ../trusted/scripts/agent-crabbox-run.mjs --emit-output-lane noMistakesRemote; then
                   exit 0;
                 fi;
@@ -283,8 +284,15 @@ jobs:
             tar -xzf /tmp/no-mistakes.tar.gz -C /tmp/no-mistakes-bin &&
             chmod 755 /tmp/no-mistakes-bin/no-mistakes &&
             export PATH="/tmp/no-mistakes-bin:$PATH" &&
+            codex_path=$(command -v codex) &&
+            model_started_path="$PWD/$model_started_file" &&
+            node ../trusted/scripts/agent-no-mistakes-gate.mjs
+            --write-codex-wrapper /tmp/no-mistakes-home/codex-turn-marker
+            --codex-path "$codex_path"
+            --model-started-file "$model_started_path" --json &&
             node ../trusted/scripts/agent-no-mistakes-gate.mjs
             --write-config /tmp/no-mistakes-home/config.yaml
+            --agent-path /tmp/no-mistakes-home/codex-turn-marker
             --model "${{ needs.prepare.outputs.backend_model }}"
             --effort "${{ needs.prepare.outputs.backend_effort }}" --json &&
             approval_flag="";
@@ -299,6 +307,7 @@ jobs:
             --expected-head "$external_head"
             --expected-source-tree "$expected_tree"
             --expected-ref "$head_ref"
+            --model-started-file "$model_started_file"
             --intent-file .agent-output/no-mistakes-intent
             --fix-patch .agent-output/fix.patch
             --result-file .agent-output/result.json

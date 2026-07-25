@@ -219,11 +219,12 @@ export function recordRepairEvaluation(
 ) {
   const ledger = structuredClone(validateRepairLedger(ledgerValue));
   const aggregate = findingDigest(findings);
+  const normalizedOutcome = boundedText(outcome, 40);
   if (
     !LANES.has(lane) ||
     !HEAD_PATTERN.test(head) ||
     !DIGEST_PATTERN.test(inputDigest) ||
-    !boundedText(outcome, 40)
+    !normalizedOutcome
   ) {
     throw new AgentError("repair evaluation is invalid", 1);
   }
@@ -232,7 +233,8 @@ export function recordRepairEvaluation(
       evaluation.lane === lane &&
       evaluation.head === head &&
       evaluation.inputDigest === inputDigest &&
-      evaluation.findingDigest === aggregate,
+      evaluation.findingDigest === aggregate &&
+      evaluation.outcome === normalizedOutcome,
   );
   if (replayed) return { ledger, replayed: true, findingDigest: aggregate };
 
@@ -272,7 +274,7 @@ export function recordRepairEvaluation(
     head,
     inputDigest,
     findingDigest: aggregate,
-    outcome: boundedText(outcome, 40),
+    outcome: normalizedOutcome,
   });
   if (ledger.evaluations.length > MAX_EVALUATIONS) {
     ledger.evaluations = ledger.evaluations.slice(-MAX_EVALUATIONS);
@@ -339,7 +341,7 @@ export function repairEvaluationFor(
   { lane, head, inputDigest },
 ) {
   const ledger = validateRepairLedger(ledgerValue);
-  const evaluation = ledger.evaluations.find(
+  const evaluation = ledger.evaluations.findLast(
     (evaluation) =>
       evaluation.lane === lane &&
       evaluation.head === head &&

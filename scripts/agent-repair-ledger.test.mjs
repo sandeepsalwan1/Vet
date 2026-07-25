@@ -90,6 +90,40 @@ test("identical exact-head evaluation reconciles without duplicating findings", 
   );
 });
 
+test("same-head setup failure can be superseded without a semantic revision", () => {
+  const inputDigest = semanticInputDigest({
+    lane: "no-mistakes",
+    head,
+    intentDigest,
+    findings: [],
+  });
+  const failed = recordRepairEvaluation(emptyRepairLedger(intentDigest), {
+    lane: "no-mistakes",
+    head,
+    inputDigest,
+    findings: [],
+    outcome: "setup-failed",
+  });
+  const passed = recordRepairEvaluation(failed.ledger, {
+    lane: "no-mistakes",
+    head,
+    inputDigest,
+    findings: [],
+    outcome: "passed",
+  });
+  assert.equal(passed.replayed, false);
+  assert.equal(passed.ledger.evaluations.length, 2);
+  assert.equal(passed.ledger.revisionCount, 0);
+  assert.equal(
+    repairEvaluationFor(passed.ledger, {
+      lane: "no-mistakes",
+      head,
+      inputDigest,
+    })?.outcome,
+    "passed",
+  );
+});
+
 test("ledger parser trusts one exact managed comment and intent digest", () => {
   const ledger = emptyRepairLedger(intentDigest);
   const body = `<!-- agent-repair-ledger:v1 -->\n${repairLedgerBody(ledger)}\n`;

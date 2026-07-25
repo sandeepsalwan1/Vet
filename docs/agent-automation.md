@@ -313,6 +313,9 @@ gh run list --repo "$REPO" --workflow agent-readiness.yml --limit 5
 
 Rerun a failed workflow on the unchanged head before creating a new issue.
 Managed comments, branches, pull requests, repair evaluations, proof results, and cost records reconcile by issue and exact head.
+A sealed no-mistakes `setup-failed` evaluation from before Codex emits `turn.started` may be superseded by a later exact-head result without consuming a semantic revision.
+An interruption after that model-turn signal is recorded separately and remains replay-cached to prevent duplicate paid work.
+Active-run reattachment may continue after that signal, but the outer no-mistakes helper cannot start a fresh daemon retry.
 Rerunning automerge for a merged pull request dispatches only missing exact-SHA CI, CodeQL, or Render verification.
 Provider retries stop once a remote command starts.
 This is the duplicate-model boundary for interruption recovery.
