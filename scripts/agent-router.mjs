@@ -12,10 +12,44 @@ import {
 } from "./agent-lib.mjs";
 
 export function routeEvent(event, config) {
-  const label = event.label?.name;
   const labels = config.labels;
   const issue = event.issue;
   const pull = event.pull_request;
+  const comment = event.comment;
+  const issueNumber = Number(issue?.number);
+
+  if (comment) {
+    const commentId = Number(comment.id);
+    const issueLabelNames = (issue?.labels ?? [])
+      .map((entry) => (typeof entry === "string" ? entry : entry?.name))
+      .filter(Boolean);
+    const owner = String(config.repo?.owner ?? "").toLowerCase();
+    const author = String(comment.user?.login ?? "").toLowerCase();
+    const body = String(comment.body ?? "").trim();
+    if (
+      event.action === "created" &&
+      Number.isSafeInteger(issueNumber) &&
+      issueNumber > 0 &&
+      !issue?.pull_request &&
+      Number.isSafeInteger(commentId) &&
+      commentId > 0 &&
+      owner &&
+      author === owner &&
+      body &&
+      issueLabelNames.includes(labels.blocked)
+    ) {
+      return {
+        lane: "resume",
+        kind: "issue",
+        issueNumber,
+        commentId,
+        reason: "repository owner answered a blocked issue"
+      };
+    }
+    return { lane: "none", reason: "comment does not qualify for blocked-issue resume" };
+  }
+
+  const label = event.label?.name;
   const isPull = Boolean(pull);
   const target = isPull ? pull : issue;
   const number = target?.number;
@@ -66,6 +100,7 @@ async function main() {
     pr_number: route.prNumber ?? "",
     target_kind: route.targetKind ?? "",
     target_number: route.targetNumber ?? "",
+    comment_id: route.commentId ?? "",
     reason: route.reason ?? ""
   });
   finish(

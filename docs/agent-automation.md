@@ -106,6 +106,9 @@ gh issue create \
 That one label records a deterministic trusted intent seal before any implementation model runs.
 The seal uses no model credits, preserves explicit priority and proof requests, and sends routine ambiguity to the implementer.
 A successful seal adds `agent:implement`, adds `agent:automerge` only when policy permits, clears stale triage blocks, and dispatches implementation automatically.
+If trusted triage asks a real question, reply on the source issue from the repository-owner account.
+That exact reply resumes zero-model triage automatically, is frozen as untrusted implementation context, and dispatches implementation once.
+Bot replies, non-owner replies, stale comments, duplicate replies, and pull-request comments do not resume work.
 Implementation creates `agent/issue-<number>-<slug>`, validates the patch, opens or updates a draft PR, starts exact-head CI, and starts review.
 Review can apply a safe patch, reruns exact-head CI and review until clean within its bounded repair budget, requests proof when needed, publishes `agent-review`, then starts no-mistakes.
 After model review, a credential-free deterministic repair removes extra blank lines at EOF only when `git diff --check` identifies them in a safe, non-privileged text file.
@@ -204,7 +207,10 @@ gh pr edit <pr-number> --repo "$REPO" --add-label agent:proof
 CI proof can run on GitHub Actions.
 UI or GIF proof prefers a credentialed Crabbox provider that passed a live smoke plus its readiness variable.
 Without one, Crabbox uses its credential-free `local-container` provider on the GitHub runner with `--desktop` and `--browser`.
-The lane launches each affected route, checks desktop health, records the actual provider and lease, and collects authentic route-bound screenshots or requested video/GIF artifacts.
+For GIF proof, recording starts before browser navigation so transient startup states are captured instead of only the settled page.
+The lane checks each affected route, desktop health, actual provider, lease, and route-bound media.
+The managed GitHub comment links the downloadable Actions artifact and keeps runner-only paths in a collapsed diagnostic section.
+Visual proof fails closed when no reviewable artifact URL is published.
 This fallback spends GitHub Actions time only and does not require the user's laptop or a paid provider key.
 A missing Docker runtime, failed desktop bootstrap, or invalid artifact blocks required visual proof instead of silently replacing it with weaker evidence.
 
@@ -266,7 +272,7 @@ Read the newest managed agent comment, answer the decision, or use the exact-hea
 
 - Issue control plane: GitHub issue labels plus `agent-router.yml`.
 - Cost control: proposal uses GPT-5.4 mini with low reasoning; triage uses no model.
-- Remote implementation: Crabbox first after provider readiness; isolated GitHub Actions fallback for non-visual work.
+- Remote implementation: Crabbox first after provider readiness; isolated GitHub Actions fallback for missing auth, provider failure, or artifact-publication failure.
 - Optional orchestration reference: Sandcastle demonstrates label-driven AFK orchestration patterns and remains an optional worker adapter.
 - OpenClaw execution reference: Crabbox is the execution and computer-use proof host pattern; credential-free visual fallback runs in a Crabbox local container on GitHub Actions.
 - Implementation and review use GPT-5.4 mini with low reasoning; no-mistakes uses the same mini model with medium reasoning for its stricter structured gate contract.
@@ -278,8 +284,10 @@ Read the newest managed agent comment, answer the decision, or use the exact-hea
 ## Trust Boundaries
 
 - Keep baseline CI separate from agent workflows.
-- Pass the OpenAI key only to `openai/codex-action`, never as job-level environment.
+- Pass the OpenAI key only to the isolated Codex Action or Crabbox worker invocation, never as job-level environment.
 - Keep GitHub write tokens out of Codex jobs; validation commands run with GitHub token variables removed.
+- Remote Codex uses full filesystem access only inside its ephemeral Crabbox lease because Vercel Sandbox cannot run Codex's nested Bubblewrap sandbox.
+- The remote lease receives model auth but no GitHub write credentials, and its patch still passes the separate exact-base validation and trusted publication jobs.
 - Codex Action author gates allow the repository owner and `github-actions[bot]`; cross-repository PR review is rejected before Codex runs.
 - High-risk or high-priority work requires human review.
 - A missing provider, artifact, or lease blocks required visual proof; it does not fake success.

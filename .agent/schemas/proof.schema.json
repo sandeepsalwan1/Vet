@@ -7,6 +7,7 @@
     "status",
     "commands",
     "artifactPaths",
+    "artifactUrl",
     "provider",
     "leaseId",
     "summary",
@@ -23,6 +24,7 @@
       "type": "array",
       "items": { "type": "string" }
     },
+    "artifactUrl": { "type": "string" },
     "provider": { "type": "string" },
     "leaseId": { "type": "string" },
     "summary": { "type": "string" },

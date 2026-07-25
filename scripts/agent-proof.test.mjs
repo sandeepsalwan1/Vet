@@ -8,11 +8,13 @@ import {
   isProofRequested,
   isProofHeadFresh,
   mayMutateProofTarget,
+  proofBody,
   proofLabelChanges,
   resolveTerminalResult,
   terminalMarker,
   structuredProofKind,
   untrustedCodeEnvironment,
+  validateArtifactUrl,
   visualServerCommand
 } from "./agent-proof.mjs";
 
@@ -191,6 +193,34 @@ test("successful proof never clears a shared blocked label", () => {
   assert.ok(failing.remove.includes(config.labels.automerge));
 });
 
+test("proof comments link the trusted Actions artifact and collapse runner-only paths", () => {
+  const artifactUrl = "https://github.com/sandeepsalwan1/Vet/actions/runs/123/artifacts/456";
+  const result = {
+    proofKind: "GIF",
+    status: "passed",
+    commands: ["npm run build"],
+    artifactPaths: ["/home/runner/work/Vet/Vet/trusted/.agent-output/screen.trimmed.gif"],
+    artifactUrl,
+    provider: "local-container",
+    leaseId: "cbx_123",
+    summary: "Capture completed.",
+    blocker: ""
+  };
+  const body = proofBody(result, ["/"], { totalMs: 10, commandMs: 5 });
+
+  assert.equal(validateArtifactUrl(artifactUrl, { repo: { owner: "sandeepsalwan1", name: "Vet" } }), artifactUrl);
+  assert.match(body, new RegExp(`\\[Open or download the proof bundle\\]\\(${artifactUrl}\\)`));
+  assert.match(body, /<summary>Runner artifact inventory<\/summary>/);
+  assert.ok(body.includes("`/home/runner/work/Vet"));
+  assert.throws(
+    () =>
+      validateArtifactUrl("https://example.com/actions/runs/123/artifacts/456", {
+        repo: { owner: "sandeepsalwan1", name: "Vet" }
+      }),
+    /outside the trusted GitHub Actions run/
+  );
+});
+
 test("proof result cannot authorize a newer PR head", () => {
   assert.equal(isProofHeadFresh("abc123", "abc123"), true);
   assert.equal(isProofHeadFresh("abc123", "def456"), false);
@@ -330,4 +360,6 @@ test("proof workflow dispatches automerge only after terminal success is publish
   assert.match(workflow, /crabbox_0\.40\.0_linux_amd64\.tar\.gz/);
   assert.doesNotMatch(workflow, /0\.38\.4/);
   assert.match(workflow, /steps\.terminal\.outputs\.state == 'success'/);
+  assert.match(workflow, /artifact_url: \$\{\{ steps\.artifact\.outputs\.artifact-url \}\}/);
+  assert.match(workflow, /--artifact-url "\$ARTIFACT_URL"/);
 });

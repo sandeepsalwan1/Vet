@@ -44,8 +44,10 @@ Automerge is forbidden for high-priority or high-risk work even if all checks pa
 - Triage is a deterministic zero-model intent seal; routine ambiguity passes to the implementer for repository-grounded judgment.
 - Crabbox is preferred for implementation/proof when provider auth exists.
 - A provider is eligible only after a live smoke passes and its repository readiness variable is enabled.
+- Remote implementation runs Codex with full access only inside the ephemeral Crabbox lease because nested Linux sandboxing is incompatible with Vercel Sandbox.
+- Remote workers receive model auth but no GitHub write credentials.
 - Crabbox `local-container` is the credential-free exception for explicit visual proof on a GitHub runner; it receives no provider credentials and must produce the same authentic route-bound artifacts or fail closed.
-- GitHub-hosted Actions is the fallback for non-visual work when provider auth is missing.
+- GitHub-hosted Actions is the fallback for non-visual work when provider auth is missing or remote generation fails.
 - The raw `crabbox` binary is not the issue brain; the worker script plus configured backend is.
 - Codex/OpenAI is one backend choice, not the control plane.
 - Default each lane to the cheapest model and reasoning level that reliably satisfies its contract; raise either only after measured failure.

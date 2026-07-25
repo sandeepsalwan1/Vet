@@ -163,6 +163,7 @@ jobs:
     outputs:
       outcome_b64: ${{ steps.remote.outputs.outcome_b64 }}
       needs_local: ${{ steps.remote.outputs.needs_local }}
+      artifact_url: ${{ steps.artifact.outputs.artifact-url }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -228,6 +229,7 @@ jobs:
             --workdir "$GITHUB_WORKSPACE/trusted" \
             --json
       - uses: actions/upload-artifact@v4
+        id: artifact
         if: always()
         with:
           name: agent-proof-${{ inputs.target-kind }}-${{ inputs.target-number }}
@@ -318,6 +320,7 @@ jobs:
           LOCAL_OUTCOME_B64: ${{ needs.local.outputs.outcome_b64 }}
           REMOTE_JOB_RESULT: ${{ needs.remote.result }}
           LOCAL_JOB_RESULT: ${{ needs.local.result }}
+          ARTIFACT_URL: ${{ needs.remote.outputs.artifact_url }}
           STATUS_SHA: ${{ needs.prepare.outputs.sha }}
           TERMINAL_MARKER: ${{ runner.temp }}/agent-proof-terminal.json
         run: |
@@ -330,6 +333,9 @@ jobs:
             --terminal-marker "$TERMINAL_MARKER"
             --json
           )
+          if [ -n "$ARTIFACT_URL" ]; then
+            args+=(--artifact-url "$ARTIFACT_URL")
+          fi
           if [ -n "$REMOTE_OUTCOME_B64" ]; then
             args+=(--remote-outcome-base64 "$REMOTE_OUTCOME_B64")
           fi

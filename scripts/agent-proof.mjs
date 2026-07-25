@@ -256,7 +256,33 @@ export function visualServerCommand(config, routes) {
   ].join("; ");
 }
 
-function proofBody(result, routes, timingRecord) {
+export function validateArtifactUrl(value, config) {
+  const candidate = String(value ?? "").trim();
+  if (!candidate) return "";
+  let url;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new AgentError("proof artifact URL is invalid", 1);
+  }
+  const expectedPath = new RegExp(
+    `^/${config.repo.owner}/${config.repo.name}/actions/runs/[0-9]+/artifacts/[0-9]+$`
+  );
+  if (
+    url.protocol !== "https:" ||
+    url.hostname !== "github.com" ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    !expectedPath.test(url.pathname)
+  ) {
+    throw new AgentError("proof artifact URL is outside the trusted GitHub Actions run", 1);
+  }
+  return url.toString();
+}
+
+export function proofBody(result, routes, timingRecord) {
   const timing = timingRecord
     ? `${timingRecord.totalMs}ms total, ${timingRecord.commandMs ?? 0}ms command`
     : "none";
@@ -278,7 +304,13 @@ ${result.commands.length ? result.commands.map((command) => `- ${command}`).join
 
 Artifacts:
 
-${result.artifactPaths.length ? result.artifactPaths.map((path) => `- ${path}`).join("\n") : "- none"}
+${result.artifactUrl ? `- [Open or download the proof bundle](${result.artifactUrl})` : "- none"}
+
+<details>
+<summary>Runner artifact inventory</summary>
+
+${result.artifactPaths.length ? result.artifactPaths.map((path) => `- \`${path}\``).join("\n") : "- none"}
+</details>
 
 Summary:
 
@@ -339,6 +371,7 @@ async function legacyMain(args = parseArgs(), config = loadConfig()) {
     status: run && !dryRun ? "pending" : "skipped",
     commands: [],
     artifactPaths: [],
+    artifactUrl: "",
     provider: "",
     leaseId: "",
     summary: dryRun ? "Proof dry run; no commands executed." : run ? "Proof has not completed." : "Proof requested but not run.",
@@ -532,6 +565,7 @@ function baseResult(proofKind, overrides = {}) {
     status: "pending",
     commands: [],
     artifactPaths: [],
+    artifactUrl: "",
     provider: "",
     leaseId: "",
     summary: "Proof has not completed.",
@@ -551,7 +585,8 @@ function normalizeResult(result, proofKind) {
       throw new AgentError(`proof outcome has invalid ${name}`, 1);
     }
   }
-  for (const name of ["provider", "leaseId", "summary", "blocker"]) {
+  result.artifactUrl ??= "";
+  for (const name of ["artifactUrl", "provider", "leaseId", "summary", "blocker"]) {
     if (typeof result[name] !== "string") throw new AgentError(`proof outcome has invalid ${name}`, 1);
   }
   return result;
@@ -851,6 +886,12 @@ async function finalizeMain(args, config) {
   });
   let timingRecord = remoteOutcome?.timing ?? null;
   let mayMutateTarget = true;
+  const artifactUrl = validateArtifactUrl(args["artifact-url"], config);
+  result.artifactUrl = artifactUrl;
+  if (["UI", "GIF"].includes(result.proofKind) && result.status === "passed" && !artifactUrl) {
+    result = failedWorkflowResult(request, "Visual capture completed, but no reviewable GitHub artifact was published.");
+    timingRecord = null;
+  }
 
   if (request.kind === "pr" && request.requested) {
     const current = targetDetails(config, "pr", request.number);

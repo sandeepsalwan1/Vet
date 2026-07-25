@@ -4,6 +4,9 @@ on:
   issues:
     types:
       - labeled
+  issue_comment:
+    types:
+      - created
   pull_request:
     types:
       - labeled
@@ -53,6 +56,7 @@ jobs:
           PR_NUMBER: ${{ steps.route.outputs.pr_number }}
           TARGET_KIND: ${{ steps.route.outputs.target_kind }}
           TARGET_NUMBER: ${{ steps.route.outputs.target_number }}
+          COMMENT_ID: ${{ steps.route.outputs.comment_id }}
         run: |
           set -euo pipefail
           head_sha=""
@@ -66,6 +70,9 @@ jobs:
               ;;
             implement)
               gh workflow run agent-implement.yml --repo "$GITHUB_REPOSITORY" -f issue-number="$ISSUE_NUMBER"
+              ;;
+            resume)
+              gh workflow run agent-resume.yml --repo "$GITHUB_REPOSITORY" --ref main -f issue-number="$ISSUE_NUMBER" -f comment-id="$COMMENT_ID"
               ;;
             review)
               gh workflow run agent-review.yml --repo "$GITHUB_REPOSITORY" --ref main -f pr-number="$PR_NUMBER" -f expected-head-sha="$head_sha"
