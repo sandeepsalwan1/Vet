@@ -20,6 +20,7 @@ Docs:
 
 - Run `npm run docs:list` to find maintained docs by purpose and task.
 - Start with `docs/architecture.md` for system boundaries and `docs/deployment.md` for operations.
+- `docs/agent-automation.md`: AFK operator guide for issue automation and recovery.
 - Coding-agent policy lives in `AGENTS.md`; scoped guides add only subtree-specific rules.
 
 Local commands:
@@ -76,10 +77,3 @@ Main routes:
 - `/staff`, `/staff/agent`, `/staff/approvals`
 - `/api/mock/clinic`, `/api/agent/*`, `/api/analytics`, `/api/approvals`, `/api/reports/*`
 - `/api/client-account-claim`, `/api/client-journey`, `/api/client-journey/staff`, `/api/notifications/client-journey`
-
-hi this works
-Issue 26 note:
-This repository tracks one deployed Vet app.
-The README now includes five added lines.
-This change is intentionally minimal.
-It satisfies the requested outcome.
