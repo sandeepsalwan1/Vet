@@ -81,11 +81,11 @@ Set the repository once for the shell session.
 REPO=sandeepsalwan1/Vet
 ```
 
-Confirm the required label set and OpenAI secret name without printing a secret value.
+Confirm the required label set and secret names without printing a secret value.
 
 ```bash
 node scripts/agent-labels.mjs --dry-run --json
-gh secret list --repo "$REPO" | awk '$1 == "OPENAI_API_KEY" { print $1 }'
+gh secret list --repo "$REPO" | awk '$1 == "OPENAI_API_KEY" || $1 == "RENDER_API_KEY" || $1 == "RENDER_WORKSPACE_ID" || $1 == "VERCEL_TOKEN" { print $1 }'
 ```
 
 Run `node scripts/agent-labels.mjs --json` only when the label dry-run reports drift.
@@ -294,6 +294,7 @@ Read the newest managed agent comment, answer the decision, or use the exact-hea
 
 `agent-readiness.yml` runs after every `main` push, daily, and on demand without model access.
 It verifies current-main required checks, the read-only branch summary, required secret presence by name, deterministic agent tests, production dependency audit, the preferred Vercel Sandbox or configured Hetzner remote lifecycle, credential-free local-container fallback lifecycle, and trusted Render tenant health.
+Render CLI jobs select the scoped workspace from the masked `RENDER_WORKSPACE_ID` repository secret before reading services, deploys, logs, or validating a Blueprint.
 Push-triggered readiness waits up to 15 minutes for the same main SHA's baseline checks before publishing, so it cannot race CI and strand preflight on a false early failure.
 The scheduled token never calls administration-only repository settings APIs.
 Workflow permission safety is enforced by explicit job permissions and deterministic workflow tests; exact-head automerge separately enforces base freshness.

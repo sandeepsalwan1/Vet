@@ -21,6 +21,8 @@ on:
         required: false
       RENDER_API_KEY:
         required: false
+      RENDER_WORKSPACE_ID:
+        required: false
   workflow_dispatch:
     inputs:
       issue-number:
@@ -69,7 +71,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           AGENT_AUTH_PRESENT: ${{ secrets.OPENAI_API_KEY != '' }}
           PRIMARY_PROVIDER_AUTH_PRESENT: ${{ (vars.CRABBOX_VERCEL_READY == 'true' && (secrets.VERCEL_TOKEN != '' || secrets.VERCEL_OIDC_TOKEN != '')) || (vars.CRABBOX_HETZNER_READY == 'true' && (secrets.HCLOUD_TOKEN != '' || secrets.HETZNER_TOKEN != '' || secrets.HETZNER_API_TOKEN != '')) }}
-          RENDER_AUTH_PRESENT: ${{ secrets.RENDER_API_KEY != '' }}
+          RENDER_AUTH_PRESENT: ${{ secrets.RENDER_API_KEY != '' && secrets.RENDER_WORKSPACE_ID != '' }}
         run: >-
           node scripts/agent-readiness.mjs
           --preflight

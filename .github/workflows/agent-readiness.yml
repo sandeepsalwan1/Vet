@@ -93,10 +93,14 @@ jobs:
         continue-on-error: true
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-        run: >-
-          node scripts/agent-render-proof.mjs
-          --output-file .agent-output/readiness-render.json
-          --json
+          RENDER_WORKSPACE_ID: ${{ secrets.RENDER_WORKSPACE_ID }}
+        run: |
+          set -euo pipefail
+          [[ "$RENDER_WORKSPACE_ID" =~ ^[A-Za-z0-9_-]{3,128}$ ]]
+          render workspace set "$RENDER_WORKSPACE_ID" --confirm -o json >/dev/null
+          node scripts/agent-render-proof.mjs \
+            --output-file .agent-output/readiness-render.json \
+            --json
       - name: Publish exact readiness state
         if: always()
         env:
@@ -105,7 +109,7 @@ jobs:
           READINESS_EXPECTED_HEAD: ${{ github.sha }}
           AGENT_AUTH_PRESENT: ${{ secrets.OPENAI_API_KEY != '' }}
           PRIMARY_PROVIDER_AUTH_PRESENT: ${{ (vars.CRABBOX_VERCEL_READY == 'true' && (secrets.VERCEL_TOKEN != '' || secrets.VERCEL_OIDC_TOKEN != '')) || (vars.CRABBOX_HETZNER_READY == 'true' && (secrets.HCLOUD_TOKEN != '' || secrets.HETZNER_TOKEN != '' || secrets.HETZNER_API_TOKEN != '')) }}
-          RENDER_AUTH_PRESENT: ${{ secrets.RENDER_API_KEY != '' }}
+          RENDER_AUTH_PRESENT: ${{ secrets.RENDER_API_KEY != '' && secrets.RENDER_WORKSPACE_ID != '' }}
           STATIC_AGENT_TESTS_PASSED: ${{ steps.static-tests.outcome == 'success' }}
         run: >-
           node scripts/agent-readiness.mjs

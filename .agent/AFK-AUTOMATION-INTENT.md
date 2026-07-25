@@ -415,7 +415,7 @@ Use this split:
 - Crabbox provider creation: trusted wrapper receives Vercel or another provider credential; the lease reports its actual provider and lease ID.
 - Implementation model: receives only Codex model auth for its single invocation.
 - GitHub publication and merge: trusted GitHub Actions jobs own GitHub write permissions; generated code receives none.
-- Render deploy and diagnosis: trusted post-merge operations own `RENDER_API_KEY`; generated implementation code receives none.
+- Render deploy and diagnosis: trusted post-merge operations own `RENDER_API_KEY` and the scoped `RENDER_WORKSPACE_ID`; generated implementation code receives neither.
 - Production database: Render services retain `DATABASE_URL`; implementation and proof use a disposable or explicitly approved environment instead of a production master URL.
 - Browser proof: Crabbox supplies its own browser or desktop; local Mac Chrome auth and personal browser profiles are never copied.
 
@@ -440,7 +440,7 @@ At that time:
 
 Verified bootstrap on 2026-07-24:
 
-- GitHub repository secrets exist for OpenAI API fallback, Vercel Sandbox, and Render.
+- GitHub repository secrets exist for OpenAI API fallback, Vercel Sandbox, Render API access, and the scoped Render workspace.
 - The repository is public.
   Actions are enabled, default workflow permissions are write, and workflows may approve pull request reviews.
 - External fork workflows still require approval for first-time contributors.

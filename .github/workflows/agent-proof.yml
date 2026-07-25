@@ -36,6 +36,8 @@ on:
         required: false
       RENDER_API_KEY:
         required: false
+      RENDER_WORKSPACE_ID:
+        required: false
   workflow_dispatch:
     inputs:
       target-kind:
@@ -316,10 +318,14 @@ jobs:
       - name: Validate candidate Blueprint as data
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-        run: >-
-          node trusted/scripts/agent-render-blueprint.mjs
-          --blueprint "$GITHUB_WORKSPACE/target/render.yaml"
-          --json
+          RENDER_WORKSPACE_ID: ${{ secrets.RENDER_WORKSPACE_ID }}
+        run: |
+          set -euo pipefail
+          [[ "$RENDER_WORKSPACE_ID" =~ ^[A-Za-z0-9_-]{3,128}$ ]]
+          render workspace set "$RENDER_WORKSPACE_ID" --confirm -o json >/dev/null
+          node trusted/scripts/agent-render-blueprint.mjs \
+            --blueprint "$GITHUB_WORKSPACE/target/render.yaml" \
+            --json
 
   local:
     name: credential-free fallback

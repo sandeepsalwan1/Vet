@@ -348,6 +348,8 @@ test("readiness workflow is scheduled, zero-model, pinned, and publishes even af
   );
   assert.match(workflow, /agent-render-proof\.mjs/);
   assert.match(workflow, /uses: \.\/\.github\/actions\/setup-render/);
+  assert.match(workflow, /RENDER_WORKSPACE_ID: \$\{\{ secrets\.RENDER_WORKSPACE_ID \}\}/);
+  assert.match(workflow, /render workspace set "\$RENDER_WORKSPACE_ID"/);
   assert.match(renderAction, /cli_2\.22\.0_linux_amd64\.zip/);
   assert.match(workflow, /--publish --json/);
   assert.match(workflow, /if: always\(\)/);

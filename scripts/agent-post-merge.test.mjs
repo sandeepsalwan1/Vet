@@ -45,6 +45,8 @@ test("post-merge workflow can read the exact pull request it validates", () => {
     workflow,
     /permissions:\n\s+contents: read\n\s+issues: write\n\s+pull-requests: read\n\s+statuses: write/
   );
+  assert.match(workflow, /RENDER_WORKSPACE_ID: \$\{\{ secrets\.RENDER_WORKSPACE_ID \}\}/);
+  assert.match(workflow, /render workspace set "\$RENDER_WORKSPACE_ID"/);
 });
 
 test("post-merge success requires exact deployed merge and real health", () => {

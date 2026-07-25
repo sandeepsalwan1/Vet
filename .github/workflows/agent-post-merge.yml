@@ -75,8 +75,12 @@ jobs:
         continue-on-error: true
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_WORKSPACE_ID: ${{ secrets.RENDER_WORKSPACE_ID }}
           MERGE_SHA: ${{ inputs.merge-sha }}
         run: |
+          set -euo pipefail
+          [[ "$RENDER_WORKSPACE_ID" =~ ^[A-Za-z0-9_-]{3,128}$ ]]
+          render workspace set "$RENDER_WORKSPACE_ID" --confirm -o json >/dev/null
           node scripts/agent-render-proof.mjs \
             --expected-sha "$MERGE_SHA" \
             --output-file "$RUNNER_TEMP/agent-render-proof.json" \

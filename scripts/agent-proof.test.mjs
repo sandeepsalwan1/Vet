@@ -494,6 +494,8 @@ test("proof workflow dispatches automerge only after terminal success is publish
   assert.match(workflow, /create role authenticated nologin/);
   assert.match(workflow, /--execute-service/);
   assert.match(workflow, /uses: \.\/trusted\/\.github\/actions\/setup-render/);
+  assert.match(workflow, /RENDER_WORKSPACE_ID: \$\{\{ secrets\.RENDER_WORKSPACE_ID \}\}/);
+  assert.match(workflow, /render workspace set "\$RENDER_WORKSPACE_ID"/);
   assert.match(workflow, /agent-render-blueprint\.mjs/);
   assert.match(crabboxAction, /v0\.40\.0/);
   assert.match(crabboxAction, /crabbox_0\.40\.0_linux_amd64\.tar\.gz/);
