@@ -370,6 +370,92 @@ No browser, media, deployment, or service proof is needed.`,
   assert.equal(result.proofNeeded, "CI");
 });
 
+test("scope exclusions do not become requested risk", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 60,
+    title: "UI canary: polish clinic opening",
+    body: `### Outcome
+
+Pet owners see clearer clinic-opening copy before the existing sign-in screen.
+
+### Plan or context
+
+Change the initial clinic opening panel and keep the existing sign-in screen.
+
+### Acceptance criteria
+
+- [ ] The opening panel says Opening your clinic.
+- [ ] The local proof route shows loading, then Welcome back.
+
+### Proof
+
+GIF or video through Crabbox
+
+### Proof route
+
+/proof/loading
+
+### Constraints
+
+1. Do not change authentication behavior, security policy, or production data.`,
+    labels: []
+  });
+
+  assert.equal(result.priority, "low");
+  assert.equal(result.risk, "low");
+  assert.equal(result.proofNeeded, "GIF");
+  assert.equal(result.automationDecision, "implement");
+});
+
+test("conversation intent summary remains risk-bearing request context", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 61,
+    title: "Implement the summarized request",
+    body: `### Outcome
+
+Implement the summarized request.
+
+### Acceptance criteria
+
+- [ ] The summarized behavior works.
+
+### Constraints
+
+Do not broaden the requested scope.
+
+### Conversation intent summary
+
+Change authentication and production data handling.`,
+    labels: []
+  });
+
+  assert.equal(result.risk, "high");
+  assert.equal(result.automationDecision, "implement");
+});
+
+test("positive constraints remain risk-bearing request context", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 62,
+    title: "Update the tenant adapter",
+    body: `### Outcome
+
+The tenant adapter supports the requested field.
+
+### Acceptance criteria
+
+- [ ] The field is returned.
+
+### Constraints
+
+1. The change must preserve tenant isolation and include a migration.`,
+    labels: [{ name: config.labels.priorityLow }]
+  });
+
+  assert.equal(result.priority, "low");
+  assert.equal(result.risk, "high");
+  assert.equal(result.automationDecision, "implement");
+});
+
 test("authoritative parser accepts raw JSON and one final fenced block", () => {
   const expected = decision();
 

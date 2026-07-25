@@ -252,6 +252,26 @@ export function validateTriageDecision(decision) {
   return decision;
 }
 
+function riskBearingConstraints(value) {
+  return String(value ?? "")
+    .split("\n")
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^[-*]\s+(?:\[[ xX]\]\s*)?/, "")
+        .replace(/^\d+[.)]\s+/, "")
+        .trim()
+    )
+    .filter(Boolean)
+    .filter(
+      (line) =>
+        !/^(?:(?:do not|don't|must not|should not|may not|cannot|can't|never)\b|no\b.*\b(?:access|changes?|modifications?|use|work|write)\b|(?:keep|leave)\b.*\b(?:alone|out of scope|unchanged)\b|unchanged\b)/i.test(
+          line
+        )
+    )
+    .join("\n");
+}
+
 export function lightweightTriageDecision(config, issue) {
   const labels = issueLabels(issue);
   const sections = parseIssueSections(issue?.body ?? "");
@@ -265,6 +285,19 @@ export function lightweightTriageDecision(config, issue) {
       ? String(issue?.body ?? "")
       : Object.values(sections).filter(Boolean).join("\n");
   const requestText = `${issue?.title ?? ""}\n${outcome}\n${acceptance}\n${semanticBody}`;
+  const workRequestText =
+    Object.keys(sections).length === 0
+      ? requestText
+      : [
+          issue?.title,
+          outcome,
+          sections["plan or context"],
+          acceptance,
+          sections["conversation intent summary"],
+          riskBearingConstraints(sections.constraints)
+        ]
+          .filter(Boolean)
+          .join("\n");
   const proofRequestText =
     Object.keys(sections).length === 0
       ? requestText
@@ -296,11 +329,11 @@ export function lightweightTriageDecision(config, issue) {
     labels.includes(config.labels.priorityTrivial);
   const lowWork =
     /\b(?:readme|documentation|docs|copy|wording|typo|test coverage|dead code|cleanup|lint)\b/i.test(
-      requestText
+      workRequestText
     );
   const urgentWork =
     /\b(?:urgent|outage|incident|patient safety|security incident|clinic blocked|production down)\b/i.test(
-      requestText
+      workRequestText
     );
   const priority = explicitHigh || urgentWork ? "high" : explicitLow || lowWork ? "low" : "medium";
   const renderService =
@@ -321,16 +354,16 @@ export function lightweightTriageDecision(config, issue) {
         : "CI";
   const highRisk =
     /\b(?:auth(?:entication|orization)?|security|secret|credential|billing|payment|migration|production data|destructive|delete production|external integration|webhook|broad refactor|architecture|tenant isolation|permission|role)\b/i.test(
-      requestText
+      workRequestText
     );
   const narrowUi =
     /\b(?:copy|wording|loading|layout|spacing|color|icon|image|empty state)\b/i.test(
-      requestText
+      workRequestText
     );
   const lowRisk =
     (lowWork || narrowUi) &&
     !/\b(?:runtime|production|deploy|database|migration|security|auth|permission|billing)\b/i.test(
-      requestText
+      workRequestText
     );
   const risk = highRisk ? "high" : lowRisk ? "low" : "medium";
   const disallowed =
