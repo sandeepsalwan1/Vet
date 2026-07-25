@@ -256,6 +256,42 @@ The Render service deploys the exact merge.
   assert.equal(service.proofNeeded, "service");
 });
 
+test("proofless issue-form headings do not request UI proof", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 42,
+    title: "Document the operator guide",
+    body: `### Outcome
+
+The README links the operator guide.
+
+### Acceptance criteria
+
+- [ ] README links the guide.
+- [ ] Documentation checks pass.
+
+### Proof
+
+Automated tests and checks
+
+### Proof route
+
+_No response_
+
+### Proof interaction
+
+_No response_
+
+### Constraints
+
+Keep the change in README.md.`,
+    labels: [{ name: config.labels.priorityLow }]
+  });
+
+  assert.equal(result.priority, "low");
+  assert.equal(result.risk, "low");
+  assert.equal(result.proofNeeded, "CI");
+});
+
 test("authoritative parser accepts raw JSON and one final fenced block", () => {
   const expected = decision();
 

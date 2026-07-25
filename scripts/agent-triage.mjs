@@ -260,7 +260,11 @@ export function lightweightTriageDecision(config, issue) {
     sections["acceptance criteria"] ||
       (Object.keys(sections).length === 0 ? issue?.body ?? "" : "")
   ).trim();
-  const requestText = `${issue?.title ?? ""}\n${outcome}\n${acceptance}\n${issue?.body ?? ""}`;
+  const semanticBody =
+    Object.keys(sections).length === 0
+      ? String(issue?.body ?? "")
+      : Object.values(sections).filter(Boolean).join("\n");
+  const requestText = `${issue?.title ?? ""}\n${outcome}\n${acceptance}\n${semanticBody}`;
   const compactRequest = `${outcome}\n${acceptance}`
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
