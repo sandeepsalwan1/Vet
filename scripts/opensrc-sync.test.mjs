@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -156,4 +156,14 @@ test("requires every configured cache entry to be fresh and present", () => {
       }),
     /stale fetchedAt/
   );
+});
+
+test("CI isolates byte-faithful mirrors without weakening application audit", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+
+  assert.match(workflow, /git diff --check .* -- \. ':\(exclude\)opensrc\/\*\*'/);
+  assert.match(workflow, /actions\/dependency-review-action@v5/);
+  assert.match(workflow, /allow-ghsas: GHSA-xcpc-8h2w-3j85/);
+  assert.match(workflow, /::notice::GHSA-xcpc-8h2w-3j85/);
+  assert.match(workflow, /npm audit --omit=dev/);
 });
