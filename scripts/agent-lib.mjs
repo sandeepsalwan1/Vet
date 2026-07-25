@@ -402,7 +402,10 @@ export function assertTrustedAgentPull(pull, config, options = {}, dependencies 
 
   const metadata = parseImplementationMetadata(pull.body);
   const branch = String(pull?.head?.ref ?? "");
-  const branchMatch = branch.match(/^agent\/issue-(\d+)-[a-z0-9]+(?:-[a-z0-9]+)*$/);
+  // Older trusted branches may retain one separator at the 48-character slug cap.
+  const branchMatch = branch.match(
+    /^agent\/issue-(\d+)-[a-z0-9]+(?:-[a-z0-9]+)*-?$/,
+  );
   if (!branchMatch || Number(branchMatch[1]) !== metadata.sourceIssue) {
     throw new AgentError("agent PR branch does not match implementation source issue", 1);
   }
@@ -1052,7 +1055,8 @@ export function slugify(value, fallback = "work") {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 48);
+    .slice(0, 48)
+    .replace(/-+$/g, "");
   return slug || fallback;
 }
 

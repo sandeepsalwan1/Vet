@@ -803,6 +803,18 @@ test("trusted agent pull requires exact bot-authored implementation provenance",
   assert.deepEqual(parseImplementationMetadata(commitMessage), metadata);
   assert.deepEqual(
     assertTrustedAgentPull(
+      {
+        ...pull,
+        head: { ...pull.head, ref: "agent/issue-42-legacy-truncated-" },
+      },
+      trustConfig,
+      { files: [{ filename: "src/safe.ts" }], sourceIssue },
+      { ghApiJson: () => [{ commit: { message: commitMessage } }] },
+    ),
+    { metadata, sourceIssue: 42 },
+  );
+  assert.deepEqual(
+    assertTrustedAgentPull(
       pull,
       trustConfig,
       { files: [{ filename: "src/safe.ts" }], sourceIssue },
