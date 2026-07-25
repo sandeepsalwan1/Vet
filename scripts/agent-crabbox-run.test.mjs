@@ -714,24 +714,26 @@ test("delegated workspace seals trusted and target files into one syncable git t
 
   assert.equal(readFileSync(join(bundle, "trusted/scripts/worker.mjs"), "utf8"), "export const trusted = true;\n");
   assert.equal(readFileSync(join(bundle, "trusted/CLAUDE.md"), "utf8"), "trusted\n");
-  assert.equal(readFileSync(join(bundle, "target/candidate.txt"), "utf8"), "candidate\n");
+  assert.equal(readFileSync(join(bundle, "candidate/candidate.txt"), "utf8"), "candidate\n");
   assert.equal(
     readFileSync(
-      join(bundle, "target/.agent/remote-input/reviewRemote/review-prompt.md"),
+      join(bundle, "candidate/.agent/remote-input/reviewRemote/review-prompt.md"),
       "utf8"
     ),
     "review\n"
   );
-  assert.equal(existsSync(join(bundle, "target/untracked-secret.txt")), false);
+  assert.equal(existsSync(join(bundle, "candidate/untracked-secret.txt")), false);
   assert.equal(existsSync(join(bundle, "trusted/.git")), false);
-  assert.equal(existsSync(join(bundle, "target/.git")), false);
+  assert.equal(existsSync(join(bundle, "candidate/.git")), false);
+  assert.equal(existsSync(join(bundle, "target")), false);
+  assert.equal(prepared.targetWorkdir, realpathSync(join(bundle, "candidate")));
   assert.deepEqual(prepared.inputFiles, [
     "review-prompt.md",
     "review.schema.json"
   ]);
   assert.match(
     git(bundle, "ls-files"),
-    /target\/\.agent\/remote-input\/reviewRemote\/review-prompt\.md/
+    /candidate\/\.agent\/remote-input\/reviewRemote\/review-prompt\.md/
   );
   assert.equal(git(bundle, "status", "--porcelain"), "");
   assert.throws(

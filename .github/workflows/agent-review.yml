@@ -226,8 +226,8 @@ jobs:
             set -e;
             node trusted/scripts/agent-crabbox-run.mjs
             --restore-input-lane reviewRemote
-            --input-workdir target --json &&
-            cd target &&
+            --input-workdir candidate --json &&
+            cd candidate &&
             export AGENT_TARGET_ROOT="$PWD";
             agent_key="$CODEX_API_KEY"; unset CODEX_API_KEY OPENAI_API_KEY;
             git init --quiet &&
@@ -258,18 +258,18 @@ jobs:
           --lane reviewRemote
           --command "$REMOTE_COMMAND"
           --workdir "$RUNNER_TEMP/agent-review-workspace"
-          --delegated-workdir "$RUNNER_TEMP/agent-review-workspace/target"
+          --delegated-workdir "$RUNNER_TEMP/agent-review-workspace/candidate"
           --remote-harness trusted/scripts/agent-crabbox-run.mjs
-          --record-file "$RUNNER_TEMP/agent-review-workspace/target/.agent-output/review-remote.json"
+          --record-file "$RUNNER_TEMP/agent-review-workspace/candidate/.agent-output/review-remote.json"
           --json
       - uses: actions/upload-artifact@v4
         with:
           name: agent-review-result-${{ inputs.pr-number }}
           path: |
-            ${{ runner.temp }}/agent-review-workspace/target/.agent-output/review.json
-            ${{ runner.temp }}/agent-review-workspace/target/.agent-output/review.patch
-            ${{ runner.temp }}/agent-review-workspace/target/.agent-output/model-usage.json
-            ${{ runner.temp }}/agent-review-workspace/target/.agent-output/review-remote.json
+            ${{ runner.temp }}/agent-review-workspace/candidate/.agent-output/review.json
+            ${{ runner.temp }}/agent-review-workspace/candidate/.agent-output/review.patch
+            ${{ runner.temp }}/agent-review-workspace/candidate/.agent-output/model-usage.json
+            ${{ runner.temp }}/agent-review-workspace/candidate/.agent-output/review-remote.json
           include-hidden-files: true
           if-no-files-found: error
       - name: Upload redacted remote diagnostics
@@ -278,8 +278,8 @@ jobs:
         with:
           name: agent-review-remote-diagnostics-${{ inputs.pr-number }}
           path: |
-            ${{ runner.temp }}/agent-review-workspace/target/.agent-output/crabbox-reviewRemote-*.json
-            ${{ runner.temp }}/agent-review-workspace/target/.agent-output/crabbox-reviewRemote-*.log
+            ${{ runner.temp }}/agent-review-workspace/candidate/.agent-output/crabbox-reviewRemote-*.json
+            ${{ runner.temp }}/agent-review-workspace/candidate/.agent-output/crabbox-reviewRemote-*.log
           include-hidden-files: true
           if-no-files-found: warn
 

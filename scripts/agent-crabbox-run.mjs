@@ -68,6 +68,8 @@ const DELEGATED_INPUTS = new Map([
 ]);
 const MAX_DELEGATED_OUTPUT_BYTES = 2_500_000;
 const MAX_DELEGATED_INPUT_BYTES = 2_500_000;
+// Crabbox excludes generated directories named "target" from sync by default.
+const DELEGATED_CANDIDATE_DIRECTORY = "candidate";
 
 function redactSecrets(text, config, env = process.env) {
   let redacted = String(text ?? "");
@@ -606,13 +608,16 @@ export function prepareDelegatedWorkspace({
   );
   const targetFiles = copyTrackedTree(
     targetRoot,
-    join(bundleRoot, "target"),
+    join(bundleRoot, DELEGATED_CANDIDATE_DIRECTORY),
     "target"
   );
   const stagedInput = delegatedInputDirectory(targetRoot, lane);
   requireRealDirectory(stagedInput, `${lane} input staging path`);
   const files = readDelegatedInputFiles(lane, stagedInput);
-  const bundledInput = delegatedInputDirectory(join(bundleRoot, "target"), lane);
+  const bundledInput = delegatedInputDirectory(
+    join(bundleRoot, DELEGATED_CANDIDATE_DIRECTORY),
+    lane
+  );
   mkdirSync(bundledInput, { recursive: true, mode: 0o700 });
   for (const [name, contents] of files) {
     writeFileSync(join(bundledInput, name), contents, { mode: 0o600 });
@@ -635,7 +640,7 @@ export function prepareDelegatedWorkspace({
   return {
     lane,
     workdir: realpathSync(bundleRoot),
-    targetWorkdir: realpathSync(join(bundleRoot, "target")),
+    targetWorkdir: realpathSync(join(bundleRoot, DELEGATED_CANDIDATE_DIRECTORY)),
     trustedFiles,
     targetFiles,
     inputFiles: files.map(([name]) => name)

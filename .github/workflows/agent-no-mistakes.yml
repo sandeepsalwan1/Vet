@@ -239,8 +239,8 @@ jobs:
             set -e;
             node trusted/scripts/agent-crabbox-run.mjs
             --restore-input-lane noMistakesRemote
-            --input-workdir target --json;
-            cd target;
+            --input-workdir candidate --json;
+            cd candidate;
             export AGENT_TARGET_ROOT="$PWD";
             agent_key="$CODEX_API_KEY"; unset CODEX_API_KEY OPENAI_API_KEY;
             external_head="${{ needs.prepare.outputs.head_sha }}";
@@ -329,9 +329,9 @@ jobs:
           --lane noMistakesRemote
           --command "$REMOTE_COMMAND"
           --workdir "$RUNNER_TEMP/agent-no-mistakes-workspace"
-          --delegated-workdir "$RUNNER_TEMP/agent-no-mistakes-workspace/target"
+          --delegated-workdir "$RUNNER_TEMP/agent-no-mistakes-workspace/candidate"
           --remote-harness trusted/scripts/agent-crabbox-run.mjs
-          --record-file "$RUNNER_TEMP/agent-no-mistakes-workspace/target/.agent-output/no-mistakes-remote.json"
+          --record-file "$RUNNER_TEMP/agent-no-mistakes-workspace/candidate/.agent-output/no-mistakes-remote.json"
           --json
       - name: Upload sanitized gate result and native fix
         if: ${{ always() }}
@@ -339,10 +339,10 @@ jobs:
         with:
           name: no-mistakes-result-${{ inputs.pr-number }}
           path: |
-            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/result.json
-            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/fix.patch
-            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/model-usage.json
-            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/no-mistakes-remote.json
+            ${{ runner.temp }}/agent-no-mistakes-workspace/candidate/.agent-output/result.json
+            ${{ runner.temp }}/agent-no-mistakes-workspace/candidate/.agent-output/fix.patch
+            ${{ runner.temp }}/agent-no-mistakes-workspace/candidate/.agent-output/model-usage.json
+            ${{ runner.temp }}/agent-no-mistakes-workspace/candidate/.agent-output/no-mistakes-remote.json
           if-no-files-found: ignore
           retention-days: 1
       - name: Upload redacted remote diagnostics
@@ -351,8 +351,8 @@ jobs:
         with:
           name: no-mistakes-remote-diagnostics-${{ inputs.pr-number }}
           path: |
-            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/crabbox-noMistakesRemote-*.json
-            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/crabbox-noMistakesRemote-*.log
+            ${{ runner.temp }}/agent-no-mistakes-workspace/candidate/.agent-output/crabbox-noMistakesRemote-*.json
+            ${{ runner.temp }}/agent-no-mistakes-workspace/candidate/.agent-output/crabbox-noMistakesRemote-*.log
           include-hidden-files: true
           if-no-files-found: warn
 

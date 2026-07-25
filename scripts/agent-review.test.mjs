@@ -686,7 +686,7 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(generate, /REMOTE_COMMAND: >-\n\s+set -e;/);
   assert.ok(
     generate.indexOf("--restore-input-lane reviewRemote") <
-      generate.indexOf("cd target")
+      generate.indexOf("cd candidate")
   );
   assert.match(generate, /--sandbox danger-full-access/);
   assert.match(generate, /--schema \.agent-output\/review\.schema\.json/);
@@ -696,18 +696,18 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   );
   assert.match(
     generate,
-    /--delegated-workdir "\$RUNNER_TEMP\/agent-review-workspace\/target"/
+    /--delegated-workdir "\$RUNNER_TEMP\/agent-review-workspace\/candidate"/
   );
   assert.match(generate, /--remote-harness trusted\/scripts\/agent-crabbox-run\.mjs/);
   assert.match(
     generate,
-    /--record-file "\$RUNNER_TEMP\/agent-review-workspace\/target\/\.agent-output\/review-remote\.json"/
+    /--record-file "\$RUNNER_TEMP\/agent-review-workspace\/candidate\/\.agent-output\/review-remote\.json"/
   );
   assert.doesNotMatch(generate, /openai\/codex-action/);
   assert.match(generate, /--create-patch \.agent-output\/review\.patch/);
   assert.match(
     generate,
-    /path: \|\n\s+\$\{\{ runner\.temp \}\}\/agent-review-workspace\/target\/\.agent-output\/review\.json\n\s+\$\{\{ runner\.temp \}\}\/agent-review-workspace\/target\/\.agent-output\/review\.patch\n\s+\$\{\{ runner\.temp \}\}\/agent-review-workspace\/target\/\.agent-output\/model-usage\.json\n\s+\$\{\{ runner\.temp \}\}\/agent-review-workspace\/target\/\.agent-output\/review-remote\.json/,
+    /path: \|\n\s+\$\{\{ runner\.temp \}\}\/agent-review-workspace\/candidate\/\.agent-output\/review\.json\n\s+\$\{\{ runner\.temp \}\}\/agent-review-workspace\/candidate\/\.agent-output\/review\.patch\n\s+\$\{\{ runner\.temp \}\}\/agent-review-workspace\/candidate\/\.agent-output\/model-usage\.json\n\s+\$\{\{ runner\.temp \}\}\/agent-review-workspace\/candidate\/\.agent-output\/review-remote\.json/,
   );
   assert.match(generate, /--model "\$\{\{ needs\.prepare-review\.outputs\.backend-model \}\}"/);
   assert.match(generate, /--effort "\$\{\{ needs\.prepare-review\.outputs\.backend-effort \}\}"/);
