@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AppRoot } from "../../components/AppRoot";
 import { BootPanel } from "../../components/BootPanel";
+import { AuthScreen } from "../../components/auth/AuthScreen";
 import { defaultClinicBrand } from "../../lib/clinicClient";
 
 export function LoadingProofClient() {
@@ -14,7 +14,13 @@ export function LoadingProofClient() {
   }, []);
 
   if (showAuth) {
-    return <AppRoot audience="customer" />;
+    return (
+      <AuthScreen
+        audience="customer"
+        onAuth={() => undefined}
+        onOpenPasscodeBoard={() => undefined}
+      />
+    );
   }
 
   return <BootPanel clinicName={defaultClinicBrand.name} line="Opening your clinic…" proofHold />;
