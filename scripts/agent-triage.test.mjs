@@ -4,11 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { issueSnapshotSha256 } from "./agent-lib.mjs";
+import { issueLabels, issueSnapshotSha256 } from "./agent-lib.mjs";
+import {
+  createIntentCapsule,
+  intentCapsuleForManagedTriage
+} from "./agent-intent.mjs";
 import {
   assertTriageSnapshot,
   lightweightTriageDecision,
   parseAuthoritativeTriageJson,
+  projectedTriageIssue,
   readTriageManifest,
   triageBody,
   triageLabelChanges,
@@ -68,6 +73,50 @@ test("safe retriage clears a stale triage block and restarts implementation", ()
   assert.ok(changes.add.includes(config.labels.implement));
   assert.ok(changes.add.includes(config.labels.automerge));
   assert.ok(changes.remove.includes(config.labels.blocked));
+});
+
+test("managed intent seals the projected post-triage policy labels", () => {
+  const source = {
+    number: 42,
+    title: "Document the operator guide",
+    body: `### Outcome
+
+Operators can find the guide.
+
+### Acceptance criteria
+
+- [ ] README links the guide.`,
+    labels: [{ name: config.labels.priorityLow }]
+  };
+  const value = decision({ priority: "low", risk: "low" });
+  const changes = triageLabelChanges(config, value, issueLabels(source));
+  const projected = projectedTriageIssue(source, changes);
+  const capsule = createIntentCapsule({ issue: projected, decision: value });
+  const managed = {
+    ...value,
+    issueSnapshotSha256: capsule.issueSnapshotSha256,
+    ownerClarifications: [],
+    intentDigest: capsule.intentDigest
+  };
+  const triageComment = {
+    body: `<!-- agent-triage:v1 -->\n\`\`\`json\n${JSON.stringify(managed)}\n\`\`\``
+  };
+
+  assert.deepEqual(capsule.sourceLabels, [
+    config.labels.automerge,
+    config.labels.implement,
+    config.labels.priorityLow
+  ]);
+  assert.equal(
+    intentCapsuleForManagedTriage({
+      issue: projected,
+      comments: [],
+      triageComment,
+      marker: "<!-- agent-triage:v1 -->",
+      repoOwner: "owner"
+    }).capsule.intentDigest,
+    capsule.intentDigest
+  );
 });
 
 test("high-priority work still implements but cannot automerge", () => {

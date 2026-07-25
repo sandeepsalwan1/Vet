@@ -434,6 +434,16 @@ export function triageLabelChanges(config, decision, currentLabels = []) {
   };
 }
 
+export function projectedTriageIssue(issue, changes) {
+  const labels = new Set(issueLabels(issue));
+  for (const label of changes.remove) labels.delete(label);
+  for (const label of changes.add) labels.add(label);
+  return {
+    ...issue,
+    labels: [...labels].sort()
+  };
+}
+
 export function prepareTriage(
   config,
   issueNumber,
@@ -512,8 +522,9 @@ export function applyDecision(config, issueNumber, decision, manifestPath, dryRu
     }
   }
   const validatedDecision = validateTriageDecision(decision);
+  const changes = triageLabelChanges(config, validatedDecision, issueLabels(issue));
   const capsule = createIntentCapsule({
-    issue,
+    issue: projectedTriageIssue(issue, changes),
     decision: validatedDecision,
     ownerClarifications
   });
@@ -526,7 +537,6 @@ export function applyDecision(config, issueNumber, decision, manifestPath, dryRu
     })),
     intentDigest: capsule.intentDigest
   };
-  const changes = triageLabelChanges(config, authoritativeDecision, issueLabels(issue));
 
   const comment = upsertManagedComment({
     config,
