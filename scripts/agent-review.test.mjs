@@ -678,6 +678,10 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(generate, /node \.\.\/trusted\/scripts\/agent-review\.mjs/);
   assert.match(generate, /--lane reviewRemote/);
   assert.match(generate, /--stage-input-lane reviewRemote/);
+  assert.match(
+    generate,
+    /--prepare-delegated-workspace "\$RUNNER_TEMP\/agent-review-workspace"/
+  );
   assert.match(generate, /--restore-input-lane reviewRemote/);
   assert.match(generate, /REMOTE_COMMAND: >-\n\s+set -e;/);
   assert.ok(
@@ -686,15 +690,24 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   );
   assert.match(generate, /--sandbox danger-full-access/);
   assert.match(generate, /--schema \.agent-output\/review\.schema\.json/);
-  assert.match(generate, /--workdir "\$GITHUB_WORKSPACE"/);
-  assert.match(generate, /--delegated-workdir "\$GITHUB_WORKSPACE\/target"/);
+  assert.match(
+    generate,
+    /--workdir "\$RUNNER_TEMP\/agent-review-workspace"/
+  );
+  assert.match(
+    generate,
+    /--delegated-workdir "\$RUNNER_TEMP\/agent-review-workspace\/target"/
+  );
   assert.match(generate, /--remote-harness trusted\/scripts\/agent-crabbox-run\.mjs/);
-  assert.match(generate, /--record-file target\/\.agent-output\/review-remote\.json/);
+  assert.match(
+    generate,
+    /--record-file "\$RUNNER_TEMP\/agent-review-workspace\/target\/\.agent-output\/review-remote\.json"/
+  );
   assert.doesNotMatch(generate, /openai\/codex-action/);
   assert.match(generate, /--create-patch \.agent-output\/review\.patch/);
   assert.match(
     generate,
-    /path: \|\n\s+target\/\.agent-output\/review\.json\n\s+target\/\.agent-output\/review\.patch\n\s+target\/\.agent-output\/model-usage\.json\n\s+target\/\.agent-output\/review-remote\.json/,
+    /path: \|\n\s+\$\{\{ runner\.temp \}\}\/agent-review-workspace\/target\/\.agent-output\/review\.json\n\s+\$\{\{ runner\.temp \}\}\/agent-review-workspace\/target\/\.agent-output\/review\.patch\n\s+\$\{\{ runner\.temp \}\}\/agent-review-workspace\/target\/\.agent-output\/model-usage\.json\n\s+\$\{\{ runner\.temp \}\}\/agent-review-workspace\/target\/\.agent-output\/review-remote\.json/,
   );
   assert.match(generate, /--model "\$\{\{ needs\.prepare-review\.outputs\.backend-model \}\}"/);
   assert.match(generate, /--effort "\$\{\{ needs\.prepare-review\.outputs\.backend-effort \}\}"/);

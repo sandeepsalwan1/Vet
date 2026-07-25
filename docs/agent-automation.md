@@ -35,6 +35,7 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 5. Implementation selects its allowed backend from `.agent/config.json`, runs without write credentials, uploads a patch plus bounded implementation addendum and proof plan, then applies the sealed patch in a separate write-token job and opens a draft PR.
 6. The current installed worker adapter is Codex; unsupported or unimplemented backend selections fail before model execution.
 7. Review repeats the credential-free read/patch separation, applies safe fixes to the agent branch, waits for exact-head CI, and shares one three-revision semantic repair ledger with no-mistakes.
+   Review and no-mistakes seal tracked trusted-main and exact-candidate trees plus the bounded lane input into one temporary git workspace before Crabbox sync, while keeping their output handoff candidate-scoped.
    If the no-mistakes client times out while its daemon is still reviewing, the gate reattaches to that exact active run instead of starting another model run.
    The no-mistakes client retries one malformed evaluator result inside the same isolated run; another malformed result blocks without starting a redundant full workflow.
    no-mistakes v1.40 receives the authoritative source issue and managed triage through `--intent`, performs native semantic review, and may run two native safe auto-fix rounds.

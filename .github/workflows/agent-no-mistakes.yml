@@ -211,6 +211,14 @@ jobs:
           --stage-input-lane noMistakesRemote
           --input-workdir "$GITHUB_WORKSPACE/target"
           --json
+      - name: Seal one syncable no-mistakes workspace
+        run: >-
+          node trusted/scripts/agent-crabbox-run.mjs
+          --prepare-delegated-workspace "$RUNNER_TEMP/agent-no-mistakes-workspace"
+          --input-lane noMistakesRemote
+          --trusted-workdir "$GITHUB_WORKSPACE/trusted"
+          --input-workdir "$GITHUB_WORKSPACE/target"
+          --json
       - uses: ./trusted/.github/actions/setup-crabbox
         with:
           repo-root: trusted
@@ -320,10 +328,10 @@ jobs:
           node trusted/scripts/agent-crabbox-run.mjs
           --lane noMistakesRemote
           --command "$REMOTE_COMMAND"
-          --workdir "$GITHUB_WORKSPACE"
-          --delegated-workdir "$GITHUB_WORKSPACE/target"
+          --workdir "$RUNNER_TEMP/agent-no-mistakes-workspace"
+          --delegated-workdir "$RUNNER_TEMP/agent-no-mistakes-workspace/target"
           --remote-harness trusted/scripts/agent-crabbox-run.mjs
-          --record-file target/.agent-output/no-mistakes-remote.json
+          --record-file "$RUNNER_TEMP/agent-no-mistakes-workspace/target/.agent-output/no-mistakes-remote.json"
           --json
       - name: Upload sanitized gate result and native fix
         if: ${{ always() }}
@@ -331,10 +339,10 @@ jobs:
         with:
           name: no-mistakes-result-${{ inputs.pr-number }}
           path: |
-            target/.agent-output/result.json
-            target/.agent-output/fix.patch
-            target/.agent-output/model-usage.json
-            target/.agent-output/no-mistakes-remote.json
+            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/result.json
+            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/fix.patch
+            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/model-usage.json
+            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/no-mistakes-remote.json
           if-no-files-found: ignore
           retention-days: 1
       - name: Upload redacted remote diagnostics
@@ -343,8 +351,8 @@ jobs:
         with:
           name: no-mistakes-remote-diagnostics-${{ inputs.pr-number }}
           path: |
-            target/.agent-output/crabbox-noMistakesRemote-*.json
-            target/.agent-output/crabbox-noMistakesRemote-*.log
+            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/crabbox-noMistakesRemote-*.json
+            ${{ runner.temp }}/agent-no-mistakes-workspace/target/.agent-output/crabbox-noMistakesRemote-*.log
           include-hidden-files: true
           if-no-files-found: warn
 

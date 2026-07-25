@@ -102,6 +102,10 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
   assert.match(workflow, /--validate-backend --lane no-mistakes --json/);
   assert.match(workflow, /--lane noMistakesRemote/);
   assert.match(workflow, /--stage-input-lane noMistakesRemote/);
+  assert.match(
+    workflow,
+    /--prepare-delegated-workspace "\$RUNNER_TEMP\/agent-no-mistakes-workspace"/
+  );
   assert.match(workflow, /--restore-input-lane noMistakesRemote/);
   assert.ok(
     workflow.indexOf("--restore-input-lane noMistakesRemote") <
@@ -112,12 +116,18 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
   assert.match(workflow, /export AGENT_TARGET_ROOT="\$PWD"/);
   assert.match(workflow, /node \.\.\/trusted\/scripts\/agent-no-mistakes-gate\.mjs/);
   assert.match(workflow, /node \.\.\/trusted\/scripts\/agent-crabbox-run\.mjs/);
-  assert.match(workflow, /--workdir "\$GITHUB_WORKSPACE"/);
-  assert.match(workflow, /--delegated-workdir "\$GITHUB_WORKSPACE\/target"/);
+  assert.match(
+    workflow,
+    /--workdir "\$RUNNER_TEMP\/agent-no-mistakes-workspace"/
+  );
+  assert.match(
+    workflow,
+    /--delegated-workdir "\$RUNNER_TEMP\/agent-no-mistakes-workspace\/target"/
+  );
   assert.match(workflow, /--remote-harness trusted\/scripts\/agent-crabbox-run\.mjs/);
   assert.match(
     workflow,
-    /--record-file target\/\.agent-output\/no-mistakes-remote\.json/
+    /--record-file "\$RUNNER_TEMP\/agent-no-mistakes-workspace\/target\/\.agent-output\/no-mistakes-remote\.json"/
   );
   assert.match(workflow, /head_tree: \$\{\{ steps\.prepare\.outputs\.head_tree \}\}/);
   assert.match(workflow, /test "\$\(git rev-parse HEAD\^\{tree\}\)" = "\$expected_tree"/);
@@ -158,7 +168,7 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
   );
   assert.match(
     workflow,
-    /path: \|\n\s+target\/\.agent-output\/result\.json\n\s+target\/\.agent-output\/fix\.patch\n\s+target\/\.agent-output\/model-usage\.json\n\s+target\/\.agent-output\/no-mistakes-remote\.json/,
+    /path: \|\n\s+\$\{\{ runner\.temp \}\}\/agent-no-mistakes-workspace\/target\/\.agent-output\/result\.json\n\s+\$\{\{ runner\.temp \}\}\/agent-no-mistakes-workspace\/target\/\.agent-output\/fix\.patch\n\s+\$\{\{ runner\.temp \}\}\/agent-no-mistakes-workspace\/target\/\.agent-output\/model-usage\.json\n\s+\$\{\{ runner\.temp \}\}\/agent-no-mistakes-workspace\/target\/\.agent-output\/no-mistakes-remote\.json/,
   );
   assert.match(workflow, /--remote-record "\$RUNNER_TEMP\/no-mistakes-result\/no-mistakes-remote\.json"/);
   assert.match(gate, /"--skip",\s+"rebase,test,document,lint,push,pr,ci"/);

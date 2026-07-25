@@ -1,18 +1,22 @@
 #!/usr/bin/env node
 import {
+  chmodSync,
   closeSync,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
   openSync,
+  readlinkSync,
   readFileSync,
   readdirSync,
   readSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync
 } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   AgentError,
@@ -529,6 +533,113 @@ function readDelegatedInputFiles(lane, directory, { exact = true } = {}) {
     }
     return [name, readFileSync(path)];
   });
+}
+
+function copyTrackedTree(sourceRoot, destinationRoot, label) {
+  const listed = runCommand("git", ["ls-files", "-z", "--cached"], {
+    cwd: sourceRoot
+  }).stdout;
+  const paths = listed.split("\0").filter(Boolean);
+  if (paths.length === 0) {
+    throw new AgentError(`Crabbox ${label} tree has no tracked files`, 1);
+  }
+  mkdirSync(destinationRoot, { recursive: true, mode: 0o700 });
+  for (const name of paths) {
+    if (
+      isAbsolute(name) ||
+      name.includes("\\") ||
+      name.split("/").some((segment) => !segment || segment === "." || segment === "..")
+    ) {
+      throw new AgentError(`Crabbox ${label} tree contains an unsafe tracked path`, 1);
+    }
+    const source = pathUnder(sourceRoot, name);
+    const destination = pathUnder(destinationRoot, name);
+    if (!source || !destination) {
+      throw new AgentError(`Crabbox ${label} tracked path escapes its tree`, 1);
+    }
+    const info = lstatSync(source);
+    mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+    if (info.isFile()) {
+      copyFileSync(source, destination);
+      chmodSync(destination, info.mode & 0o777);
+      continue;
+    }
+    if (info.isSymbolicLink()) {
+      const target = readlinkSync(source);
+      const resolvedTarget = resolve(dirname(source), target);
+      const offset = relative(sourceRoot, resolvedTarget);
+      if (isAbsolute(target) || offset.startsWith("..") || isAbsolute(offset)) {
+        throw new AgentError(`Crabbox ${label} tree contains an escaping symlink`, 1);
+      }
+      symlinkSync(target, destination);
+      continue;
+    }
+    throw new AgentError(`Crabbox ${label} tracked path is not a file or symlink`, 1);
+  }
+  return paths.length;
+}
+
+export function prepareDelegatedWorkspace({
+  lane,
+  trustedWorkdir,
+  targetWorkdir,
+  destination
+}) {
+  delegatedInputFiles(lane);
+  const trustedRoot = resolveCrabboxWorkdir(trustedWorkdir);
+  const targetRoot = resolveCrabboxWorkdir(targetWorkdir);
+  const requestedDestination = resolve(destination);
+  const bundleParent = resolveCrabboxWorkdir(dirname(requestedDestination));
+  const bundleRoot = join(bundleParent, basename(requestedDestination));
+  if (
+    existsSync(bundleRoot) ||
+    pathUnder(trustedRoot, bundleRoot) ||
+    pathUnder(targetRoot, bundleRoot)
+  ) {
+    throw new AgentError("Crabbox delegated workspace destination is unsafe", 2);
+  }
+  mkdirSync(bundleRoot, { mode: 0o700 });
+  const trustedFiles = copyTrackedTree(
+    trustedRoot,
+    join(bundleRoot, "trusted"),
+    "trusted"
+  );
+  const targetFiles = copyTrackedTree(
+    targetRoot,
+    join(bundleRoot, "target"),
+    "target"
+  );
+  const stagedInput = delegatedInputDirectory(targetRoot, lane);
+  requireRealDirectory(stagedInput, `${lane} input staging path`);
+  const files = readDelegatedInputFiles(lane, stagedInput);
+  const bundledInput = delegatedInputDirectory(join(bundleRoot, "target"), lane);
+  mkdirSync(bundledInput, { recursive: true, mode: 0o700 });
+  for (const [name, contents] of files) {
+    writeFileSync(join(bundledInput, name), contents, { mode: 0o600 });
+  }
+  runCommand("git", ["init", "--quiet"], { cwd: bundleRoot });
+  runCommand("git", ["config", "user.name", "Agent Workspace Bundler"], {
+    cwd: bundleRoot
+  });
+  runCommand(
+    "git",
+    ["config", "user.email", "agent-workspace@example.invalid"],
+    { cwd: bundleRoot }
+  );
+  runCommand("git", ["add", "--all"], { cwd: bundleRoot });
+  runCommand(
+    "git",
+    ["commit", "--quiet", "--no-verify", "-m", "chore: seal delegated workspace"],
+    { cwd: bundleRoot }
+  );
+  return {
+    lane,
+    workdir: realpathSync(bundleRoot),
+    targetWorkdir: realpathSync(join(bundleRoot, "target")),
+    trustedFiles,
+    targetFiles,
+    inputFiles: files.map(([name]) => name)
+  };
 }
 
 export function stageDelegatedInput(lane, workdir = repoRoot()) {
@@ -1400,6 +1511,29 @@ export function runCrabboxLane(options) {
 
 export async function main() {
   const args = parseArgs();
+  if (args["prepare-delegated-workspace"]) {
+    if (
+      !args["input-lane"] ||
+      !args["trusted-workdir"] ||
+      !args["input-workdir"]
+    ) {
+      throw new AgentError(
+        "--prepare-delegated-workspace requires --input-lane, --trusted-workdir, and --input-workdir",
+        2
+      );
+    }
+    const result = prepareDelegatedWorkspace({
+      lane: String(args["input-lane"]),
+      trustedWorkdir: String(args["trusted-workdir"]),
+      targetWorkdir: String(args["input-workdir"]),
+      destination: String(args["prepare-delegated-workspace"])
+    });
+    finish(
+      { ok: true, message: "prepared delegated Crabbox workspace", ...result },
+      Boolean(args.json)
+    );
+    return;
+  }
   if (args["stage-input-lane"]) {
     const lane = String(args["stage-input-lane"]);
     const workdir = resolveCrabboxWorkdir(args["input-workdir"] ?? repoRoot());

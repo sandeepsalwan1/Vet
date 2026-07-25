@@ -18,6 +18,7 @@ import {
   gifEncoderBootstrapCommands,
   parseTimingReport,
   parseBrowserBehaviorObservation,
+  prepareDelegatedWorkspace,
   providerChildEnvironment,
   recordedBrowserLaunchScript,
   recoverLeaseHandle,
@@ -665,6 +666,84 @@ test("semantic lanes can sync a trusted sibling while restoring only into the ca
   );
   assert.equal(emitted.status, 0, emitted.stderr);
   assert.match(emitted.stdout, /^AGENT_CRABBOX_REVIEW_OUTPUT_V1 /);
+});
+
+test("delegated workspace seals trusted and target files into one syncable git tree", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "vet-agent-delegated-bundle-"));
+  const trusted = join(root, "trusted-source");
+  const target = join(root, "target-source");
+  const bundle = join(root, "bundle");
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(trusted);
+  mkdirSync(target);
+
+  const git = (cwd, ...args) => {
+    const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  for (const repository of [trusted, target]) {
+    git(repository, "init", "--quiet");
+    git(repository, "config", "user.name", "Test");
+    git(repository, "config", "user.email", "test@example.invalid");
+  }
+  mkdirSync(join(trusted, "scripts"));
+  writeFileSync(join(trusted, "scripts/worker.mjs"), "export const trusted = true;\n");
+  writeFileSync(join(trusted, "AGENTS.md"), "trusted\n");
+  symlinkSync("AGENTS.md", join(trusted, "CLAUDE.md"));
+  git(trusted, "add", "--all");
+  git(trusted, "commit", "--quiet", "-m", "trusted");
+
+  mkdirSync(join(target, ".agent"));
+  mkdirSync(join(target, ".agent-output"));
+  writeFileSync(join(target, ".agent/config.json"), "{}\n");
+  writeFileSync(join(target, "candidate.txt"), "candidate\n");
+  writeFileSync(join(target, "untracked-secret.txt"), "must not copy\n");
+  writeFileSync(join(target, ".agent-output/review-prompt.md"), "review\n");
+  writeFileSync(join(target, ".agent-output/review.schema.json"), "{}\n");
+  git(target, "add", ".agent/config.json", "candidate.txt");
+  git(target, "commit", "--quiet", "-m", "target");
+  stageDelegatedInput("reviewRemote", target);
+
+  const prepared = prepareDelegatedWorkspace({
+    lane: "reviewRemote",
+    trustedWorkdir: trusted,
+    targetWorkdir: target,
+    destination: bundle
+  });
+
+  assert.equal(readFileSync(join(bundle, "trusted/scripts/worker.mjs"), "utf8"), "export const trusted = true;\n");
+  assert.equal(readFileSync(join(bundle, "trusted/CLAUDE.md"), "utf8"), "trusted\n");
+  assert.equal(readFileSync(join(bundle, "target/candidate.txt"), "utf8"), "candidate\n");
+  assert.equal(
+    readFileSync(
+      join(bundle, "target/.agent/remote-input/reviewRemote/review-prompt.md"),
+      "utf8"
+    ),
+    "review\n"
+  );
+  assert.equal(existsSync(join(bundle, "target/untracked-secret.txt")), false);
+  assert.equal(existsSync(join(bundle, "trusted/.git")), false);
+  assert.equal(existsSync(join(bundle, "target/.git")), false);
+  assert.deepEqual(prepared.inputFiles, [
+    "review-prompt.md",
+    "review.schema.json"
+  ]);
+  assert.match(
+    git(bundle, "ls-files"),
+    /target\/\.agent\/remote-input\/reviewRemote\/review-prompt\.md/
+  );
+  assert.equal(git(bundle, "status", "--porcelain"), "");
+  assert.throws(
+    () =>
+      prepareDelegatedWorkspace({
+        lane: "reviewRemote",
+        trustedWorkdir: trusted,
+        targetWorkdir: target,
+        destination: join(target, "nested")
+      }),
+    /destination is unsafe/
+  );
 });
 
 test("remote no-mistakes handoff allows an absent sealed fix patch", (t) => {
