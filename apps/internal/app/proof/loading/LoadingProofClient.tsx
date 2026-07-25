@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AppRoot } from "../../components/AppRoot";
-import { ClinicWordmark } from "../../components/ClinicWordmark";
+import { BootPanel } from "../../components/BootPanel";
 import { defaultClinicBrand } from "../../lib/clinicClient";
 
 export function LoadingProofClient() {
@@ -17,13 +17,5 @@ export function LoadingProofClient() {
     return <AppRoot audience="customer" />;
   }
 
-  return (
-    <main className="entryShell">
-      <section className="entryPanel bootPanel" aria-live="polite">
-        <ClinicWordmark name={defaultClinicBrand.name} />
-        <p className="bootLine">Opening your clinic…</p>
-        <div aria-hidden="true" data-agent-proof="loading-hold" />
-      </section>
-    </main>
-  );
+  return <BootPanel clinicName={defaultClinicBrand.name} line="Opening your clinic…" proofHold />;
 }

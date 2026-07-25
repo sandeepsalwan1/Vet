@@ -5,8 +5,8 @@ import { getSession, logout, type AccountSession } from "../lib/accountStore";
 import { validateAccountTeamSession } from "../lib/authClient";
 import { AdminDashboard } from "./admin/AdminDashboard";
 import { AuthScreen, type Audience } from "./auth/AuthScreen";
+import { BootPanel } from "./BootPanel";
 import { ClinicProvider, useClinicBrand } from "./ClinicContext";
-import { ClinicWordmark } from "./ClinicWordmark";
 import { CustomerExperience } from "./customer/CustomerExperience";
 import { TaskBoard } from "./TaskBoard";
 import {
@@ -124,14 +124,7 @@ function AppRootContent({ audience }: { audience: Audience }) {
   }
 
   if (view.kind === "loading" || view.kind === "redirecting") {
-    return (
-      <main className="entryShell">
-        <section className="entryPanel bootPanel">
-          <ClinicWordmark name={clinic.name} />
-          <p className="bootLine">{view.kind === "redirecting" ? "Taking you there…" : "Opening your clinic…"}</p>
-        </section>
-      </main>
-    );
+    return <BootPanel clinicName={clinic.name} line={view.kind === "redirecting" ? "Taking you there…" : "Opening your clinic…"} />;
   }
 
   if (view.kind === "auth") {
