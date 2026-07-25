@@ -360,7 +360,8 @@ _No response_
 
 ### Constraints
 
-Keep the change in README.md.`,
+Keep the change in README.md.
+No browser, media, deployment, or service proof is needed.`,
     labels: [{ name: config.labels.priorityLow }]
   });
 

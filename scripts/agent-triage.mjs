@@ -265,6 +265,19 @@ export function lightweightTriageDecision(config, issue) {
       ? String(issue?.body ?? "")
       : Object.values(sections).filter(Boolean).join("\n");
   const requestText = `${issue?.title ?? ""}\n${outcome}\n${acceptance}\n${semanticBody}`;
+  const proofRequestText =
+    Object.keys(sections).length === 0
+      ? requestText
+      : [
+          issue?.title,
+          outcome,
+          acceptance,
+          sections.proof,
+          sections["proof route"],
+          sections["proof interaction"],
+        ]
+          .filter(Boolean)
+          .join("\n");
   const compactRequest = `${outcome}\n${acceptance}`
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
@@ -292,17 +305,17 @@ export function lightweightTriageDecision(config, issue) {
   const priority = explicitHigh || urgentWork ? "high" : explicitLow || lowWork ? "low" : "medium";
   const renderService =
     /\b(?:render\s+(?:api|blueprint|deploy(?:ment)?|environment|health|logs?|service)|(?:blueprint|deploy(?:ment)?|health|logs?|service)\s+(?:on\s+)?render)\b/i.test(
-      requestText
+      proofRequestText
     );
-  const proofNeeded = /\b(?:gif|video|screen recording)\b/i.test(requestText)
+  const proofNeeded = /\b(?:gif|video|screen recording)\b/i.test(proofRequestText)
     ? "GIF"
     : renderService ||
         /\b(?:deploy(?:ment)?|migration|database|postgres|supabase|webhook|integration|service health|production logs)\b/i.test(
-          requestText
+          proofRequestText
         )
       ? "service"
       : /\b(?:ui|visual|screenshot|browser|page|route|screen|layout|loading state|animation)\b/i.test(
-            requestText
+            proofRequestText
           ) || labels.includes(config.labels.proof)
         ? "UI"
         : "CI";
