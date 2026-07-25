@@ -21,6 +21,7 @@ import {
   getPullSnapshot,
   ghApiJson,
   implementationCommitMessage,
+  issueLabels,
   loadConfig,
   markdownJsonBlock,
   newestManagedComment,
@@ -57,6 +58,10 @@ const STATUS_CONTEXT = "no-mistakes";
 export const MAX_INFRASTRUCTURE_RETRIES = 1;
 export const MAX_GATE_REPAIR_ATTEMPTS = MAX_SEMANTIC_REVISIONS;
 const PASSING_OUTCOMES = new Set(["checks-passed", "passed"]);
+const REPLAY_PASSING_OUTCOMES = new Set([
+  "passed-proven",
+  "passed-recovered",
+]);
 const ALLOWED_OUTCOMES = new Set([
   ...PASSING_OUTCOMES,
   "failed",
@@ -98,10 +103,50 @@ const PUBLIC_FAILURE_STAGES = new Set([
 
 export function noMistakesReplayState(evaluation) {
   const outcome = String(evaluation?.outcome ?? "");
+  const replayPassed = REPLAY_PASSING_OUTCOMES.has(outcome);
   return {
-    skipModel: Boolean(evaluation) && outcome !== "setup-failed",
-    replayPassed: PASSING_OUTCOMES.has(outcome),
+    skipModel:
+      replayPassed ||
+      (Boolean(evaluation) &&
+        !PASSING_OUTCOMES.has(outcome) &&
+        outcome !== "setup-failed"),
+    replayPassed,
   };
+}
+
+export function repairLedgerOutcome(artifact) {
+  const outcome = String(artifact?.outcome ?? "");
+  if (artifact?.status === "passed") return "passed-proven";
+  return PASSING_OUTCOMES.has(outcome) ? "failed" : outcome;
+}
+
+export function setupFailureRecoveryEligible({
+  config,
+  ledger,
+  head,
+  inputDigest,
+  passProven,
+  sourceIssue,
+}) {
+  if (
+    !passProven ||
+    !issueLabels(sourceIssue).includes(config.labels.automerge) ||
+    openRepairFindings(ledger).length > 0
+  ) {
+    return false;
+  }
+  const history = ledger.evaluations.filter(
+    (evaluation) =>
+      evaluation.lane === "no-mistakes" &&
+      evaluation.head === head &&
+      evaluation.inputDigest === inputDigest,
+  );
+  const lastRecovered = history.findLastIndex(
+    (evaluation) => evaluation.outcome === "passed-recovered",
+  );
+  return history.findLastIndex(
+    (evaluation) => evaluation.outcome === "setup-failed",
+  ) > lastRecovered;
 }
 
 function readApprovalState(value) {
@@ -1110,9 +1155,16 @@ ${markdownJsonBlock({
 export function gateLabelChanges(
   config,
   artifact,
-  { repairAttempt = 0, repairDecision = null } = {},
+  {
+    repairAttempt = 0,
+    repairDecision = null,
+    recoveredSetupFailure = false,
+  } = {},
 ) {
-  if (artifact?.status === "passed" && artifact?.userApproved) {
+  if (
+    artifact?.status === "passed" &&
+    (artifact?.userApproved || recoveredSetupFailure)
+  ) {
     return {
       add: [config.labels.automerge],
       remove: [config.labels.blocked],
@@ -1337,6 +1389,7 @@ function recordTerminal({
   mutatePull = true,
   repairAttempt = 0,
   repairDecision = null,
+  recoveredSetupFailure = false,
   remote = null,
   dryRun = false,
 }) {
@@ -1363,6 +1416,7 @@ function recordTerminal({
   const labelChanges = gateLabelChanges(config, artifact, {
     repairAttempt,
     repairDecision,
+    recoveredSetupFailure,
   });
   const labels = {
     added: addLabels(config, pull.number, labelChanges.add, dryRun),
@@ -1764,7 +1818,7 @@ async function main() {
       if (!dryRun) writePrivateFile(args["intent-file"], `${intent}\n`);
     }
     const comments = getIssueComments(config, prNumber);
-    const repairLedger = loadRepairLedger(
+    let repairLedger = loadRepairLedger(
       comments,
       context.intentCapsule.intentDigest,
       config.repo.owner,
@@ -1783,11 +1837,53 @@ async function main() {
           : "not-approved",
       }],
     });
-    const replay = noMistakesReplayState(repairEvaluationFor(repairLedger, {
+    const replayEvaluation = repairEvaluationFor(repairLedger, {
       lane: "no-mistakes",
       head: expectedHead,
       inputDigest,
-    }));
+    });
+    let replay = noMistakesReplayState(replayEvaluation);
+    const recoveredSetupFailure =
+      replay.replayPassed &&
+      setupFailureRecoveryEligible({
+        config,
+        ledger: repairLedger,
+        head: expectedHead,
+        inputDigest,
+        passProven: replayEvaluation.outcome === "passed-proven",
+        sourceIssue: context.sourceIssue,
+      });
+    let recoveryLabels = null;
+    let recoveryLedgerComment = null;
+    if (recoveredSetupFailure) {
+      const changes = gateLabelChanges(
+        config,
+        { status: "passed", outcome: replayEvaluation.outcome },
+        { recoveredSetupFailure: true },
+      );
+      recoveryLabels = {
+        added: addLabels(config, pull.number, changes.add, dryRun),
+        removed: removeLabels(config, pull.number, changes.remove, dryRun),
+      };
+      repairLedger = recordRepairEvaluation(repairLedger, {
+        lane: "no-mistakes",
+        head: expectedHead,
+        inputDigest,
+        findings: [],
+        outcome: "passed-recovered",
+      }).ledger;
+      recoveryLedgerComment = saveRepairLedger({
+        config,
+        prNumber,
+        ledger: repairLedger,
+        dryRun,
+      });
+      replay = noMistakesReplayState(repairEvaluationFor(repairLedger, {
+        lane: "no-mistakes",
+        head: expectedHead,
+        inputDigest,
+      }));
+    }
     const status = replay.skipModel ? null : markPending(config, pull, dryRun);
     setGitHubOutput({
       default_branch: trustedDefault.branch,
@@ -1809,6 +1905,9 @@ async function main() {
           ? `no-mistakes already evaluated for PR #${prNumber}`
           : `no-mistakes pending for PR #${prNumber}`,
         status,
+        recoveredSetupFailure,
+        recoveryLabels,
+        recoveryLedgerComment,
         ...replay,
       },
       Boolean(args.json),
@@ -1998,13 +2097,21 @@ async function main() {
         artifact = setupFailureArtifact(expectedHead);
       }
     }
+    const recoveredSetupFailure = setupFailureRecoveryEligible({
+      config,
+      ledger: repairLedger,
+      head: expectedHead,
+      inputDigest,
+      passProven: artifact.status === "passed",
+      sourceIssue: context.sourceIssue,
+    });
     const binding = terminalHeadBinding(expectedHead, pull.head.sha);
     const evaluation = recordRepairEvaluation(repairLedger, {
       lane: "no-mistakes",
       head: expectedHead,
       inputDigest,
       findings: artifact.status === "passed" ? [] : artifact.findings,
-      outcome: artifact.outcome,
+      outcome: repairLedgerOutcome(artifact),
     });
     repairLedger = evaluation.ledger;
     const repair = gateRepairDecision(artifact, repairAttempt, {
@@ -2059,9 +2166,19 @@ async function main() {
       ...binding,
       repairAttempt,
       repairDecision: repair,
+      recoveredSetupFailure,
       remote,
       dryRun,
     });
+    if (recoveredSetupFailure) {
+      repairLedger = recordRepairEvaluation(repairLedger, {
+        lane: "no-mistakes",
+        head: expectedHead,
+        inputDigest,
+        findings: [],
+        outcome: "passed-recovered",
+      }).ledger;
+    }
     const ledgerComment = saveRepairLedger({
       config,
       prNumber,

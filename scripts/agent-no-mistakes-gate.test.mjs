@@ -35,9 +35,11 @@ import {
   parseAxiResult,
   resolvePullMergeBase,
   resolveTrustedDefaultCommit,
+  repairLedgerOutcome,
   runNoMistakesGate,
   sanitizedGateArtifact,
   selectTrustedManagedTriageComment,
+  setupFailureRecoveryEligible,
   setupFailureArtifact,
   terminalHeadBinding,
   validateNoMistakesRemoteRecord,
@@ -104,6 +106,10 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
 
   assert.match(workflow, /--validate-backend --lane no-mistakes --json/);
   assert.match(workflow, /--lane noMistakesRemote/);
+  assert.match(
+    workflow,
+    /prepare:\n[\s\S]*?permissions:\n[\s\S]*?issues: write/,
+  );
   assert.match(workflow, /--stage-input-lane noMistakesRemote/);
   assert.match(
     workflow,
@@ -315,9 +321,13 @@ test("cached no-mistakes results resume only a passing gate", () => {
     skipModel: false,
     replayPassed: false,
   });
-  assert.deepEqual(noMistakesReplayState({ outcome: "checks-passed" }), {
+  assert.deepEqual(noMistakesReplayState({ outcome: "passed-proven" }), {
     skipModel: true,
     replayPassed: true,
+  });
+  assert.deepEqual(noMistakesReplayState({ outcome: "checks-passed" }), {
+    skipModel: false,
+    replayPassed: false,
   });
   assert.deepEqual(noMistakesReplayState({ outcome: "ask-user" }), {
     skipModel: true,
@@ -327,6 +337,91 @@ test("cached no-mistakes results resume only a passing gate", () => {
     skipModel: false,
     replayPassed: false,
   });
+  assert.deepEqual(noMistakesReplayState({ outcome: "passed-recovered" }), {
+    skipModel: true,
+    replayPassed: true,
+  });
+  assert.equal(
+    repairLedgerOutcome({ status: "passed", outcome: "passed" }),
+    "passed-proven",
+  );
+  assert.equal(
+    repairLedgerOutcome({ status: "failed", outcome: "passed" }),
+    "failed",
+  );
+});
+
+test("same-head setup recovery restores only inherited automerge once", () => {
+  const head = "7".repeat(40);
+  const inputDigest = "8".repeat(64);
+  const findingDigest = "9".repeat(64);
+  const ledger = {
+    version: 1,
+    intentDigest: "a".repeat(64),
+    revisionCount: 0,
+    revisions: [],
+    evaluations: [{
+      lane: "no-mistakes",
+      head,
+      inputDigest,
+      findingDigest,
+      outcome: "setup-failed",
+    }],
+    findings: [],
+  };
+  const recoveryConfig = {
+    labels: { automerge: "agent:automerge" },
+  };
+  const sourceIssue = { labels: [{ name: "agent:automerge" }] };
+  const eligible = (currentLedger) =>
+    setupFailureRecoveryEligible({
+      config: recoveryConfig,
+      ledger: currentLedger,
+      head,
+      inputDigest,
+      passProven: true,
+      sourceIssue,
+    });
+
+  assert.equal(eligible(ledger), true);
+  assert.equal(
+    setupFailureRecoveryEligible({
+      config: recoveryConfig,
+      ledger,
+      head,
+      inputDigest,
+      passProven: false,
+      sourceIssue,
+    }),
+    false,
+  );
+  ledger.evaluations.push({
+    lane: "no-mistakes",
+    head,
+    inputDigest,
+    findingDigest,
+    outcome: "passed",
+  });
+  assert.equal(eligible(ledger), true);
+  ledger.evaluations.push({
+    lane: "no-mistakes",
+    head,
+    inputDigest,
+    findingDigest,
+    outcome: "passed-recovered",
+  });
+  assert.equal(eligible(ledger), false);
+  assert.equal(
+    setupFailureRecoveryEligible({
+      config: recoveryConfig,
+      ledger: { ...ledger, evaluations: ledger.evaluations.slice(0, 2) },
+      head,
+      inputDigest,
+      passProven: true,
+      sourceIssue: { labels: [] },
+    }),
+    false,
+  );
 });
 
 test("early no-mistakes setup failures produce terminal sanitized artifacts", (t) => {
@@ -1446,6 +1541,14 @@ test("terminal failures block while exact-head auto-fix findings receive bounded
   assert.deepEqual(
     gateLabelChanges(labelConfig, { status: "passed", outcome: "passed", userApproved: false }),
     { add: [], remove: [] },
+  );
+  assert.deepEqual(
+    gateLabelChanges(
+      labelConfig,
+      { status: "passed", outcome: "passed", userApproved: false },
+      { recoveredSetupFailure: true },
+    ),
+    { add: ["agent:automerge"], remove: ["agent:blocked"] },
   );
   for (const artifact of [
     { status: "failed", outcome: "failed" },
