@@ -886,6 +886,33 @@ function fetchTrustedPull(config, prNumber, dependencies = {}) {
   return { ...snapshot, trust };
 }
 
+export function resolvePullMergeBase(config, pull, dependencies = {}) {
+  const baseSha = String(pull?.base?.sha ?? "");
+  const headSha = String(pull?.head?.sha ?? "");
+  if (!/^[0-9a-f]{40}$/.test(baseSha) || !/^[0-9a-f]{40}$/.test(headSha)) {
+    throw new AgentError("no-mistakes pull comparison requires exact commit SHAs", 1);
+  }
+  const apiJson = dependencies.ghApiJson ?? ghApiJson;
+  const comparison = apiJson(
+    `repos/${config.repo.owner}/${config.repo.name}/compare/${baseSha}...${headSha}`,
+  );
+  const mergeBaseSha = String(comparison?.merge_base_commit?.sha ?? "");
+  if (!/^[0-9a-f]{40}$/.test(mergeBaseSha)) {
+    throw new AgentError("no-mistakes pull comparison has no exact merge base", 1);
+  }
+  const commit = apiJson(
+    `repos/${config.repo.owner}/${config.repo.name}/git/commits/${mergeBaseSha}`,
+  );
+  const mergeBaseTree = String(commit?.tree?.sha ?? "");
+  if (
+    commit?.sha !== mergeBaseSha ||
+    !/^[0-9a-f]{40}$/.test(mergeBaseTree)
+  ) {
+    throw new AgentError("no-mistakes merge base has no trusted Git tree", 1);
+  }
+  return { sha: mergeBaseSha, tree: mergeBaseTree };
+}
+
 export function assertTrustedIntentSource(config, snapshot, context, dependencies = {}) {
   return assertSharedTrustedAgentPull(
     snapshot.pull,
@@ -1698,6 +1725,7 @@ async function main() {
     if (pull.head.sha !== expectedHead) {
       throw new AgentError("PR head changed before no-mistakes preparation", 1);
     }
+    const mergeBase = resolvePullMergeBase(config, pull, { ghApiJson });
     const context = fetchIntentContext(config, trust.sourceIssue, pull);
     assertTrustedIntentSource(config, snapshot, context, { ghApiJson });
     const commit = ghApiJson(
@@ -1741,6 +1769,8 @@ async function main() {
     }));
     const status = replay.skipModel ? null : markPending(config, pull, dryRun);
     setGitHubOutput({
+      merge_base_sha: mergeBase.sha,
+      merge_base_tree: mergeBase.tree,
       head_sha: pull.head.sha,
       head_ref: pull.head.ref,
       head_tree: headTree,

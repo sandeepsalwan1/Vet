@@ -351,6 +351,7 @@ This is the duplicate-model boundary for interruption recovery.
 - Credentialed Crabbox providers require readiness proof; built-in `local-container` receives no provider credentials and passes a scheduled lifecycle smoke plus the same route, lease, desktop, media, and behavior checks when used for proof.
 - no-mistakes and proof statuses must reflect real execution; skip lanes use omission or the distinct `no-mistakes-bypass` status instead of faking success.
 - The credentialless no-mistakes gate runs semantic review and native safe auto-fix only.
+- Its ephemeral Git commit keeps a sealed, history-free copy of the immutable pull-request merge-base tree as its parent and local read-only origin, so no-mistakes sees the real diff and initializes without repository credentials.
 - It never rebases, edits privileged automation paths, lints, or publishes directly.
 - A trusted exact-head job alone may publish its sealed patch.
 - Deterministic scenario, API, and CLI checks may provide direct non-visual evidence when the trusted request calls for it.

@@ -12,6 +12,7 @@ import {
   browserRouteMarker,
   browserRouteMarkerArgs,
   buildRunArgs,
+  createExactParentBundle,
   emitDelegatedOutput,
   emitImplementationOutput,
   gifArtifactArgs,
@@ -764,6 +765,10 @@ test("delegated workspace seals trusted and target files into one syncable git t
     git(join(bundle, "candidate"), "ls-files", ".agent/remote-input"),
     ""
   );
+  assert.equal(
+    git(join(bundle, "candidate"), "status", "--porcelain", "--untracked-files=all"),
+    ""
+  );
   assert.throws(
     () =>
       prepareDelegatedWorkspace({
@@ -774,6 +779,64 @@ test("delegated workspace seals trusted and target files into one syncable git t
       }),
     /destination is unsafe/
   );
+});
+
+test("exact remote repository uses one sealed history-free parent bundle", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "vet-agent-exact-origin-"));
+  const base = join(root, "base");
+  const target = join(root, "target");
+  const candidate = join(root, "candidate");
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(base);
+  mkdirSync(target);
+  mkdirSync(candidate);
+  const git = (cwd, ...args) => {
+    const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  for (const repository of [base, target]) {
+    git(repository, "init", "--quiet", "-b", "main");
+    git(repository, "config", "user.name", "Test");
+    git(repository, "config", "user.email", "test@example.invalid");
+    writeFileSync(join(repository, ".gitignore"), ".agent-output/\n");
+  }
+  writeFileSync(join(base, "candidate.txt"), "before\n");
+  git(base, "add", "--all");
+  git(base, "commit", "--quiet", "-m", "base");
+  const baseSha = git(base, "rev-parse", "HEAD");
+  const baseTree = git(base, "rev-parse", "HEAD^{tree}");
+  mkdirSync(join(base, ".agent-output"));
+  const parent = createExactParentBundle(base, { parentSha: baseSha });
+
+  writeFileSync(join(target, "candidate.txt"), "after\n");
+  git(target, "add", "--all");
+  git(target, "commit", "--quiet", "-m", "target");
+  const targetTree = git(target, "rev-parse", "HEAD^{tree}");
+  mkdirSync(join(candidate, ".agent-output"));
+  cpSync(
+    parent.path,
+    join(candidate, ".agent-output/no-mistakes-parent.bundle")
+  );
+  writeFileSync(join(candidate, ".gitignore"), ".agent-output/\n");
+  writeFileSync(join(candidate, "candidate.txt"), "after\n");
+
+  const seeded = seedExactRemoteRepository(candidate, {
+    expectedTree: targetTree,
+    branch: "agent/test",
+    originBundle: join(candidate, ".agent-output/no-mistakes-parent.bundle"),
+    expectedParentTree: baseTree
+  });
+  assert.equal(seeded.tree, targetTree);
+  assert.equal(seeded.branch, "agent/test");
+  assert.equal(git(candidate, "rev-parse", "HEAD^"), parent.parent);
+  assert.equal(git(candidate, "rev-list", "--count", "HEAD^"), "1");
+  assert.equal(
+    git(candidate, "remote", "get-url", "origin"),
+    realpathSync(join(candidate, ".agent-output/no-mistakes-parent.bundle"))
+  );
+  assert.equal(git(candidate, "diff", "--name-only", "HEAD^", "HEAD"), "candidate.txt");
+  assert.equal(git(candidate, "status", "--porcelain", "--untracked-files=all"), "");
 });
 
 test("remote no-mistakes handoff allows an absent sealed fix patch", (t) => {
@@ -799,7 +862,7 @@ test("delegated inputs cross Crabbox sync through a bounded nonignored handoff",
   const lanes = new Map([
     ["implementRemote", ["implement-prompt.md", "implementation-intent.json"]],
     ["reviewRemote", ["review-prompt.md", "review.schema.json"]],
-    ["noMistakesRemote", ["no-mistakes-intent"]]
+    ["noMistakesRemote", ["no-mistakes-intent", "no-mistakes-parent.bundle"]]
   ]);
   for (const [lane, names] of lanes) {
     const root = mkdtempSync(join(tmpdir(), `vet-agent-${lane}-input-`));

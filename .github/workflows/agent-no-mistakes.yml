@@ -83,6 +83,8 @@ jobs:
       issues: read
       statuses: write
     outputs:
+      merge_base_sha: ${{ steps.prepare.outputs.merge_base_sha }}
+      merge_base_tree: ${{ steps.prepare.outputs.merge_base_tree }}
       backend_effort: ${{ steps.backend.outputs.effort }}
       backend_model: ${{ steps.backend.outputs.model }}
       concurrency_group: ${{ steps.concurrency.outputs.group }}
@@ -205,6 +207,13 @@ jobs:
         with:
           name: no-mistakes-context-${{ inputs.pr-number }}
           path: target/.agent-output
+      - name: Seal exact no-mistakes parent
+        run: >-
+          node trusted/scripts/agent-crabbox-run.mjs
+          --create-exact-parent-bundle
+          --input-workdir "$GITHUB_WORKSPACE/target"
+          --parent-sha "${{ needs.prepare.outputs.merge_base_sha }}"
+          --json
       - name: Stage trusted remote input
         run: >-
           node trusted/scripts/agent-crabbox-run.mjs
@@ -244,8 +253,10 @@ jobs:
             export AGENT_TARGET_ROOT="$PWD";
             agent_key="$CODEX_API_KEY"; unset CODEX_API_KEY OPENAI_API_KEY;
             external_head="${{ needs.prepare.outputs.head_sha }}";
+            expected_parent_tree="${{ needs.prepare.outputs.merge_base_tree }}";
             expected_tree="${{ needs.prepare.outputs.head_tree }}";
             head_ref="${{ needs.prepare.outputs.head_ref }}";
+            origin_bundle="$PWD/.agent-output/no-mistakes-parent.bundle";
             result_file=.agent-output/result.json;
             model_started_file=.agent-output/model-started;
             mkdir -p .agent-output;
@@ -269,7 +280,9 @@ jobs:
             --seed-exact-repository
             --input-workdir "$PWD"
             --expected-tree "$expected_tree"
-            --branch "$head_ref" --json &&
+            --branch "$head_ref"
+            --origin-bundle "$origin_bundle"
+            --expected-parent-tree "$expected_parent_tree" --json &&
             npm ci --ignore-scripts --no-audit --no-fund &&
             npm run typecheck &&
             npm run build &&

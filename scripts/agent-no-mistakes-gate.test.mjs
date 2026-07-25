@@ -33,6 +33,7 @@ import {
   noMistakesCommentMarker,
   normalizeGateArtifact,
   parseAxiResult,
+  resolvePullMergeBase,
   runNoMistakesGate,
   sanitizedGateArtifact,
   selectTrustedManagedTriageComment,
@@ -130,11 +131,27 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
     workflow,
     /--record-file "\$RUNNER_TEMP\/agent-no-mistakes-workspace\/candidate\/\.agent-output\/no-mistakes-remote\.json"/
   );
+  assert.match(
+    workflow,
+    /merge_base_sha: \$\{\{ steps\.prepare\.outputs\.merge_base_sha \}\}/,
+  );
+  assert.match(
+    workflow,
+    /merge_base_tree: \$\{\{ steps\.prepare\.outputs\.merge_base_tree \}\}/,
+  );
   assert.match(workflow, /head_tree: \$\{\{ steps\.prepare\.outputs\.head_tree \}\}/);
+  assert.match(workflow, /--create-exact-parent-bundle/);
+  assert.match(
+    workflow,
+    /--parent-sha "\$\{\{ needs\.prepare\.outputs\.merge_base_sha \}\}"/,
+  );
   assert.match(
     workflow,
     /--seed-exact-repository[\s\S]*?--expected-tree "\$expected_tree"[\s\S]*?--branch "\$head_ref"/,
   );
+  assert.match(workflow, /--origin-bundle "\$origin_bundle"/);
+  assert.match(workflow, /--expected-parent-tree "\$expected_parent_tree"/);
+  assert.doesNotMatch(workflow, /https:\/\/github\.com\/\$\{\{ github\.repository \}\}\.git/);
   assert.match(workflow, /--expected-source-tree "\$expected_tree"/);
   assert.match(workflow, /--intent-file \.agent-output\/no-mistakes-intent/);
   assert.match(workflow, /--model-started-file "\$model_started_file"/);
@@ -217,6 +234,42 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
   assert.equal(packageJson.devDependencies.jscpd, "^5.0.12");
   assert.match(gate, /"--untracked-files=all"/);
   assert.match(gate, /createNativeFixPatch/);
+});
+
+test("remote synthetic parent is the immutable pull-request merge base", () => {
+  const baseTip = "1".repeat(40);
+  const mergeBase = "2".repeat(40);
+  const head = "3".repeat(40);
+  const mergeBaseTree = "4".repeat(40);
+  const requestedPaths = [];
+  const resolved = resolvePullMergeBase(
+    config,
+    { base: { sha: baseTip }, head: { sha: head } },
+    {
+      ghApiJson: (path) => {
+        requestedPaths.push(path);
+        if (path.includes("/compare/")) {
+          return { merge_base_commit: { sha: mergeBase } };
+        }
+        return { sha: mergeBase, tree: { sha: mergeBaseTree } };
+      },
+    },
+  );
+
+  assert.deepEqual(resolved, { sha: mergeBase, tree: mergeBaseTree });
+  assert.deepEqual(requestedPaths, [
+    `repos/owner/repo/compare/${baseTip}...${head}`,
+    `repos/owner/repo/git/commits/${mergeBase}`,
+  ]);
+  assert.throws(
+    () =>
+      resolvePullMergeBase(
+        config,
+        { base: { sha: baseTip }, head: { sha: head } },
+        { ghApiJson: () => ({ merge_base_commit: { sha: "invalid" } }) },
+      ),
+    /no exact merge base/,
+  );
 });
 
 test("cached no-mistakes results resume only a passing gate", () => {
