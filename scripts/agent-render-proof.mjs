@@ -112,26 +112,45 @@ export function evaluateRenderHealth(check, response, body, elapsedMs) {
   };
 }
 
-function renderJson(args, dependencies = {}) {
-  const execute = dependencies.runCommand ?? runCommand;
-  const result = execute("render", [...args, "-o", "json", "--confirm"], {
-    env: dependencies.env ?? process.env,
-    maxBuffer: 8 * 1024 * 1024
-  });
-  try {
-    return JSON.parse(result.stdout);
-  } catch {
-    throw new AgentError("Render CLI returned invalid JSON", 1);
+async function withRenderReadRetry(operation, dependencies = {}) {
+  const wait = dependencies.sleep ?? sleep;
+  const delays = dependencies.renderRetryDelaysMs ?? [0, 2_000, 5_000];
+  let lastError;
+  for (let attempt = 0; attempt < delays.length; attempt += 1) {
+    if (delays[attempt] > 0) await wait(delays[attempt]);
+    try {
+      return operation();
+    } catch (error) {
+      lastError = error;
+    }
   }
+  throw lastError;
 }
 
-function renderLogRecords(args, dependencies = {}) {
+async function renderJson(args, dependencies = {}) {
   const execute = dependencies.runCommand ?? runCommand;
-  const result = execute("render", [...args, "-o", "json", "--confirm"], {
-    env: dependencies.env ?? process.env,
-    maxBuffer: 8 * 1024 * 1024
-  });
-  return parseRenderLogStream(result.stdout);
+  return withRenderReadRetry(() => {
+    const result = execute("render", [...args, "-o", "json", "--confirm"], {
+      env: dependencies.env ?? process.env,
+      maxBuffer: 8 * 1024 * 1024
+    });
+    try {
+      return JSON.parse(result.stdout);
+    } catch {
+      throw new AgentError("Render CLI returned invalid JSON", 1);
+    }
+  }, dependencies);
+}
+
+async function renderLogRecords(args, dependencies = {}) {
+  const execute = dependencies.runCommand ?? runCommand;
+  return withRenderReadRetry(() => {
+    const result = execute("render", [...args, "-o", "json", "--confirm"], {
+      env: dependencies.env ?? process.env,
+      maxBuffer: 8 * 1024 * 1024
+    });
+    return parseRenderLogStream(result.stdout);
+  }, dependencies);
 }
 
 function safeTimestamp(value, label) {
@@ -184,7 +203,7 @@ export async function verifyRenderDeployment(
   if (expectedSha && !/^[a-f0-9]{40}$/i.test(expectedSha)) {
     throw new AgentError("expected Render commit SHA is invalid", 2);
   }
-  const services = renderJson(["services"], dependencies);
+  const services = await renderJson(["services"], dependencies);
   const service = selectRenderService(services, config.render.serviceName);
   if (service.serviceDetails?.url !== config.render.serviceUrl) {
     throw new AgentError("Render service URL does not match trusted configuration", 1);
@@ -195,7 +214,7 @@ export async function verifyRenderDeployment(
   let deploy = null;
   do {
     deploy = findRenderDeploy(
-      renderJson(["deploys", "list", service.id], dependencies),
+      await renderJson(["deploys", "list", service.id], dependencies),
       expectedSha
     );
     if (deploy?.status === "live" || FAILURE_STATUSES.has(deploy?.status)) break;
@@ -245,7 +264,7 @@ export async function verifyRenderDeployment(
   let logs = summarizeRenderLogs([]);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     logs = summarizeRenderLogs(
-      renderLogRecords(
+      await renderLogRecords(
         [
           "logs",
           "-r",

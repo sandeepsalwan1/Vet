@@ -172,6 +172,27 @@ test("trusted Render proof probes health before requiring runtime logs", async (
   assert.equal(healthProbed, true);
 });
 
+test("trusted Render proof retries transient read-only CLI failures", async () => {
+  const base = renderDependencies();
+  let serviceAttempts = 0;
+  const result = await verifyRenderDeployment(
+    { config, expectedSha: sha },
+    {
+      ...base,
+      renderRetryDelaysMs: [0, 0, 0],
+      runCommand(command, args) {
+        if (args[0] === "services" && serviceAttempts++ === 0) {
+          throw new Error("transient Render API failure");
+        }
+        return base.runCommand(command, args);
+      }
+    }
+  );
+
+  assert.equal(result.status, "passed");
+  assert.equal(serviceAttempts, 2);
+});
+
 test("tenant health fails when the public hostname resolves another clinic", () => {
   const check = config.render.healthChecks[0];
   const result = evaluateRenderHealth(
