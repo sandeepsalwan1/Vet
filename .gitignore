@@ -64,6 +64,8 @@ dist
 /plan.md
 /docs/.local/
 /.artifacts/
+__pycache__/
+*.pyc
 
 # Vendor outreach material (policy: outreach history stays out of repo)
 /pims-outreach.md
