@@ -15,6 +15,7 @@ import {
   structuredProofKind,
   untrustedCodeEnvironment,
   validateArtifactUrl,
+  validateVisualBehaviorPlan,
   visualServerCommand
 } from "./agent-proof.mjs";
 
@@ -184,6 +185,79 @@ test("explicit visual route is local, static, and normalized", () => {
   assert.throws(() => deriveAffectedRoutes([], "/api/tasks"), /unsafe or non-UI/);
 });
 
+test("visual behavior plan covers every sealed clause and GIF transition", () => {
+  const behaviorContract = {
+    target: { kind: "web" },
+    captureBeforeAction: true,
+    checks: [
+      { id: "AC1", statement: "Loading is visible." },
+      { id: "AC2", statement: "The page completes." }
+    ]
+  };
+  const proofPlan = {
+    version: 1,
+    tasks: [
+      {
+        clauseIds: ["AC1", "AC2"],
+        route: "/proof/loading",
+        actions: [{ type: "navigate", path: "/proof/loading" }],
+        intermediateAssertions: [
+          { type: "visible", selector: "[data-agent-proof-state='loading']" }
+        ],
+        finalAssertions: [
+          { type: "visible", selector: "[data-agent-proof-state='complete']" }
+        ]
+      }
+    ]
+  };
+
+  assert.equal(
+    validateVisualBehaviorPlan({
+      proofKind: "GIF",
+      routes: ["/proof/loading"],
+      behaviorContract,
+      proofPlan
+    }),
+    proofPlan
+  );
+  assert.throws(
+    () =>
+      validateVisualBehaviorPlan({
+        proofKind: "GIF",
+        routes: ["/proof/loading"],
+        behaviorContract,
+        proofPlan: {
+          ...proofPlan,
+          tasks: [
+            {
+              ...proofPlan.tasks[0],
+              clauseIds: ["AC1"]
+            }
+          ]
+        }
+      }),
+    /does not cover sealed clauses: AC2/
+  );
+  assert.throws(
+    () =>
+      validateVisualBehaviorPlan({
+        proofKind: "GIF",
+        routes: ["/proof/loading"],
+        behaviorContract,
+        proofPlan: {
+          ...proofPlan,
+          tasks: [
+            {
+              ...proofPlan.tasks[0],
+              intermediateAssertions: []
+            }
+          ]
+        }
+      }),
+    /no intermediate assertion/
+  );
+});
+
 test("successful proof never clears a shared blocked label", () => {
   const passing = proofLabelChanges(config, "passed");
   const failing = proofLabelChanges(config, "failed");
@@ -333,6 +407,56 @@ test("fresh finalizer trusts job conclusion, not a forged local success outcome"
   );
 });
 
+test("service proof requires both disposable checks and trusted Blueprint validation", () => {
+  const request = {
+    kind: "pr",
+    number: 12,
+    requested: true,
+    proofKind: "service",
+    routes: [],
+    sha: "a".repeat(40),
+    checkoutRef: "a".repeat(40)
+  };
+  const serviceOutcome = {
+    terminal: true,
+    result: {
+      proofKind: "service",
+      status: "passed",
+      commands: ["npm run db:migrate", "npm run build"],
+      artifactPaths: [],
+      artifactDigests: [],
+      provider: "github-actions",
+      leaseId: "",
+      summary: "service proof passed",
+      blocker: ""
+    }
+  };
+  const passing = resolveTerminalResult({
+    request,
+    remoteOutcome: null,
+    remoteJobResult: "skipped",
+    localOutcome: null,
+    localJobResult: "skipped",
+    serviceOutcome,
+    serviceJobResult: "success",
+    serviceConfigJobResult: "success"
+  });
+  assert.equal(passing.status, "passed");
+
+  const failed = resolveTerminalResult({
+    request,
+    remoteOutcome: null,
+    remoteJobResult: "skipped",
+    localOutcome: null,
+    localJobResult: "skipped",
+    serviceOutcome,
+    serviceJobResult: "success",
+    serviceConfigJobResult: "failure"
+  });
+  assert.equal(failed.status, "failed");
+  assert.match(failed.summary, /Blueprint/);
+});
+
 test("terminal marker preserves terminal failure detail for status finalization", () => {
   const marker = terminalMarker(
     {
@@ -349,6 +473,10 @@ test("terminal marker preserves terminal failure detail for status finalization"
 
 test("proof workflow dispatches automerge only after terminal success is published", () => {
   const workflow = readFileSync(new URL("../.github/workflows/agent-proof.yml", import.meta.url), "utf8");
+  const crabboxAction = readFileSync(
+    new URL("../.github/actions/setup-crabbox/action.yml", import.meta.url),
+    "utf8"
+  );
   const finalizeJob = workflow.slice(workflow.indexOf("\n  finalize:"));
   const statusIndex = workflow.indexOf("gh api \"repos/$GITHUB_REPOSITORY/statuses/$STATUS_SHA\"");
   const dispatchIndex = workflow.indexOf("gh workflow run agent-automerge.yml");
@@ -356,9 +484,20 @@ test("proof workflow dispatches automerge only after terminal success is publish
   assert.ok(statusIndex >= 0);
   assert.ok(dispatchIndex > statusIndex);
   assert.match(finalizeJob, /pull-requests: write/);
-  assert.match(workflow, /v0\.40\.0/);
-  assert.match(workflow, /crabbox_0\.40\.0_linux_amd64\.tar\.gz/);
-  assert.doesNotMatch(workflow, /0\.38\.4/);
+  assert.match(workflow, /uses: \.\/trusted\/\.github\/actions\/setup-crabbox/);
+  assert.match(workflow, /name: disposable service proof/);
+  assert.match(
+    workflow,
+    /image: pgvector\/pgvector:0\.8\.5-pg17@sha256:[a-f0-9]{64}/
+  );
+  assert.match(workflow, /create role anon nologin/);
+  assert.match(workflow, /create role authenticated nologin/);
+  assert.match(workflow, /--execute-service/);
+  assert.match(workflow, /uses: \.\/trusted\/\.github\/actions\/setup-render/);
+  assert.match(workflow, /agent-render-blueprint\.mjs/);
+  assert.match(crabboxAction, /v0\.40\.0/);
+  assert.match(crabboxAction, /crabbox_0\.40\.0_linux_amd64\.tar\.gz/);
+  assert.doesNotMatch(`${workflow}\n${crabboxAction}`, /0\.38\.4/);
   assert.match(workflow, /steps\.terminal\.outputs\.state == 'success'/);
   assert.match(workflow, /artifact_url: \$\{\{ steps\.artifact\.outputs\.artifact-url \}\}/);
   assert.match(workflow, /--artifact-url "\$ARTIFACT_URL"/);

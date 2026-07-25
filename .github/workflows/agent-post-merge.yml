@@ -1,0 +1,102 @@
+name: Agent Post-Merge Verification
+run-name: Agent Post-Merge ${{ inputs.merge-sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        required: true
+        type: number
+      source-issue:
+        required: true
+        type: number
+      merge-sha:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-post-merge-render
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Render deploy, logs, and health
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate exact merged target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          SOURCE_ISSUE: ${{ inputs.source-issue }}
+          MERGE_SHA: ${{ inputs.merge-sha }}
+        run: |
+          set -euo pipefail
+          [[ "$MERGE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          pull_json="$RUNNER_TEMP/agent-post-merge-pull.json"
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > "$pull_json"
+          actual_merge="$(jq -r .merge_commit_sha "$pull_json")"
+          actual_source="$(
+            PULL_JSON="$pull_json" node --input-type=module -e '
+              import { readFileSync } from "node:fs";
+              import { parseImplementationMetadata } from "./scripts/agent-lib.mjs";
+              const pull = JSON.parse(readFileSync(process.env.PULL_JSON, "utf8"));
+              process.stdout.write(String(parseImplementationMetadata(pull.body).sourceIssue));
+            '
+          )"
+          test "$actual_merge" = "$MERGE_SHA"
+          test "$actual_source" = "$SOURCE_ISSUE"
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$MERGE_SHA" -X POST \
+            -f state=pending \
+            -f context=agent-post-merge \
+            -f description="trusted Render verification started" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+      - name: Install pinned Render CLI
+        id: render_cli
+        continue-on-error: true
+        uses: ./.github/actions/setup-render
+      - name: Verify exact Render deployment
+        id: verify_render
+        continue-on-error: true
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          MERGE_SHA: ${{ inputs.merge-sha }}
+        run: |
+          node scripts/agent-render-proof.mjs \
+            --expected-sha "$MERGE_SHA" \
+            --output-file "$RUNNER_TEMP/agent-render-proof.json" \
+            --json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-post-merge-${{ inputs.pr-number }}
+          path: ${{ runner.temp }}/agent-render-proof.json
+          if-no-files-found: warn
+      - name: Publish post-merge result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFY_CONCLUSION: ${{ steps.verify_render.outcome }}
+        run: |
+          node scripts/agent-post-merge.mjs \
+            --pr-number "${{ inputs.pr-number }}" \
+            --source-issue "${{ inputs.source-issue }}" \
+            --merge-sha "${{ inputs.merge-sha }}" \
+            --render-record "$RUNNER_TEMP/agent-render-proof.json" \
+            --verification-conclusion "$VERIFY_CONCLUSION" \
+            --json

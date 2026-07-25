@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 import {
   AgentError,
   assertTrustedAgentPull,
-  extractJson,
   fail,
   finish,
   getIssueComments,
@@ -24,6 +23,10 @@ import {
   skipsNoMistakesForCost,
   upsertManagedComment
 } from "./agent-lib.mjs";
+import {
+  intentCapsuleForManagedTriage,
+  parseImplementationAddendum
+} from "./agent-intent.mjs";
 
 function newest(items, timestampFields) {
   return [...items].sort((left, right) => {
@@ -219,13 +222,17 @@ export function conflictRecoveryDispatchArgs(issueNumber, config) {
   ];
 }
 
-export function postMergeDispatchArgs(config, mergeSha) {
+export function postMergeDispatchArgs(
+  config,
+  mergeSha,
+  { prNumber = null, sourceIssue = null } = {}
+) {
   if (!/^[a-f0-9]{40}$/.test(String(mergeSha ?? ""))) {
     throw new AgentError("post-merge commit SHA is invalid", 1);
   }
   const repo = repoSlug(config);
   const common = ["--repo", repo, "--ref", config.repo.defaultBranch];
-  return [
+  const dispatches = [
     ["workflow", "run", "ci.yml", ...common, "-f", `main-sha=${mergeSha}`],
     [
       "workflow",
@@ -238,6 +245,21 @@ export function postMergeDispatchArgs(config, mergeSha) {
       `candidate-ref=refs/heads/${config.repo.defaultBranch}`
     ]
   ];
+  if (Number.isInteger(prNumber) && prNumber > 0 && Number.isInteger(sourceIssue) && sourceIssue > 0) {
+    dispatches.push([
+      "workflow",
+      "run",
+      "agent-post-merge.yml",
+      ...common,
+      "-f",
+      `pr-number=${prNumber}`,
+      "-f",
+      `source-issue=${sourceIssue}`,
+      "-f",
+      `merge-sha=${mergeSha}`
+    ]);
+  }
+  return dispatches;
 }
 
 export function postMergeRunName(workflow, mergeSha) {
@@ -246,12 +268,19 @@ export function postMergeRunName(workflow, mergeSha) {
   }
   if (workflow === "ci.yml") return `CI ${mergeSha}`;
   if (workflow === "codeql.yml") return `CodeQL ${mergeSha}`;
+  if (workflow === "agent-post-merge.yml") return `Agent Post-Merge ${mergeSha}`;
   throw new AgentError(`unsupported post-merge workflow ${workflow}`, 1);
 }
 
-export function dispatchPostMergeChecks({ config, mergeSha }, dependencies = {}) {
+export function dispatchPostMergeChecks(
+  { config, mergeSha, prNumber = null, sourceIssue = null },
+  dependencies = {}
+) {
   const execute = dependencies.runCommand ?? runCommand;
-  const dispatches = postMergeDispatchArgs(config, mergeSha);
+  const dispatches = postMergeDispatchArgs(config, mergeSha, {
+    prNumber,
+    sourceIssue
+  });
   const dispatchErrors = [];
   for (const args of dispatches) {
     try {
@@ -269,7 +298,13 @@ export function dispatchPostMergeChecks({ config, mergeSha }, dependencies = {})
 }
 
 export function reconcilePostMergeChecks(
-  { config, mergeSha, dryRun = false },
+  {
+    config,
+    mergeSha,
+    prNumber = null,
+    sourceIssue = null,
+    dryRun = false
+  },
   dependencies = {}
 ) {
   const execute = dependencies.runCommand ?? runCommand;
@@ -282,7 +317,10 @@ export function reconcilePostMergeChecks(
       );
       return (Array.isArray(pages) ? pages : [pages]).flatMap((page) => page?.workflow_runs ?? []);
     });
-  const dispatches = postMergeDispatchArgs(config, mergeSha);
+  const dispatches = postMergeDispatchArgs(config, mergeSha, {
+    prNumber,
+    sourceIssue
+  });
   const missing = [];
   const existing = [];
   const dispatchErrors = [];
@@ -452,43 +490,6 @@ export async function recoverStaleBase(
   };
 }
 
-function triageDecision(comments, marker, repoOwner) {
-  const comment = newestManagedComment(comments, marker, repoOwner);
-  if (!comment) throw new AgentError("source issue has no trusted managed triage", 1);
-  const afterMarker = String(comment.body).slice(String(comment.body).indexOf(marker) + marker.length);
-  const fences = [...afterMarker.matchAll(/```json\s*([\s\S]*?)```/gi)];
-  if (fences.length !== 1) throw new AgentError("managed triage must contain exactly one decision JSON block", 1);
-  const decision = extractJson(fences[0][1]);
-  const expectedKeys = [
-    "alignment",
-    "automationDecision",
-    "humanQuestion",
-    "implementationScope",
-    "issueSnapshotSha256",
-    "priority",
-    "proofNeeded",
-    "risk",
-    "value"
-  ];
-  if (
-    !decision ||
-    Array.isArray(decision) ||
-    JSON.stringify(Object.keys(decision).sort()) !== JSON.stringify(expectedKeys) ||
-    !["low", "medium", "high"].includes(decision.value) ||
-    !["yes", "no", "unclear"].includes(decision.alignment) ||
-    !["low", "medium", "high"].includes(decision.priority) ||
-    !["low", "medium", "high"].includes(decision.risk) ||
-    !["none", "CI", "UI", "GIF"].includes(decision.proofNeeded) ||
-    !["implement", "manual-review", "blocked", "reject"].includes(decision.automationDecision) ||
-    typeof decision.implementationScope !== "string" ||
-    typeof decision.humanQuestion !== "string" ||
-    !/^[a-f0-9]{64}$/.test(String(decision.issueSnapshotSha256 ?? ""))
-  ) {
-    throw new AgentError("managed triage JSON is invalid", 1);
-  }
-  return decision;
-}
-
 function includesClosingReference(body, issueNumber) {
   const escaped = String(issueNumber).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s+#${escaped}\\b`, "i").test(String(body ?? ""));
@@ -588,13 +589,46 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
 
   if (!sourceIssue || sourceIssue.state !== "open") policyBlockers.push("source issue must be open");
   try {
-    triage = triageDecision(sourceComments, config.comments.triage, config.repo.owner);
+    const triageComment = newestManagedComment(
+      sourceComments,
+      config.comments.triage,
+      config.repo.owner
+    );
+    if (!triageComment) {
+      throw new AgentError("source issue has no trusted managed triage", 1);
+    }
+    const context = intentCapsuleForManagedTriage({
+      issue: sourceIssue,
+      comments: sourceComments,
+      triageComment,
+      marker: config.comments.triage,
+      repoOwner: config.repo.owner
+    });
+    triage = context.decision;
+    if (metadata?.intentDigest) {
+      const implementationAddendum = parseImplementationAddendum(pull.body);
+      if (
+        context.capsule.intentDigest !== metadata.intentDigest ||
+        implementationAddendum.digest !== metadata.implementationAddendumDigest
+      ) {
+        throw new AgentError(
+          "automerge intent context does not match immutable implementation metadata",
+          1
+        );
+      }
+    }
   } catch (error) {
     policyBlockers.push(error.message);
   }
   if (triage) {
     if (metadata && triage.issueSnapshotSha256 !== metadata.issueSnapshotSha256) {
       policyBlockers.push("source triage snapshot does not match implementation metadata");
+    }
+    if (
+      metadata?.intentDigest &&
+      triage.intentDigest !== metadata.intentDigest
+    ) {
+      policyBlockers.push("source triage intent does not match implementation metadata");
     }
     if (sourceIssue && triage.issueSnapshotSha256 !== issueSnapshotSha256(sourceIssue)) {
       policyBlockers.push("source issue changed after trusted triage");
@@ -647,7 +681,8 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
     prLabels.includes(config.labels.proof) ||
     sourceLabels.includes(config.labels.proof) ||
     triage?.proofNeeded === "UI" ||
-    triage?.proofNeeded === "GIF";
+    triage?.proofNeeded === "GIF" ||
+    triage?.proofNeeded === "service";
   if (proofRequested) {
     const state = statusState(combined?.statuses ?? [], config.automerge.proofStatus, config);
     if (state !== "success") gateBlockers.push(`${config.automerge.proofStatus} status ${state}`);
@@ -763,6 +798,66 @@ export function closeIssueArgs(number, config) {
     "state=closed",
     "--silent"
   ];
+}
+
+export function addLabelArgs(number, config, label) {
+  return [
+    "issue",
+    "edit",
+    String(number),
+    "--repo",
+    repoSlug(config),
+    "--add-label",
+    label
+  ];
+}
+
+export function openIssueArgs(number, config) {
+  return [
+    "api",
+    `repos/${config.repo.owner}/${config.repo.name}/issues/${number}`,
+    "--method",
+    "PATCH",
+    "-f",
+    "state=open",
+    "--silent"
+  ];
+}
+
+export function holdPostMergeDispatchFailure(
+  { config, decision, dryRun = false },
+  dependencies = {}
+) {
+  const sourceIssue = Number(decision.metadata?.sourceIssue);
+  if (!Number.isInteger(sourceIssue) || sourceIssue <= 0) {
+    return {
+      ok: false,
+      actions: [],
+      errors: ["implementation source issue is invalid"]
+    };
+  }
+  const actions = [
+    addLabelArgs(sourceIssue, config, config.labels.postMergeFailed),
+    addLabelArgs(sourceIssue, config, config.labels.blocked),
+    openIssueArgs(sourceIssue, config)
+  ];
+  if (dryRun) return { ok: true, dryRun: true, actions, errors: [] };
+  const execute = dependencies.runCommand ?? runCommand;
+  const errors = [];
+  for (const args of actions) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        execute("gh", args);
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (lastError) errors.push(lastError?.message ?? String(lastError));
+  }
+  return { ok: errors.length === 0, actions, errors };
 }
 
 export function closeAgentLoop(
@@ -962,7 +1057,12 @@ export function settleAutomerge(
         throw new AgentError("could not resolve the trusted post-merge commit", 1);
       }
       postMerge = dispatchPostMergeChecks(
-        { config, mergeSha },
+        {
+          config,
+          mergeSha,
+          prNumber,
+          sourceIssue: Number(decision.metadata?.sourceIssue)
+        },
         { runCommand: execute }
       );
     } catch (error) {
@@ -974,20 +1074,35 @@ export function settleAutomerge(
       };
     }
   }
-  const cleanup = closeAgentLoop(
-    { config, prNumber, decision, dryRun },
-    { runCommand: execute, getIssue: dependencies.getIssue }
-  );
-  if (!postMerge.ok || !cleanup.ok) {
-    const failures = [];
-    if (!postMerge.ok) failures.push("post-merge check dispatch failed");
-    if (!cleanup.ok) failures.push("loop cleanup failed");
+  if (!postMerge.ok) {
+    const hold = holdPostMergeDispatchFailure(
+      { config, decision, dryRun },
+      { runCommand: execute }
+    );
     return {
       code: 1,
       result: {
         ok: false,
         merged: !dryRun,
-        message: `${dryRun ? "would merge" : "merged"} PR #${prNumber}, but ${failures.join(" and ")}`,
+        message: `${dryRun ? "would merge" : "merged"} PR #${prNumber}, but post-merge check dispatch failed`,
+        decision,
+        postMerge,
+        hold,
+        cleanup: null
+      }
+    };
+  }
+  const cleanup = closeAgentLoop(
+    { config, prNumber, decision, dryRun },
+    { runCommand: execute, getIssue: dependencies.getIssue }
+  );
+  if (!cleanup.ok) {
+    return {
+      code: 1,
+      result: {
+        ok: false,
+        merged: !dryRun,
+        message: `${dryRun ? "would merge" : "merged"} PR #${prNumber}, but loop cleanup failed`,
         decision,
         postMerge,
         cleanup
@@ -1016,7 +1131,13 @@ export function reconcileMergedAgentPull(
     closingReferences
   });
   const postMerge = reconcilePostMergeChecks(
-    { config, mergeSha: pull.merge_commit_sha, dryRun },
+    {
+      config,
+      mergeSha: pull.merge_commit_sha,
+      prNumber,
+      sourceIssue: metadata.sourceIssue,
+      dryRun
+    },
     dependencies
   );
   const cleanup = closeAgentLoop(

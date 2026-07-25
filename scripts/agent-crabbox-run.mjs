@@ -23,13 +23,39 @@ import {
   runCommand,
   secretState
 } from "./agent-lib.mjs";
+import { BROWSER_BEHAVIOR_MARKER } from "./agent-browser-behavior.mjs";
 
 const VISUAL_LANES = new Set(["visualProof", "gifProof"]);
+const FALLBACK_READINESS_LANE = "fallbackReadinessRemote";
+const REMOTE_COMMAND_STARTED_MARKER = "AGENT_CRABBOX_REMOTE_COMMAND_STARTED_V1";
 const LOCAL_CONTAINER_VISUAL_IMAGE =
   "node:22-bookworm@sha256:5647be709086c696ff32edaaf1c70cd26d1da6ab2b39c32f3c7b4c4a31957e37";
-const IMPLEMENTATION_OUTPUT_MARKER = "AGENT_CRABBOX_IMPLEMENTATION_OUTPUT_V1 ";
-const MAX_IMPLEMENTATION_OUTPUT_BYTES = 2_500_000;
-const IMPLEMENTATION_OUTPUT_FILES = ["codex.patch", "implementation.md"];
+const DELEGATED_OUTPUTS = new Map([
+  [
+    "implementRemote",
+    {
+      marker: "AGENT_CRABBOX_IMPLEMENTATION_OUTPUT_V1 ",
+      files: ["codex.patch", "implementation.md", "model-usage.json"],
+    },
+  ],
+  [
+    "reviewRemote",
+    {
+      marker: "AGENT_CRABBOX_REVIEW_OUTPUT_V1 ",
+      files: ["review.json", "review.patch", "model-usage.json"],
+      allowEmptyFiles: ["review.patch"],
+    },
+  ],
+  [
+    "noMistakesRemote",
+    {
+      marker: "AGENT_CRABBOX_NO_MISTAKES_OUTPUT_V1 ",
+      files: ["result.json", "model-usage.json"],
+      optionalFiles: ["fix.patch"],
+    },
+  ],
+]);
+const MAX_DELEGATED_OUTPUT_BYTES = 2_500_000;
 
 function redactSecrets(text, config, env = process.env) {
   let redacted = String(text ?? "");
@@ -87,7 +113,7 @@ export function parseTimingReport(output) {
   return null;
 }
 
-export function selectCrabboxProvider(config, lane, env = process.env) {
+export function selectCrabboxProviders(config, lane, env = process.env) {
   const visual = VISUAL_LANES.has(lane);
   const auth = secretState(
     [config.secrets.crabboxCoordinator, ...config.secrets.crabboxProviders, ...config.secrets.vercel],
@@ -106,30 +132,48 @@ export function selectCrabboxProvider(config, lane, env = process.env) {
     credentialFreeVisualFallback === "local-container" &&
     config.crabbox?.visualProviders?.includes(credentialFreeVisualFallback);
 
-  if (visual) {
-    if (hasReadyHetzner) return { available: true, provider: "hetzner", auth };
-    if (hasCredentialFreeVisualFallback) {
-      return { available: true, provider: credentialFreeVisualFallback, auth };
-    }
-    return {
-      available: false,
-      provider: "",
-      reason:
-        env[hetznerReadyName] === "true"
-          ? "ready Hetzner visual provider is missing its required auth"
-          : "Hetzner visual provider has not passed its live readiness smoke",
-      auth
-    };
+  if (lane === FALLBACK_READINESS_LANE) {
+    return hasCredentialFreeVisualFallback
+      ? [{ available: true, provider: credentialFreeVisualFallback, auth }]
+      : [];
   }
-  if (hasVercel) return { available: true, provider: "vercel-sandbox", auth };
-  if (hasReadyHetzner) return { available: true, provider: "hetzner", auth };
+  if (visual) {
+    return [
+      ...(hasReadyHetzner ? [{ available: true, provider: "hetzner", auth }] : []),
+      ...(hasCredentialFreeVisualFallback
+        ? [{ available: true, provider: credentialFreeVisualFallback, auth }]
+        : [])
+    ];
+  }
+  return [
+    ...(hasVercel ? [{ available: true, provider: "vercel-sandbox", auth }] : []),
+    ...(hasReadyHetzner ? [{ available: true, provider: "hetzner", auth }] : [])
+  ];
+}
+
+export function selectCrabboxProvider(config, lane, env = process.env) {
+  const candidates = selectCrabboxProviders(config, lane, env);
+  if (candidates.length) return candidates[0];
+  const visual = VISUAL_LANES.has(lane);
+  const auth = secretState(
+    [config.secrets.crabboxCoordinator, ...config.secrets.crabboxProviders, ...config.secrets.vercel],
+    env
+  );
+  const vercelReadyName = config.crabbox?.readiness?.vercel ?? "CRABBOX_VERCEL_READY";
+  const hetznerReadyName = config.crabbox?.readiness?.hetzner ?? "CRABBOX_HETZNER_READY";
   return {
     available: false,
     provider: "",
     reason:
-      env[vercelReadyName] === "true" || env[hetznerReadyName] === "true"
-        ? "ready non-visual Crabbox provider is missing its required auth"
-        : "no non-visual Crabbox provider has passed its live readiness smoke",
+      lane === FALLBACK_READINESS_LANE
+        ? "credential-free Crabbox fallback is not configured"
+        : visual
+          ? env[hetznerReadyName] === "true"
+            ? "ready Hetzner visual provider is missing its required auth"
+            : "no visual Crabbox provider is configured"
+          : env[vercelReadyName] === "true" || env[hetznerReadyName] === "true"
+            ? "ready non-visual Crabbox provider is missing its required auth"
+            : "no non-visual Crabbox provider has passed its live readiness smoke",
     auth
   };
 }
@@ -173,7 +217,7 @@ export function providerChildEnvironment(config, { provider, lane }, source = pr
   if (coordinatorProviders.has(provider)) {
     copyEnvironmentNames(child, source, [config.secrets?.crabboxCoordinator]);
   }
-  if (lane === "implementRemote") {
+  if (DELEGATED_OUTPUTS.has(lane)) {
     copyEnvironmentNames(child, source, ["CODEX_API_KEY"]);
   }
   return child;
@@ -246,7 +290,17 @@ function hasMediaSignature(kind, path) {
 
 export function validateRouteBinding(
   path,
-  { bundleDir, provider, leaseId, proofKind, route, launchMarker, launchEvidence }
+  {
+    bundleDir,
+    provider,
+    leaseId,
+    proofKind,
+    route,
+    launchMarker,
+    launchEvidence,
+    behaviorRequired = false,
+    behaviorStatus = ""
+  }
 ) {
   const bindingPath = validateRegularArtifact(path, bundleDir, "route binding");
   let binding;
@@ -264,6 +318,10 @@ export function validateRouteBinding(
     binding?.launchStatus !== 0 ||
     binding?.desktopDoctorStatus !== 0 ||
     binding?.computerUseStatus !== 0 ||
+    (behaviorRequired &&
+      (binding?.behaviorRequired !== true ||
+        binding?.behaviorStatus !== behaviorStatus ||
+        !binding?.behaviorReportPath)) ||
     (proofKind === "GIF" && binding?.captureStartedBeforeLaunch !== true)
   ) {
     throw new AgentError("Crabbox route binding does not match the captured route and lease", 1);
@@ -273,7 +331,18 @@ export function validateRouteBinding(
 
 export function validateCollectedArtifacts(
   bundle,
-  { provider, leaseId, proofKind, bundleDir, route, routeBindingPath, launchMarker, launchEvidence }
+  {
+    provider,
+    leaseId,
+    proofKind,
+    bundleDir,
+    route,
+    routeBindingPath,
+    launchMarker,
+    launchEvidence,
+    behaviorRequired = false,
+    behaviorStatus = ""
+  }
 ) {
   if (!bundle || typeof bundle !== "object") throw new AgentError("Crabbox artifact collection did not emit JSON", 1);
   if (bundle.metadata?.provider !== provider || bundle.metadata?.leaseId !== leaseId) {
@@ -290,7 +359,9 @@ export function validateCollectedArtifacts(
     proofKind,
     route,
     launchMarker,
-    launchEvidence
+    launchEvidence,
+    behaviorRequired,
+    behaviorStatus
   });
   const files = Array.isArray(bundle.files) ? bundle.files : [];
   const validated = [];
@@ -316,23 +387,49 @@ export function validateCollectedArtifacts(
   return [binding, ...validated];
 }
 
-export function buildRunArgs({ provider, command, visual, lane, leasePath, noSync = false }) {
+function remoteRelativePath(value, label, allowDot = false) {
+  const path = String(value ?? "").trim();
+  if (
+    (!allowDot && !path) ||
+    (allowDot && !path) ||
+    isAbsolute(path) ||
+    path.includes("\\") ||
+    /^[A-Za-z]:/.test(path) ||
+    path.split("/").some((segment) => segment === ".." || segment === "")
+  ) {
+    throw new AgentError(`invalid Crabbox ${label}`, 2);
+  }
+  if (path === "." && !allowDot) {
+    throw new AgentError(`invalid Crabbox ${label}`, 2);
+  }
+  return path;
+}
+
+export function buildRunArgs({
+  provider,
+  command,
+  visual,
+  lane,
+  leasePath,
+  noSync = false,
+  remoteHarnessPath = "scripts/agent-crabbox-run.mjs",
+  remoteOutputPath = "."
+}) {
   const args = ["run", "--provider", provider, "--timing-json", "--timing-record", "off"];
-  let remoteCommand = command;
-  if (visual && provider === "local-container") args.push("--local-container-image", LOCAL_CONTAINER_VISUAL_IMAGE);
+  let remoteCommand =
+    `agent_crabbox_root="$PWD"; printf '${REMOTE_COMMAND_STARTED_MARKER}\\n' && ` +
+    `( ${command} )`;
+  if (provider === "local-container") args.push("--local-container-image", LOCAL_CONTAINER_VISUAL_IMAGE);
   if (noSync) args.push("--no-sync");
-  if (lane === "implementRemote") {
+  const delegated = DELEGATED_OUTPUTS.get(lane);
+  if (delegated) {
+    const harness = remoteRelativePath(remoteHarnessPath, "remote harness path");
+    const output = remoteRelativePath(remoteOutputPath, "remote output path", true);
     args.push("--allow-env", "CODEX_API_KEY");
-    if (provider === "vercel-sandbox") {
-      remoteCommand = `${command} && node scripts/agent-crabbox-run.mjs --emit-implementation-output`;
-    } else {
-      args.push(
-        "--download",
-        ".agent-output/codex.patch=.agent-output/codex.patch",
-        "--download",
-        ".agent-output/implementation.md=.agent-output/implementation.md"
-      );
-    }
+    remoteCommand =
+      `${remoteCommand} && AGENT_TARGET_ROOT="$agent_crabbox_root/${output}" ` +
+      `node "$agent_crabbox_root/${harness}" --emit-output-lane ${lane} ` +
+      `--output-workdir "$agent_crabbox_root/${output}"`;
   }
   if (visual) {
     args.push("--desktop", "--browser", "--keep", "--keep-on-failure");
@@ -344,34 +441,46 @@ export function buildRunArgs({ provider, command, visual, lane, leasePath, noSyn
   return args;
 }
 
-export function emitImplementationOutput(workdir = repoRoot()) {
+export function emitDelegatedOutput(lane, workdir = repoRoot()) {
+  const delegated = DELEGATED_OUTPUTS.get(lane);
+  if (!delegated) throw new AgentError(`unsupported delegated output lane: ${lane}`, 2);
   const files = {};
   let totalBytes = 0;
-  for (const name of IMPLEMENTATION_OUTPUT_FILES) {
+  for (const name of [
+    ...delegated.files,
+    ...(delegated.optionalFiles ?? []),
+  ]) {
     const path = join(workdir, ".agent-output", name);
     let info;
     try {
       info = lstatSync(path);
     } catch {
-      throw new AgentError(`Crabbox implementation output is missing: ${path}`, 1);
+      if (delegated.optionalFiles?.includes(name)) continue;
+      throw new AgentError(`Crabbox ${lane} output is missing: ${path}`, 1);
     }
-    if (!info.isFile() || info.isSymbolicLink() || info.size <= 0) {
-      throw new AgentError(`Crabbox implementation output is not a nonempty regular file: ${path}`, 1);
+    const allowEmpty = delegated.allowEmptyFiles?.includes(name);
+    if (!info.isFile() || info.isSymbolicLink() || (!allowEmpty && info.size <= 0)) {
+      throw new AgentError(
+        `Crabbox ${lane} output is not a valid regular file: ${path}`,
+        1
+      );
     }
     totalBytes += info.size;
-    if (totalBytes > MAX_IMPLEMENTATION_OUTPUT_BYTES) {
-      throw new AgentError("Crabbox implementation output exceeds the delegated handoff limit", 1);
+    if (totalBytes > MAX_DELEGATED_OUTPUT_BYTES) {
+      throw new AgentError(`Crabbox ${lane} output exceeds the delegated handoff limit`, 1);
     }
     files[name] = readFileSync(path).toString("base64");
   }
-  return `${IMPLEMENTATION_OUTPUT_MARKER}${JSON.stringify({ version: 1, files })}`;
+  return `${delegated.marker}${JSON.stringify({ version: 1, lane, files })}`;
 }
 
-export function restoreImplementationOutput(output, workdir = repoRoot()) {
-  const markerIndex = String(output ?? "").lastIndexOf(IMPLEMENTATION_OUTPUT_MARKER);
+export function restoreDelegatedOutput(lane, output, workdir = repoRoot()) {
+  const delegated = DELEGATED_OUTPUTS.get(lane);
+  if (!delegated) throw new AgentError(`unsupported delegated output lane: ${lane}`, 2);
+  const markerIndex = String(output ?? "").lastIndexOf(delegated.marker);
   if (markerIndex === -1) throw new AgentError("Crabbox delegated output has no trusted handoff marker", 1);
   const encoded = String(output)
-    .slice(markerIndex + IMPLEMENTATION_OUTPUT_MARKER.length)
+    .slice(markerIndex + delegated.marker.length)
     .split(/\r?\n/, 1)[0];
   let envelope;
   try {
@@ -381,26 +490,37 @@ export function restoreImplementationOutput(output, workdir = repoRoot()) {
   }
   if (
     envelope?.version !== 1 ||
+    envelope?.lane !== lane ||
     !envelope.files ||
     Array.isArray(envelope.files) ||
-    JSON.stringify(Object.keys(envelope.files).sort()) !== JSON.stringify([...IMPLEMENTATION_OUTPUT_FILES].sort())
+    !delegated.files.every((name) => Object.hasOwn(envelope.files, name)) ||
+    Object.keys(envelope.files).some(
+      (name) =>
+        !delegated.files.includes(name) &&
+        !(delegated.optionalFiles ?? []).includes(name),
+    )
   ) {
     throw new AgentError("Crabbox delegated output handoff has an invalid shape", 1);
   }
 
   let totalBytes = 0;
   const decoded = [];
-  for (const name of IMPLEMENTATION_OUTPUT_FILES) {
+  for (const name of Object.keys(envelope.files).sort()) {
     const value = envelope.files[name];
-    if (typeof value !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+    const allowEmpty = delegated.allowEmptyFiles?.includes(name);
+    if (
+      typeof value !== "string" ||
+      (!allowEmpty && !value) ||
+      (value && !/^[A-Za-z0-9+/]+={0,2}$/.test(value))
+    ) {
       throw new AgentError(`Crabbox delegated ${name} handoff is not canonical base64`, 1);
     }
     const contents = Buffer.from(value, "base64");
-    if (!contents.length || contents.toString("base64") !== value) {
+    if ((!allowEmpty && !contents.length) || contents.toString("base64") !== value) {
       throw new AgentError(`Crabbox delegated ${name} handoff is invalid`, 1);
     }
     totalBytes += contents.length;
-    if (totalBytes > MAX_IMPLEMENTATION_OUTPUT_BYTES) {
+    if (totalBytes > MAX_DELEGATED_OUTPUT_BYTES) {
       throw new AgentError("Crabbox delegated output exceeds the handoff limit", 1);
     }
     decoded.push([name, contents]);
@@ -421,6 +541,14 @@ export function restoreImplementationOutput(output, workdir = repoRoot()) {
     restored.push(path);
   }
   return restored;
+}
+
+export function emitImplementationOutput(workdir = repoRoot()) {
+  return emitDelegatedOutput("implementRemote", workdir);
+}
+
+export function restoreImplementationOutput(output, workdir = repoRoot()) {
+  return restoreDelegatedOutput("implementRemote", output, workdir);
 }
 
 function verifySession(session, timing, provider) {
@@ -521,6 +649,12 @@ export function validateBrowserLaunchOutput(output, route) {
 }
 
 export function browserLaunchArgs({ provider, leaseId, route }) {
+  const url = `http://127.0.0.1:3000${route}`;
+  const browserFlags = [
+    "--remote-debugging-address=127.0.0.1",
+    "--remote-debugging-port=9222",
+    "--no-first-run"
+  ];
   const args = [
     "desktop",
     "launch",
@@ -529,17 +663,38 @@ export function browserLaunchArgs({ provider, leaseId, route }) {
     "--id",
     leaseId,
     "--browser",
-    "--fullscreen",
-    "--url",
-    `http://127.0.0.1:3000${route}`
+    "--fullscreen"
   ];
   if (provider === "local-container") {
-    args.push("--", "/usr/local/bin/crabbox-browser", "--no-sandbox", "--disable-dev-shm-usage");
+    args.push(
+      "--",
+      "/usr/local/bin/crabbox-browser",
+      "--no-sandbox",
+      "--disable-dev-shm-usage",
+      ...browserFlags,
+      url
+    );
+  } else {
+    args.push(
+      "--",
+      "sh",
+      "-lc",
+      `exec "$BROWSER" ${browserFlags.join(" ")} "$1"`,
+      "agent-browser",
+      url
+    );
   }
   return args;
 }
 
-export function recordedBrowserLaunchScript({ provider, leaseId, route, videoPath, contactSheetPath }) {
+export function recordedBrowserLaunchScript({
+  provider,
+  leaseId,
+  route,
+  videoPath,
+  contactSheetPath,
+  behaviorCommand = ""
+}) {
   const video = [
     "crabbox",
     "artifacts",
@@ -567,11 +722,89 @@ export function recordedBrowserLaunchScript({ provider, leaseId, route, videoPat
     "sleep 1",
     launch,
     "launch_status=$?",
+    ...(behaviorCommand
+      ? [
+          `${behaviorCommand}`,
+          "behavior_status=$?",
+          'printf "AGENT_BROWSER_BEHAVIOR_EXIT %s\\n" "$behavior_status"'
+        ]
+      : []),
     'wait "$video_pid"',
     "video_status=$?",
     'if [ "$launch_status" -ne 0 ]; then exit "$launch_status"; fi',
     'if [ "$video_status" -ne 0 ]; then exit "$video_status"; fi'
   ].join("\n");
+}
+
+function browserBehaviorSource() {
+  return readFileSync(fileURLToPath(new URL("./agent-browser-behavior.mjs", import.meta.url)), "utf8");
+}
+
+export function browserBehaviorArgs({ provider, leaseId, route, tasks }) {
+  const source = Buffer.from(browserBehaviorSource(), "utf8").toString("base64");
+  const payload = Buffer.from(
+    JSON.stringify({
+      baseUrl: "http://127.0.0.1:3000",
+      route,
+      tasks
+    }),
+    "utf8"
+  ).toString("base64");
+  const command = [
+    "set -eu",
+    `printf %s ${shellQuote(source)} | base64 -d > /tmp/agent-browser-behavior.mjs`,
+    `node /tmp/agent-browser-behavior.mjs --payload-base64 ${shellQuote(payload)}`
+  ].join("; ");
+  return [
+    "run",
+    "--provider",
+    provider,
+    "--id",
+    leaseId,
+    "--no-sync",
+    "--stop-after",
+    "never",
+    "--timing-record",
+    "off",
+    "--",
+    "sh",
+    "-lc",
+    command
+  ];
+}
+
+export function parseBrowserBehaviorObservation(output, route) {
+  const line = String(output ?? "")
+    .split(/\r?\n/)
+    .reverse()
+    .find((value) => value.startsWith(BROWSER_BEHAVIOR_MARKER));
+  if (!line) throw new AgentError(`Crabbox browser behavior produced no report for ${route}`, 1);
+  let observation;
+  try {
+    observation = JSON.parse(
+      Buffer.from(line.slice(BROWSER_BEHAVIOR_MARKER.length), "base64").toString("utf8")
+    );
+  } catch {
+    throw new AgentError(`Crabbox browser behavior report is invalid for ${route}`, 1);
+  }
+  if (
+    observation?.route !== route ||
+    !["pass", "fail"].includes(observation?.status) ||
+    !Array.isArray(observation?.taskResults) ||
+    observation.taskResults.length === 0 ||
+    observation.taskResults.some(
+      (result) =>
+        result?.route !== route ||
+        !["pass", "fail"].includes(result?.status) ||
+        !Array.isArray(result?.clauseIds) ||
+        !Array.isArray(result?.reproductionSteps) ||
+        !Array.isArray(result?.assertions)
+    ) ||
+    !Array.isArray(observation?.antiCheatProbes)
+  ) {
+    throw new AgentError(`Crabbox browser behavior report has an invalid shape for ${route}`, 1);
+  }
+  return observation;
 }
 
 export function gifArtifactArgs({ videoPath, gifPath, trimmedVideoPath }) {
@@ -614,7 +847,7 @@ export function validateProbedRoutes(output, routes) {
   return routes.filter((route) => probed.has(route));
 }
 
-export function runCrabboxLane({
+function runCrabboxAttempt({
   config = loadConfig(),
   lane,
   command,
@@ -622,14 +855,16 @@ export function runCrabboxLane({
   dryRun = false,
   env = process.env,
   workdir = repoRoot(),
-  noSync = false
+  delegatedWorkdir = workdir,
+  remoteHarnessPath = "scripts/agent-crabbox-run.mjs",
+  remoteOutputPath = ".",
+  noSync = false,
+  behaviorPlan = null,
+  selection,
+  attempt = 0
 }) {
   const visual = VISUAL_LANES.has(lane);
   const proofKind = lane === "gifProof" ? "GIF" : visual ? "UI" : "CI";
-  const selection = selectCrabboxProvider(config, lane, env);
-  if (!selection.available) {
-    return { ok: false, attempted: false, lane, command, provider: "", leaseId: "", reason: selection.reason, auth: selection.auth };
-  }
   if (!commandExists("crabbox") && !dryRun) {
     return {
       ok: false,
@@ -655,13 +890,22 @@ export function runCrabboxLane({
     };
   }
 
-  const outputDir = join(workdir, ".agent-output");
-  const stamp = `${Date.now()}-${process.pid}`;
+  const outputDir = join(delegatedWorkdir, ".agent-output");
+  const stamp = `${Date.now()}-${process.pid}-${attempt + 1}-${selection.provider.replace(/[^a-z0-9-]/gi, "-")}`;
   const recordPath = join(outputDir, `crabbox-${lane}-${stamp}.json`);
   const logPath = join(outputDir, `crabbox-${lane}-${stamp}.log`);
   const leasePath = join(outputDir, `crabbox-${lane}-${stamp}-lease.json`);
   mkdirSync(outputDir, { recursive: true });
-  const args = buildRunArgs({ provider: selection.provider, command, visual, lane, leasePath, noSync });
+  const args = buildRunArgs({
+    provider: selection.provider,
+    command,
+    visual,
+    lane,
+    leasePath,
+    noSync,
+    remoteHarnessPath,
+    remoteOutputPath
+  });
   const childEnv = providerChildEnvironment(config, { provider: selection.provider, lane }, env);
   if (dryRun) {
     return {
@@ -684,7 +928,9 @@ export function runCrabboxLane({
   let cleanup = null;
   const artifacts = [];
   const artifactBindings = [];
+  const behaviorObservations = [];
   let failure = "";
+  let remoteCommandStarted = false;
 
   try {
     run = runCommand("crabbox", args, {
@@ -693,6 +939,9 @@ export function runCrabboxLane({
       cwd: workdir,
       maxBuffer: 8 * 1024 * 1024
     });
+    remoteCommandStarted = `${run.stdout}\n${run.stderr}`.includes(
+      REMOTE_COMMAND_STARTED_MARKER
+    );
     writeFileSync(logPath, redactSecrets(`${run.stdout}\n${run.stderr}`, config, env), { mode: 0o600 });
     timing = validateTimingReport(parseTimingReport(`${run.stderr}\n${run.stdout}`), selection.provider);
     leaseId = timing.leaseId;
@@ -700,18 +949,9 @@ export function runCrabboxLane({
       throw new AgentError(`Crabbox command failed with exit ${timing.exitCode}`, 1);
     }
 
-    if (lane === "implementRemote") {
-      if (selection.provider === "vercel-sandbox") {
-        artifacts.push(...restoreImplementationOutput(run.stdout, workdir));
-      } else {
-        for (const path of [
-          join(workdir, ".agent-output/codex.patch"),
-          join(workdir, ".agent-output/implementation.md")
-        ]) {
-          if (!existsSync(path)) throw new AgentError(`Crabbox implementation output is missing: ${path}`, 1);
-          artifacts.push(path);
-        }
-      }
+    const delegated = DELEGATED_OUTPUTS.get(lane);
+    if (delegated) {
+      artifacts.push(...restoreDelegatedOutput(lane, run.stdout, delegatedWorkdir));
     }
 
     if (visual) {
@@ -737,6 +977,13 @@ export function runCrabboxLane({
         if (bootstrap.status !== 0) throw new AgentError("Could not install the host GIF encoder", 1);
       }
       for (const [index, route] of routes.entries()) {
+        const routeTasks = (behaviorPlan?.tasks ?? []).filter(
+          (task) => task.route === route
+        );
+        const behaviorRequired = Boolean(behaviorPlan);
+        if (behaviorRequired && routeTasks.length === 0) {
+          throw new AgentError(`browser proof plan has no task for ${route}`, 1);
+        }
         const bundleDir = join(
           outputDir,
           `crabbox-${lane}-${stamp}-${String(index + 1).padStart(2, "0")}-${safeArtifactSlug(route, index)}`
@@ -757,6 +1004,17 @@ export function runCrabboxLane({
         });
         if (markerRun.status !== 0) throw new AgentError(`Crabbox remote route marker failed for ${route}`, 1);
         const launchMarker = validateBrowserRouteMarker(markerRun.stdout, route);
+        const behaviorArgs = behaviorRequired
+          ? browserBehaviorArgs({
+              provider: selection.provider,
+              leaseId,
+              route,
+              tasks: routeTasks
+            })
+          : null;
+        const behaviorCommand = behaviorArgs
+          ? ["crabbox", ...behaviorArgs].map(shellQuote).join(" ")
+          : "";
 
         const launch =
           proofKind === "GIF"
@@ -769,7 +1027,8 @@ export function runCrabboxLane({
                     leaseId,
                     route,
                     videoPath,
-                    contactSheetPath
+                    contactSheetPath,
+                    behaviorCommand
                   })
                 ],
                 { check: false, env: childEnv, cwd: workdir }
@@ -782,6 +1041,25 @@ export function runCrabboxLane({
         writeFileSync(logPath, redactSecrets(`\n${launch.stdout}\n${launch.stderr}`, config, env), { flag: "a", mode: 0o600 });
         if (launch.status !== 0) throw new AgentError(`Crabbox browser launch failed for ${route}`, 1);
         const launchEvidence = validateBrowserLaunchOutput(launch.stdout, route);
+        let behavior = null;
+        if (behaviorRequired) {
+          if (proofKind === "GIF") {
+            behavior = parseBrowserBehaviorObservation(launch.stdout, route);
+          } else {
+            const behaviorRun = runCommand("crabbox", behaviorArgs, {
+              check: false,
+              env: childEnv,
+              cwd: workdir
+            });
+            writeFileSync(
+              logPath,
+              redactSecrets(`\n${behaviorRun.stdout}\n${behaviorRun.stderr}`, config, env),
+              { flag: "a", mode: 0o600 }
+            );
+            behavior = parseBrowserBehaviorObservation(behaviorRun.stdout, route);
+          }
+          behaviorObservations.push(behavior);
+        }
 
         const doctor = runCommand(
           "crabbox",
@@ -812,6 +1090,10 @@ export function runCrabboxLane({
           if (gif.status !== 0) throw new AgentError(`Crabbox GIF encoding failed for ${route}`, 1);
         }
 
+        const behaviorReportPath = behavior
+          ? join(bundleDir, "behavior-observation.json")
+          : "";
+        if (behaviorReportPath) writeJson(behaviorReportPath, behavior);
         const routeBindingPath = join(bundleDir, "route-binding.json");
         writeJson(routeBindingPath, {
           provider: selection.provider,
@@ -822,7 +1104,10 @@ export function runCrabboxLane({
           launchStatus: launch.status,
           desktopDoctorStatus: doctor.status,
           computerUseStatus: computerUse.status,
-          captureStartedBeforeLaunch: proofKind === "GIF"
+          captureStartedBeforeLaunch: proofKind === "GIF",
+          behaviorRequired,
+          behaviorStatus: behavior?.status ?? "",
+          behaviorReportPath
         });
         const collected = runCommand(
           "crabbox",
@@ -849,10 +1134,34 @@ export function runCrabboxLane({
           route,
           routeBindingPath,
           launchMarker,
-          launchEvidence
+          launchEvidence,
+          behaviorRequired,
+          behaviorStatus: behavior?.status ?? ""
         });
+        if (behaviorReportPath) {
+          routeArtifacts.push(
+            validateRegularArtifact(
+              behaviorReportPath,
+              bundleDir,
+              "behavior observation"
+            )
+          );
+        }
         artifacts.push(...routeArtifacts);
-        artifactBindings.push({ route, bundleDir, launchMarker, launchEvidence, artifacts: routeArtifacts });
+        artifactBindings.push({
+          route,
+          bundleDir,
+          launchMarker,
+          launchEvidence,
+          behavior,
+          artifacts: routeArtifacts
+        });
+        if (behavior?.status === "fail") {
+          throw new AgentError(
+            `Crabbox browser behavior assertions failed for ${route}`,
+            1
+          );
+        }
       }
     }
   } catch (error) {
@@ -889,6 +1198,8 @@ export function runCrabboxLane({
     probedRoutes: visual && !failure ? routes : [],
     artifacts,
     artifactBindings,
+    behaviorObservations,
+    remoteCommandStarted,
     logPath,
     cleanupStatus: cleanup?.status ?? null,
     reason: failure
@@ -897,10 +1208,100 @@ export function runCrabboxLane({
   return { ...record, recordPath };
 }
 
+function providerAttemptSummary(result) {
+  return {
+    provider: result.provider,
+    leaseId: result.leaseId,
+    attempted: result.attempted,
+    ok: result.ok,
+    remoteCommandStarted: result.remoteCommandStarted ?? false,
+    cleanupStatus: result.cleanupStatus ?? null,
+    reason: result.reason
+  };
+}
+
+export function resolveCrabboxWorkdir(value = repoRoot()) {
+  const target = resolve(value);
+  let info;
+  try {
+    info = lstatSync(target);
+  } catch {
+    throw new AgentError("Crabbox workdir does not exist", 2);
+  }
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new AgentError("Crabbox workdir must be a real directory", 2);
+  }
+  return realpathSync(target);
+}
+
+export function resolveDelegatedWorkdir(workdir, value = workdir) {
+  const root = resolveCrabboxWorkdir(workdir);
+  const target = resolveCrabboxWorkdir(value);
+  const offset = relative(root, target);
+  if (offset.startsWith("..") || isAbsolute(offset)) {
+    throw new AgentError("Crabbox delegated workdir must stay inside the synced workdir", 2);
+  }
+  return target;
+}
+
+export function runCrabboxLane(options) {
+  const config = options.config ?? loadConfig();
+  const lane = options.lane;
+  const env = options.env ?? process.env;
+  const candidates = selectCrabboxProviders(config, lane, env);
+  if (!candidates.length) {
+    const selection = selectCrabboxProvider(config, lane, env);
+    return {
+      ok: false,
+      attempted: false,
+      lane,
+      command: options.command,
+      provider: "",
+      leaseId: "",
+      reason: selection.reason,
+      auth: selection.auth,
+      providerAttempts: []
+    };
+  }
+
+  const attempts = [];
+  for (const [index, selection] of candidates.entries()) {
+    const result = runCrabboxAttempt({
+      ...options,
+      config,
+      env,
+      selection,
+      attempt: index
+    });
+    attempts.push(providerAttemptSummary(result));
+    const final = { ...result, providerAttempts: attempts };
+    if (result.ok) return final;
+
+    const acquisitionFailedBeforeRemoteExecution =
+      result.attempted === true &&
+      result.remoteCommandStarted !== true &&
+      !result.leaseId &&
+      !result.timing;
+    if (!acquisitionFailedBeforeRemoteExecution || index === candidates.length - 1) {
+      return final;
+    }
+  }
+  throw new AgentError("Crabbox provider selection exhausted unexpectedly", 1);
+}
+
 export async function main() {
   const args = parseArgs();
   if (args["emit-implementation-output"]) {
     process.stdout.write(`${emitImplementationOutput()}\n`);
+    return;
+  }
+  if (args["emit-output-lane"]) {
+    const outputWorkdir = resolveCrabboxWorkdir(
+      args["output-workdir"] ?? repoRoot()
+    );
+    process.stdout.write(
+      `${emitDelegatedOutput(String(args["emit-output-lane"]), outputWorkdir)}\n`
+    );
     return;
   }
   const config = loadConfig();
@@ -909,7 +1310,24 @@ export async function main() {
   const command = args.command ?? config.crabbox.lanes[lane]?.[0];
   if (!command) throw new AgentError(`missing command for lane ${lane}`, 2);
   const routes = args.route ? [String(args.route)] : [];
-  const result = runCrabboxLane({ config, lane, command, routes, dryRun });
+  const workdir = resolveCrabboxWorkdir(args.workdir);
+  const delegatedWorkdir = resolveDelegatedWorkdir(
+    workdir,
+    args["delegated-workdir"] ?? workdir
+  );
+  const remoteOutputPath = relative(workdir, delegatedWorkdir) || ".";
+  const result = runCrabboxLane({
+    config,
+    lane,
+    command,
+    routes,
+    dryRun,
+    workdir,
+    delegatedWorkdir,
+    remoteHarnessPath: args["remote-harness"] ?? "scripts/agent-crabbox-run.mjs",
+    remoteOutputPath
+  });
+  if (args["record-file"]) writeJson(resolve(args["record-file"]), result);
   finish(result, Boolean(args.json), result.ok ? 0 : result.attempted ? 1 : 2);
 }
 

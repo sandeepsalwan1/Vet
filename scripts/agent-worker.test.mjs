@@ -4,7 +4,12 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { loadConfig } from "./agent-lib.mjs";
-import { createWorkerInvocation, resolveCodexSettings, resolveWorkerBackend } from "./agent-worker.mjs";
+import {
+  createWorkerInvocation,
+  parseCodexUsage,
+  resolveCodexSettings,
+  resolveWorkerBackend
+} from "./agent-worker.mjs";
 
 function config(overrides = {}) {
   return {
@@ -60,13 +65,13 @@ test("Codex lanes select configured overrides and otherwise inherit implementati
   });
   assert.deepEqual(invocation.args.slice(0, 8), [
     "exec",
+    "--json",
     "--sandbox",
     "workspace-write",
     "--model",
     "gpt-nano",
     "--config",
-    'model_reasoning_effort="low"',
-    "-"
+    'model_reasoning_effort="low"'
   ]);
   assert.throws(() => resolveCodexSettings(laneConfig, "unknown"), /unsupported Codex lane: unknown/);
   assert.throws(() => resolveCodexSettings(laneConfig, "triage"), /unsupported Codex lane: triage/);
@@ -108,12 +113,15 @@ test("Codex adapter applies config defaults and scopes its auth name", () => {
   assert.equal(invocation.executable, "codex");
   assert.deepEqual(invocation.args, [
     "exec",
+    "--json",
     "--sandbox",
     "workspace-write",
     "--model",
     "gpt-test",
     "--config",
     'model_reasoning_effort="medium"',
+    "--config",
+    'shell_environment_policy.exclude=["OPENAI_API_KEY","CODEX_API_KEY","GITHUB_TOKEN","GH_TOKEN","AGENT_PAT","CRABBOX_COORDINATOR_TOKEN"]',
     "--output-schema",
     "schema.json",
     "--output-last-message",
@@ -128,6 +136,54 @@ test("Codex adapter applies config defaults and scopes its auth name", () => {
   assert.equal(invocation.env.OPENAI_API_KEY, undefined);
   assert.equal(invocation.env.UNRELATED, "kept");
   assert.deepEqual(source, { OPENAI_API_KEY: "secret", UNRELATED: "kept" });
+});
+
+test("Codex usage parser records exact per-turn tokens without thread identifiers", () => {
+  const usage = parseCodexUsage(
+    [
+      JSON.stringify({ type: "thread.started", thread_id: "private-thread-id" }),
+      JSON.stringify({
+        type: "turn.completed",
+        usage: {
+          input_tokens: 1200,
+          cached_input_tokens: 800,
+          output_tokens: 75,
+          reasoning_output_tokens: 25
+        }
+      })
+    ].join("\n"),
+    { lane: "implement", model: "gpt-test", effort: "low" }
+  );
+
+  assert.equal(usage.complete, true);
+  assert.equal(usage.calls.length, 1);
+  assert.match(usage.calls[0].id, /^[a-f0-9]{64}$/);
+  assert.doesNotMatch(JSON.stringify(usage), /private-thread-id/);
+  assert.deepEqual(usage.calls[0], {
+    id: usage.calls[0].id,
+    inputTokens: 1200,
+    cachedInputTokens: 800,
+    outputTokens: 75,
+    reasoningOutputTokens: 25
+  });
+});
+
+test("Codex usage parser fails closed on incomplete or inconsistent counters", () => {
+  const usage = parseCodexUsage(
+    JSON.stringify({
+      type: "turn.completed",
+      usage: {
+        input_tokens: 10,
+        cached_input_tokens: 11,
+        output_tokens: 2,
+        reasoning_output_tokens: 1
+      }
+    }),
+    { lane: "review", model: "gpt-test", effort: "low" }
+  );
+
+  assert.equal(usage.complete, false);
+  assert.deepEqual(usage.calls, []);
 });
 
 test("Codex adapter rejects unknown sandbox values", () => {

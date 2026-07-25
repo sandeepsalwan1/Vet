@@ -19,6 +19,8 @@ on:
         required: false
       HETZNER_API_TOKEN:
         required: false
+      RENDER_API_KEY:
+        required: false
   workflow_dispatch:
     inputs:
       issue-number:
@@ -42,6 +44,8 @@ jobs:
       backend-sandbox: ${{ steps.backend.outputs.sandbox }}
       concurrency-group: ${{ steps.concurrency.outputs.group }}
     permissions:
+      actions: read
+      checks: read
       contents: read
       issues: read
     steps:
@@ -60,6 +64,17 @@ jobs:
       - name: Validate configured implementation backend
         id: backend
         run: node scripts/agent-worker.mjs --validate-backend --lane implement --json
+      - name: Require fresh zero-model readiness
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AGENT_AUTH_PRESENT: ${{ secrets.OPENAI_API_KEY != '' }}
+          PRIMARY_PROVIDER_AUTH_PRESENT: ${{ (vars.CRABBOX_VERCEL_READY == 'true' && (secrets.VERCEL_TOKEN != '' || secrets.VERCEL_OIDC_TOKEN != '')) || (vars.CRABBOX_HETZNER_READY == 'true' && (secrets.HCLOUD_TOKEN != '' || secrets.HETZNER_TOKEN != '' || secrets.HETZNER_API_TOKEN != '')) }}
+          RENDER_AUTH_PRESENT: ${{ secrets.RENDER_API_KEY != '' }}
+        run: >-
+          node scripts/agent-readiness.mjs
+          --preflight
+          --wait-seconds 900
+          --json
       - name: Build trusted implementation prompt
         env:
           GH_TOKEN: ${{ github.token }}
@@ -82,7 +97,6 @@ jobs:
     needs: prepare-prompt
     if: vars.CRABBOX_VERCEL_READY == 'true' || vars.CRABBOX_HETZNER_READY == 'true'
     runs-on: ubuntu-latest
-    continue-on-error: true
     outputs:
       generated: ${{ steps.generate.outcome == 'success' && steps.implementation-artifact.outcome == 'success' }}
     concurrency:
@@ -105,31 +119,9 @@ jobs:
         with:
           name: agent-implementation-context-${{ inputs.issue-number }}
           path: .agent-output
-      - name: Install pinned Crabbox
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          download="$RUNNER_TEMP/crabbox-download"
-          bin="$RUNNER_TEMP/crabbox-bin"
-          mkdir -p "$download" "$bin"
-          gh release download v0.40.0 --repo openclaw/crabbox --pattern crabbox_0.40.0_linux_amd64.tar.gz --pattern checksums.txt --dir "$download"
-          (cd "$download" && sha256sum --check --ignore-missing checksums.txt)
-          tar -xzf "$download/crabbox_0.40.0_linux_amd64.tar.gz" -C "$bin"
-          chmod 755 "$bin/crabbox"
-          echo "$bin" >> "$GITHUB_PATH"
-      - name: Install pinned Vercel Sandbox bridge
-        if: vars.CRABBOX_VERCEL_READY == 'true'
-        run: |
-          bridge_dir="$RUNNER_TEMP/crabbox-vercel-bridge"
-          bridge="$RUNNER_TEMP/crabbox-vercel-sandbox-bridge"
-          mkdir -p "$bridge_dir"
-          cp .agent/crabbox-vercel-bridge/package.json .agent/crabbox-vercel-bridge/package-lock.json "$bridge_dir/"
-          (cd "$bridge_dir" && npm ci --ignore-scripts --no-audit --no-fund)
-          echo '#!/bin/sh' > "$bridge"
-          echo "cd '$bridge_dir'" >> "$bridge"
-          echo 'exec crabbox __vercel-sandbox-bridge "$@"' >> "$bridge"
-          chmod 755 "$bridge"
-          echo "CRABBOX_VERCEL_SANDBOX_BRIDGE=$bridge" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/setup-crabbox
+        with:
+          vercel-ready: ${{ vars.CRABBOX_VERCEL_READY }}
       - name: Generate patch in Crabbox
         id: generate
         env:
@@ -149,14 +141,25 @@ jobs:
             git add --all &&
             git commit --quiet --no-verify -m "chore: seed remote workspace" &&
             npm install --global --ignore-scripts --no-audit --no-fund @openai/codex@0.144.1 &&
+            codex debug prompt-input 'skill discovery probe'
+            > /tmp/vet-worker-prompt-input.json &&
+            node scripts/agent-skill-discovery.mjs
+            --input /tmp/vet-worker-prompt-input.json --json &&
             CODEX_API_KEY="$agent_key" node scripts/agent-worker.mjs
             --sandbox danger-full-access
             --prompt-file .agent-output/implement-prompt.md
+            --schema .agent/schemas/implementation.schema.json
+            --usage-file .agent-output/model-usage.json
             --output-file .agent-output/implementation.md &&
             unset agent_key && node scripts/agent-implement.mjs
             --issue-number "${{ inputs.issue-number }}"
             --create-patch .agent-output/codex.patch --json
-        run: node scripts/agent-crabbox-run.mjs --lane implementRemote --command "$REMOTE_COMMAND" --json
+        run: >-
+          node scripts/agent-crabbox-run.mjs
+          --lane implementRemote
+          --command "$REMOTE_COMMAND"
+          --record-file .agent-output/implementation-remote.json
+          --json
       - id: implementation-artifact
         uses: actions/upload-artifact@v4
         if: steps.generate.outcome == 'success'
@@ -175,66 +178,12 @@ jobs:
             .agent-output/crabbox-implementRemote-*.log
           include-hidden-files: true
           if-no-files-found: warn
-      - name: Report GitHub fallback
-        if: always() && (steps.generate.outcome != 'success' || steps.implementation-artifact.outcome != 'success')
-        run: echo "::warning::Remote Crabbox generation failed; continuing with the isolated GitHub implementer."
-
-  generate-patch:
-    name: generate-patch
-    needs:
-      - prepare-prompt
-      - generate-patch-remote
-    if: always() && needs.prepare-prompt.result == 'success' && needs.generate-patch-remote.outputs.generated != 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    concurrency:
-      group: ${{ needs.prepare-prompt.outputs.concurrency-group }}
-      cancel-in-progress: false
-      queue: max
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: main
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-      - run: npm ci
-      - uses: actions/download-artifact@v4
-        with:
-          name: agent-implementation-context-${{ inputs.issue-number }}
-          path: .agent-output
-      - name: Run Codex implementer
-        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
-        with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          codex-version: "0.144.1"
-          prompt-file: .agent-output/implement-prompt.md
-          sandbox: ${{ needs.prepare-prompt.outputs.backend-sandbox }}
-          model: ${{ needs.prepare-prompt.outputs.backend-model }}
-          effort: ${{ needs.prepare-prompt.outputs.backend-effort }}
-          allow-users: ${{ github.repository_owner }}
-          allow-bots: true
-          output-file: .agent-output/implementation.md
-      - name: Create patch artifact
-        run: node scripts/agent-implement.mjs --issue-number "${{ inputs.issue-number }}" --create-patch .agent-output/codex.patch --json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: agent-implementation-${{ inputs.issue-number }}
-          path: .agent-output/*
-          include-hidden-files: true
-          if-no-files-found: error
 
   validate-patch:
     name: validate-patch
     runs-on: ubuntu-latest
-    needs:
-      - generate-patch-remote
-      - generate-patch
-    if: always() && (needs.generate-patch-remote.outputs.generated == 'true' || needs.generate-patch.result == 'success')
+    needs: generate-patch-remote
+    if: needs.generate-patch-remote.outputs.generated == 'true'
     permissions:
       contents: read
     env:
@@ -338,6 +287,8 @@ jobs:
           path: |
             .agent-output/codex.patch
             .agent-output/implementation.md
+            .agent-output/model-usage.json
+            .agent-output/implementation-remote.json
             .agent-output/integrity.json
           include-hidden-files: true
           if-no-files-found: error
@@ -352,6 +303,7 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
+      statuses: write
     steps:
       - uses: actions/checkout@v5
         with:
@@ -366,6 +318,7 @@ jobs:
           name: agent-implementation-validated-${{ inputs.issue-number }}
           path: .agent-output
       - name: Apply patch and open PR
+        id: apply
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
@@ -375,13 +328,26 @@ jobs:
           --codex-output .agent-output/implementation.md
           --integrity-manifest .agent-output/integrity.json
           --json
+      - name: Record exact implementation cost
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/agent-cost.mjs
+          --pr-number "${{ steps.apply.outputs.pr_number }}"
+          --head-sha "${{ steps.apply.outputs.head_sha }}"
+          --lane implement
+          --usage-file .agent-output/model-usage.json
+          --remote-record .agent-output/implementation-remote.json
+          --remote-lane implementRemote
+          --retry-reason initial
+          --effect new-head
+          --json
 
   report-failure:
     name: report-failure
     runs-on: ubuntu-latest
     needs:
       - generate-patch-remote
-      - generate-patch
       - validate-patch
       - open-pr
     if: always() && needs.open-pr.result != 'success'

@@ -34,9 +34,41 @@ import {
   skipsNoMistakesForCost,
   upsertManagedComment
 } from "./agent-lib.mjs";
+import {
+  PROOF_KINDS,
+  intentCapsuleForManagedTriage,
+  parseImplementationAddendum
+} from "./agent-intent.mjs";
+import {
+  MAX_SEMANTIC_REVISIONS,
+  loadRepairLedger,
+  openRepairFindings,
+  recordRepairEvaluation,
+  recordRepairRevision,
+  repairEvaluationFor,
+  saveRepairLedger,
+  semanticInputDigest,
+} from "./agent-repair-ledger.mjs";
 
 export const MAX_REVIEW_DIFF_BYTES = 50000;
-export const MAX_REVIEW_REPAIR_ATTEMPTS = 2;
+export const MAX_REVIEW_REPAIR_ATTEMPTS = MAX_SEMANTIC_REVISIONS;
+
+export function reviewReplayNextGate({
+  config,
+  evaluation,
+  metadata,
+  pullLabels,
+  sourceLabels,
+}) {
+  if (evaluation?.outcome !== "ready") return "";
+  return skipsNoMistakesForCost(config, {
+    metadata,
+    pullLabels,
+    sourceLabels,
+  })
+    ? "automerge"
+    : "no-mistakes";
+}
 
 function ciReproductionCommands(pull, ciChecks) {
   const commands = {
@@ -188,9 +220,9 @@ export function buildReviewPrompt({
   template,
   pull,
   pullIssue,
-  pullComments,
-  sourceIssue,
-  triageComment,
+  intentCapsule,
+  implementationAddendum,
+  repairLedger,
   ciChecks = [],
   diff
 }) {
@@ -205,27 +237,23 @@ Labels: ${issueLabels(pullIssue).join(", ") || "none"}
 Head: ${pull.head.ref} ${pull.head.sha}
 Base: ${pull.base.ref}
 
-Body:
+## Sealed Intent Capsule
 
-${pull.body ?? ""}
+\`\`\`json
+${JSON.stringify(intentCapsule, null, 2)}
+\`\`\`
 
-## Comments
+## Implementation Intent Addendum
 
-${pullComments.map((comment) => `### Comment ${comment.id}\n\n${comment.body ?? ""}`).join("\n\n") || "none"}
+\`\`\`json
+${JSON.stringify(implementationAddendum, null, 2)}
+\`\`\`
 
-## Source Issue
+## Shared Repair Ledger
 
-Number: ${sourceIssue.number}
-Title: ${sourceIssue.title}
-Labels: ${issueLabels(sourceIssue).join(", ") || "none"}
-
-Body:
-
-${sourceIssue.body ?? ""}
-
-## Managed Agent Triage
-
-${triageComment.body}
+\`\`\`json
+${JSON.stringify(repairLedger, null, 2)}
+\`\`\`
 
 ## Exact-Head CI
 
@@ -249,7 +277,12 @@ export function requireManagedTriageComment(comments, marker, sourceIssueNumber,
   return triageComment;
 }
 
-function writePrompt(config, prNumber, outputPath, expectedHeadSha, dependencies = {}) {
+function fetchTrustedReviewContext(
+  config,
+  prNumber,
+  expectedHeadSha,
+  dependencies = {}
+) {
   const { pull, issue, comments, files } = fetchPull(config, prNumber, dependencies);
   assertReviewedHead(pull, expectedHeadSha);
   const closing = ghReadJson([
@@ -269,6 +302,29 @@ function writePrompt(config, prNumber, outputPath, expectedHeadSha, dependencies
     rejectPrivilegedPaths: true,
     allowEmptyFiles: true
   }, dependencies);
+  return {
+    pull,
+    issue,
+    comments,
+    files,
+    sourceIssueNumber,
+    sourceIssue
+  };
+}
+
+function writePrompt(config, prNumber, outputPath, expectedHeadSha, dependencies = {}) {
+  const {
+    pull,
+    issue,
+    comments,
+    sourceIssueNumber,
+    sourceIssue
+  } = fetchTrustedReviewContext(
+    config,
+    prNumber,
+    expectedHeadSha,
+    dependencies
+  );
   const sourceComments = getIssueComments(config, sourceIssueNumber);
   const triageComment = requireManagedTriageComment(
     sourceComments,
@@ -276,21 +332,81 @@ function writePrompt(config, prNumber, outputPath, expectedHeadSha, dependencies
     sourceIssueNumber,
     config.repo.owner
   );
+  const { capsule } = intentCapsuleForManagedTriage({
+    issue: sourceIssue,
+    comments: sourceComments,
+    triageComment,
+    marker: config.comments.triage,
+    repoOwner: config.repo.owner
+  });
+  const metadata = implementationMetadata(pull.body);
+  const implementationAddendum = parseImplementationAddendum(pull.body);
+  if (
+    metadata.intentDigest !== capsule.intentDigest ||
+    metadata.implementationAddendumDigest !== implementationAddendum.digest
+  ) {
+    throw new AgentError(
+      "review intent context does not match immutable implementation metadata",
+      1
+    );
+  }
   const diff = getPullDiff(config, pull);
   const ciChecks = fetchRequiredChecks(config, pull.head.sha);
+  const repairLedger = loadRepairLedger(
+    comments,
+    capsule.intentDigest,
+    config.repo.owner,
+  );
+  const inputDigest = semanticInputDigest({
+    lane: "review",
+    head: pull.head.sha,
+    intentDigest: capsule.intentDigest,
+    findings: openRepairFindings(repairLedger).filter(
+      (finding) => finding.lane !== "review",
+    ),
+    checks: ciChecks,
+  });
+  const replayEvaluation = repairEvaluationFor(repairLedger, {
+    lane: "review",
+    head: pull.head.sha,
+    inputDigest,
+  });
+  const skipModel = Boolean(replayEvaluation);
+  const replayNextGate = reviewReplayNextGate({
+    config,
+    evaluation: replayEvaluation,
+    metadata,
+    pullLabels: issueLabels(issue),
+    sourceLabels: issueLabels(sourceIssue),
+  });
   const prompt = buildReviewPrompt({
     template: readText(join(repoRoot(), ".agent/prompts/review.md")),
     pull,
     pullIssue: issue,
-    pullComments: comments,
-    sourceIssue,
-    triageComment,
+    intentCapsule: capsule,
+    implementationAddendum,
+    repairLedger,
     ciChecks,
     diff
   });
   mkdirSync(join(repoRoot(), ".agent-output"), { recursive: true });
   writeFileSync(outputPath, prompt);
-  return { prNumber, sourceIssueNumber, diffBytes: Buffer.byteLength(diff, "utf8"), outputPath };
+  setGitHubOutput({
+    "skip-model": skipModel,
+    "replay-next-gate": replayNextGate,
+    "semantic-input-digest": inputDigest,
+    "shared-revision-count": repairLedger.revisionCount,
+  });
+  return {
+    prNumber,
+    sourceIssueNumber,
+    diffBytes: Buffer.byteLength(diff, "utf8"),
+    outputPath,
+    inputDigest,
+    skipModel,
+    replayNextGate,
+    sharedRevisionCount: repairLedger.revisionCount,
+  };
 }
 
 function createPatch(outputPath) {
@@ -454,7 +570,32 @@ export function dispatchPullSecurity(
   );
 }
 
-function reviewBody(review, cycle) {
+export function validateReviewRemoteRecord(config, path) {
+  const record = readAgentJson(path);
+  const providers = new Set(config.crabbox?.nonVisualProviders ?? []);
+  if (
+    record?.ok !== true ||
+    record?.attempted !== true ||
+    record?.lane !== "reviewRemote" ||
+    !providers.has(record?.provider) ||
+    !/^[A-Za-z0-9._:-]+$/.test(String(record?.leaseId ?? "")) ||
+    record?.timing?.provider !== record.provider ||
+    record?.timing?.leaseId !== record.leaseId ||
+    record?.timing?.exitCode !== 0 ||
+    !Number.isFinite(record?.timing?.totalMs) ||
+    record.timing.totalMs < 0 ||
+    String(record?.reason ?? "")
+  ) {
+    throw new AgentError("Crabbox review provenance is invalid", 1);
+  }
+  return {
+    provider: record.provider,
+    leaseId: record.leaseId,
+    totalMs: record.timing.totalMs,
+  };
+}
+
+function reviewBody(review, cycle, remote) {
   return `## Agent Review
 
 Findings:
@@ -473,6 +614,9 @@ Remaining risk: ${review.remainingRisk}
 Proof needed: ${review.proofNeeded}
 Recommendation: ${review.mergeRecommendation}
 Cycle: ${cycle.state}${cycle.state === "retry" ? ` ${cycle.nextAttempt}/${MAX_REVIEW_REPAIR_ATTEMPTS}` : ""}
+Crabbox provider: ${remote.provider}
+Crabbox lease: ${remote.leaseId}
+Crabbox duration: ${remote.totalMs} ms
 
 ${review.humanQuestion ? `Human question:\n\n${review.humanQuestion}\n` : ""}
 
@@ -524,7 +668,7 @@ export function validateReviewResult(review) {
     JSON.stringify(Object.keys(review).sort()) !== JSON.stringify(expectedKeys) ||
     !stringArrays.every((key) => Array.isArray(review[key]) && review[key].every((item) => typeof item === "string")) ||
     !["low", "medium", "high"].includes(review.remainingRisk) ||
-    !["none", "CI", "UI", "GIF"].includes(review.proofNeeded) ||
+    !PROOF_KINDS.includes(review.proofNeeded) ||
     !["ready", "ready-human-review", "blocked"].includes(review.mergeRecommendation) ||
     typeof review.humanQuestion !== "string" ||
     typeof review.unifiedDiff !== "string"
@@ -556,7 +700,9 @@ export function reviewLabelChanges(config, review) {
   const policy = reviewPolicyOutcome(review);
   const add = [];
   const remove = [];
-  if (review.proofNeeded === "UI" || review.proofNeeded === "GIF") add.push(config.labels.proof);
+  if (["UI", "GIF", "service"].includes(review.proofNeeded)) {
+    add.push(config.labels.proof);
+  }
   if (policy.manualBlock) {
     add.push(config.labels.blocked);
     remove.push(config.labels.automerge);
@@ -578,7 +724,12 @@ function repairAttempt(value) {
 
 export function reviewCycleDecision(
   review,
-  { repairAttempt: attemptValue = 0, patchApplied = false, ciPassed = true } = {}
+  {
+    repairAttempt: attemptValue = 0,
+    patchApplied = false,
+    patchRejectedByBudget = false,
+    ciPassed = true,
+  } = {}
 ) {
   const attempt = repairAttempt(attemptValue);
   const humanBlocked =
@@ -594,24 +745,40 @@ export function reviewCycleDecision(
       statusDescription: "agent review needs human review"
     };
   }
-  const technicalRepairNeeded =
-    patchApplied || review.mergeRecommendation === "blocked" || !ciPassed;
-  if (technicalRepairNeeded && attempt < MAX_REVIEW_REPAIR_ATTEMPTS) {
+  if (patchApplied) {
     return {
       state: "retry",
-      nextAttempt: attempt + 1,
+      nextAttempt: attempt,
       continueToNoMistakes: false,
       statusState: "pending",
-      statusDescription: `agent review repairing (${attempt + 1}/${MAX_REVIEW_REPAIR_ATTEMPTS})`
+      statusDescription: `agent review validating revision (${attempt}/${MAX_REVIEW_REPAIR_ATTEMPTS})`
     };
   }
-  if (technicalRepairNeeded) {
+  if (patchRejectedByBudget) {
     return {
       state: "repair-exhausted",
       nextAttempt: null,
       continueToNoMistakes: false,
       statusState: "failure",
       statusDescription: "agent review repair limit exhausted"
+    };
+  }
+  if (!ciPassed) {
+    return {
+      state: "deterministic-blocked",
+      nextAttempt: null,
+      continueToNoMistakes: false,
+      statusState: "failure",
+      statusDescription: "agent review blocked by exact-head CI"
+    };
+  }
+  if (review.mergeRecommendation === "blocked") {
+    return {
+      state: "unchanged-blocked",
+      nextAttempt: null,
+      continueToNoMistakes: false,
+      statusState: "failure",
+      statusDescription: "agent review blocked without a material repair"
     };
   }
   return {
@@ -631,7 +798,7 @@ export function reviewCycleLabelChanges(
 ) {
   const add = [];
   const remove = [];
-  if (cycle.state === "ready" && (review.proofNeeded === "UI" || review.proofNeeded === "GIF")) {
+  if (cycle.state === "ready" && ["UI", "GIF", "service"].includes(review.proofNeeded)) {
     add.push(config.labels.proof);
   }
   if (cycle.state === "ready" || cycle.state === "retry") {
@@ -648,30 +815,23 @@ function applyReview(
   prNumber,
   reviewPath,
   patchPath,
+  remoteRecordPath,
   dryRun,
   expectedHeadSha,
   repairAttemptValue = 0,
   dependencies = {},
 ) {
-  const { pull, issue, files } = fetchPull(config, prNumber, dependencies);
-  assertReviewedHead(pull, expectedHeadSha);
-  const closing = ghReadJson([
-    "pr",
-    "view",
-    String(prNumber),
-    "--repo",
-    `${config.repo.owner}/${config.repo.name}`,
-    "--json",
-    "closingIssuesReferences"
-  ]);
-  const sourceIssueNumber = resolveSourceIssueNumber(pull, closing?.closingIssuesReferences, config);
-  const sourceIssue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${sourceIssueNumber}`);
-  assertTrustedAgentPull(pull, config, {
-    files,
-    sourceIssue,
-    rejectPrivilegedPaths: true,
-    allowEmptyFiles: true
-  }, dependencies);
+  const {
+    pull,
+    issue,
+    comments,
+    sourceIssue
+  } = fetchTrustedReviewContext(
+    config,
+    prNumber,
+    expectedHeadSha,
+    dependencies
+  );
   const metadata = implementationMetadata(pull.body);
   const sourceLabels = issueLabels(sourceIssue);
   const automergeEligible =
@@ -684,8 +844,25 @@ function applyReview(
   });
   const ciChecks = fetchRequiredChecks(config, pull.head.sha);
   const ciPassed = ciChecks.every((check) => check.state === "success");
+  let repairLedger = loadRepairLedger(
+    comments,
+    metadata.intentDigest,
+    config.repo.owner,
+  );
+  repairAttempt(repairAttemptValue);
+  const priorOpenFindings = openRepairFindings(repairLedger).filter(
+    (finding) => finding.lane !== "review",
+  );
+  const inputDigest = semanticInputDigest({
+    lane: "review",
+    head: pull.head.sha,
+    intentDigest: metadata.intentDigest,
+    findings: priorOpenFindings,
+    checks: ciChecks,
+  });
   let review = readAgentJson(reviewPath);
   validateReviewResult(review);
+  const remote = validateReviewRemoteRecord(config, remoteRecordPath);
   let effectivePatchPath = patchPath;
   let patchText = patchPath && existsSync(patchPath) ? readText(patchPath) : "";
   if (!patchText.trim() && typeof review.unifiedDiff === "string" && review.unifiedDiff.trim()) {
@@ -701,8 +878,13 @@ function applyReview(
   let ciDispatch = null;
   let codeqlDispatch = null;
   let patchApplied = false;
+  let patchRejectedByBudget = false;
 
-  if (!dryRun && hasPatch) {
+  if (hasPatch && repairLedger.revisionCount >= MAX_SEMANTIC_REVISIONS) {
+    patchRejectedByBudget = true;
+    review.bugsFound.push("The shared semantic repair budget is exhausted.");
+    review.mergeRecommendation = "blocked";
+  } else if (!dryRun && hasPatch) {
     checkoutPullHead(pull);
     runCommand("git", ["apply", "--index", effectivePatchPath]);
     const staged = runCommand("git", ["diff", "--cached", "--no-renames", "--name-only"]).stdout.trim();
@@ -760,9 +942,26 @@ function applyReview(
     review.bugsFound.push(`Required exact-head CI is not passing: ${failures}`);
     review.mergeRecommendation = "blocked";
   }
+  const evaluation = recordRepairEvaluation(repairLedger, {
+    lane: "review",
+    head: pull.head.sha,
+    inputDigest,
+    findings: review.mergeRecommendation === "blocked" ? review.bugsFound : [],
+    outcome: review.mergeRecommendation,
+  });
+  repairLedger = evaluation.ledger;
+  if (patchApplied) {
+    repairLedger = recordRepairRevision(repairLedger, {
+      lane: "review",
+      fromHead: pull.head.sha,
+      toHead: statusSha,
+      findingDigest: evaluation.findingDigest,
+    }).ledger;
+  }
   const cycle = reviewCycleDecision(review, {
-    repairAttempt: repairAttemptValue,
+    repairAttempt: repairLedger.revisionCount,
     patchApplied,
+    patchRejectedByBudget,
     ciPassed: patchApplied ? false : ciPassed
   });
   const policy = reviewCycleLabelChanges(config, review, cycle, { automergeEligible });
@@ -771,10 +970,9 @@ function applyReview(
     config,
     number: prNumber,
     marker: config.comments.review,
-    body: reviewBody(review, cycle),
+    body: reviewBody(review, cycle, remote),
     dryRun
   });
-
   const labels = {
     added: addLabels(config, prNumber, policy.add, dryRun),
     removed: removeLabels(config, prNumber, policy.remove, dryRun)
@@ -783,7 +981,8 @@ function applyReview(
     issueLabels(issue).includes(config.labels.proof) ||
     sourceLabels.includes(config.labels.proof) ||
     review.proofNeeded === "UI" ||
-    review.proofNeeded === "GIF";
+    review.proofNeeded === "GIF" ||
+    review.proofNeeded === "service";
   const proofDispatch =
     cycle.state === "ready" && proofRequested && !dryRun
       ? dispatchWorkflow(
@@ -816,11 +1015,20 @@ function applyReview(
           config.repo.defaultBranch
         )
       : null;
+  const ledgerComment = saveRepairLedger({
+    config,
+    prNumber,
+    ledger: repairLedger,
+    dryRun,
+  });
   return {
     review,
     cycle,
     ciChecks,
     comment,
+    ledgerComment,
+    repairLedger,
+    remote,
     labels,
     dispatch: {
       ci: ciDispatch,
@@ -908,6 +1116,7 @@ async function main() {
       prNumber,
       args["from-file"],
       args["apply-patch"],
+      args["remote-record"],
       dryRun,
       args["expected-head-sha"],
       args["repair-attempt"],

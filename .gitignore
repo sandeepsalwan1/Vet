@@ -14,7 +14,9 @@ dist
 /skills-lock.json
 .claude/skills/apify-ultimate-scraper/
 .adal/
-.agents/
+.agents/*
+!.agents/skills/
+!.agents/skills/**
 .aider-desk/
 .augment/
 .bob/

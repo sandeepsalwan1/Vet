@@ -1,6 +1,7 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   AgentError,
@@ -21,6 +22,7 @@ import {
   markdownJsonBlock,
   newestManagedComment,
   parseArgs,
+  parseImplementationMetadata,
   removeLabels,
   runCommand,
   runShell,
@@ -29,8 +31,18 @@ import {
   upsertManagedComment
 } from "./agent-lib.mjs";
 import { runCrabboxLane } from "./agent-crabbox-run.mjs";
+import {
+  commandBehaviorReport,
+  validateBehaviorReport
+} from "./agent-behavior-report.mjs";
+import {
+  PROOF_KINDS as INTENT_PROOF_KINDS,
+  intentCapsuleForManagedTriage,
+  parseImplementationAddendum,
+  validateProofPlan
+} from "./agent-intent.mjs";
 
-const PROOF_KINDS = new Set(["none", "CI", "UI", "GIF"]);
+const PROOF_KINDS = new Set(INTENT_PROOF_KINDS);
 
 function commentsFor(config, number) {
   return getIssueComments(config, number);
@@ -106,12 +118,41 @@ function targetDetails(config, kind, number) {
           comments: commentsFor(config, sourceNumber)
         }
       : null;
+    if (!source) throw new AgentError("proof target has no trusted source issue", 1);
+    const triageComment = newestManagedComment(
+      source.comments,
+      config.comments.triage,
+      config.repo.owner
+    );
+    if (!triageComment) {
+      throw new AgentError("proof target has no trusted managed triage", 1);
+    }
+    const { capsule } = intentCapsuleForManagedTriage({
+      issue: source.issue,
+      comments: source.comments,
+      triageComment,
+      marker: config.comments.triage,
+      repoOwner: config.repo.owner
+    });
+    const metadata = parseImplementationMetadata(pull.body);
+    const implementationAddendum = parseImplementationAddendum(pull.body);
+    if (
+      metadata.intentDigest !== capsule.intentDigest ||
+      metadata.implementationAddendumDigest !== implementationAddendum.digest
+    ) {
+      throw new AgentError(
+        "proof intent context does not match immutable implementation metadata",
+        1
+      );
+    }
     return {
       title: pull.title,
       body: pull.body ?? "",
       labels: issueLabels(issue),
       comments: commentsFor(config, number),
       source,
+      intentCapsule: capsule,
+      implementationAddendum,
       files,
       sha: pull.head.sha,
       pull
@@ -234,6 +275,137 @@ export function deriveAffectedRoutes(files, explicitRoute = "") {
   return [...new Set(routes)].sort();
 }
 
+function proofContract(details) {
+  return details.intentCapsule?.behaviorContract ?? null;
+}
+
+function implementationProofPlan(details) {
+  return validateProofPlan(
+    details.implementationAddendum?.intentAddendum?.proofPlan ?? {
+      version: 1,
+      tasks: []
+    }
+  );
+}
+
+function visualRoutes(details, explicitRoute = "") {
+  const routes = [
+    ...deriveAffectedRoutes(details.files, explicitRoute),
+    ...(proofContract(details)?.routes ?? []),
+    ...implementationProofPlan(details).tasks.map((task) => task.route)
+  ];
+  return [...new Set(routes)].sort();
+}
+
+export function validateVisualBehaviorPlan({
+  proofKind,
+  routes,
+  behaviorContract,
+  proofPlan
+}) {
+  if (!["UI", "GIF"].includes(proofKind)) return proofPlan;
+  if (!behaviorContract || behaviorContract.target?.kind !== "web") {
+    throw new AgentError("visual proof has no sealed web behavior contract", 1);
+  }
+  const expected = new Set(behaviorContract.checks.map((check) => check.id));
+  const covered = new Set();
+  if (!proofPlan.tasks.length) {
+    throw new AgentError("visual proof has no implementation browser plan", 1);
+  }
+  for (const task of proofPlan.tasks) {
+    if (!routes.includes(task.route)) {
+      throw new AgentError(`browser proof task route was not prepared: ${task.route}`, 1);
+    }
+    if (!task.finalAssertions.length) {
+      throw new AgentError("browser proof task has no final assertion", 1);
+    }
+    if (proofKind === "GIF" && !task.intermediateAssertions.length) {
+      throw new AgentError("GIF proof task has no intermediate assertion", 1);
+    }
+    for (const clauseId of task.clauseIds) {
+      if (!expected.has(clauseId)) {
+        throw new AgentError(`browser proof task references unknown clause ${clauseId}`, 1);
+      }
+      covered.add(clauseId);
+    }
+  }
+  const missing = [...expected].filter((clauseId) => !covered.has(clauseId));
+  if (missing.length) {
+    throw new AgentError(
+      `browser proof plan does not cover sealed clauses: ${missing.join(", ")}`,
+      1
+    );
+  }
+  if (proofKind === "GIF" && behaviorContract.captureBeforeAction !== true) {
+    throw new AgentError("GIF proof contract does not require capture before action", 1);
+  }
+  return proofPlan;
+}
+
+function browserBehaviorReport({ contract, observations, routes }) {
+  const results = observations.flatMap((observation) => observation.taskResults);
+  const checks = contract.checks.map((check) => {
+    const matching = results.filter((result) => result.clauseIds.includes(check.id));
+    const status =
+      matching.length === 0
+        ? "blocked"
+        : matching.every((result) => result.status === "pass")
+          ? "pass"
+          : "fail";
+    return {
+      contract_clause: `${check.id}: ${check.statement}`,
+      status,
+      severity: status === "fail" ? "high" : null,
+      evidence:
+        matching.length === 0
+          ? "No route-bound browser task returned evidence for this clause."
+          : matching.map((result) => `${result.route}: ${result.evidence}`).join(" "),
+      reproduction_steps: matching.flatMap((result) => result.reproductionSteps),
+      confidence: status === "pass" ? 0.95 : 0.99
+    };
+  });
+  const statuses = checks.map((check) => check.status);
+  const blocked = statuses.includes("blocked");
+  const failed = statuses.includes("fail");
+  return validateBehaviorReport(
+    {
+      overall_behavior: failed
+        ? "violates_contract"
+        : blocked
+          ? "blocked"
+          : "satisfies_contract",
+      overall_confidence: failed || blocked ? 0.99 : 0.95,
+      target: {
+        type: "web app",
+        access: routes.map((route) => `http://127.0.0.1:3000${route}`).join(", ")
+      },
+      checks,
+      anti_cheat_probes: observations.flatMap(
+        (observation) => observation.antiCheatProbes
+      ),
+      blockers: blocked
+        ? ["At least one sealed contract clause produced no browser evidence."]
+        : []
+    },
+    contract
+  );
+}
+
+function artifactDigestRecords(paths) {
+  return paths
+    .filter((path) => {
+      try {
+        return readFileSync(path).length > 0;
+      } catch {
+        return false;
+      }
+    })
+    .map((path) => ({
+      name: basename(path),
+      sha256: createHash("sha256").update(readFileSync(path)).digest("hex")
+    }));
+}
+
 function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'"'"'`)}'`;
 }
@@ -306,6 +478,10 @@ Artifacts:
 
 ${result.artifactUrl ? `- [Open or download the proof bundle](${result.artifactUrl})` : "- none"}
 
+Artifact digests:
+
+${result.artifactDigests?.length ? result.artifactDigests.map((record) => `- \`${record.sha256}\` ${record.name}`).join("\n") : "- none"}
+
 <details>
 <summary>Runner artifact inventory</summary>
 
@@ -317,6 +493,13 @@ Summary:
 ${result.summary}
 
 ${result.blocker ? `Blocker:\n\n${result.blocker}\n` : ""}
+
+Behavior contract results:
+
+${result.behaviorReport?.checks?.length ? result.behaviorReport.checks.map((check) => `- ${check.status}: ${check.contract_clause}`).join("\n") : "- none"}
+
+Structured behavior report:
+${markdownJsonBlock(result.behaviorReport ?? null)}
 
 Structured proof:
 ${markdownJsonBlock(result)}`;
@@ -423,35 +606,10 @@ async function legacyMain(args = parseArgs(), config = loadConfig()) {
   }
 
   if (result.status === "pending" && (proofKind === "UI" || proofKind === "GIF")) {
-    if (!routes.length) {
-      result.status = "blocked";
-      result.blocker = "Visual proof has no explicit route and no safely derivable changed Next.js page route.";
-      result.summary = "Visual proof did not exercise an affected route.";
-    } else {
-      const lane = proofKind === "GIF" ? "gifProof" : "visualProof";
-      const command = visualServerCommand(config, routes);
-      const remote = runCrabboxLane({ config, lane, command, routes, dryRun });
-      if (remote.attempted) {
-        result.commands.push(`crabbox run (${remote.provider}) ${command}`);
-        for (const path of [remote.recordPath, remote.logPath, ...(remote.artifacts ?? [])]) {
-          if (path) result.artifactPaths.push(path);
-        }
-      }
-      if (remote.ok && remote.attempted) {
-        result.status = "passed";
-        result.provider = remote.provider;
-        result.leaseId = remote.leaseId;
-        timingRecord = remote.timing;
-        result.summary = proofKind === "GIF" ? "Authentic Crabbox video and GIF proof were collected." : "Authentic Crabbox UI screenshots were collected.";
-      } else {
-        result.status = remote.attempted ? "failed" : "blocked";
-        result.provider = remote.provider;
-        result.leaseId = remote.leaseId;
-        timingRecord = remote.timing;
-        result.blocker = remote.reason || "Crabbox visual proof did not complete.";
-        result.summary = "Required visual proof is unavailable.";
-      }
-    }
+    result.status = "blocked";
+    result.blocker =
+      "Direct visual proof has no sealed behavior plan. Dispatch the trusted Agent Proof workflow.";
+    result.summary = "Visual proof did not run without semantic acceptance criteria.";
   }
 
   if (kind === "pr" && result.status === "passed" && run && !dryRun) {
@@ -541,6 +699,11 @@ function readModeDocument(args, name) {
 
 function validateRequest(request) {
   if (!request || typeof request !== "object") throw new AgentError("invalid proof request", 1);
+  request.intentDigest ??= "";
+  request.behaviorContract ??= null;
+  request.proofPlan = validateProofPlan(
+    request.proofPlan ?? { version: 1, tasks: [] }
+  );
   if (!["issue", "pr"].includes(request.kind)) throw new AgentError("invalid proof request kind", 1);
   if (!Number.isInteger(request.number) || request.number <= 0) throw new AgentError("invalid proof request number", 1);
   if (typeof request.requested !== "boolean") throw new AgentError("invalid proof request decision", 1);
@@ -555,7 +718,16 @@ function validateRequest(request) {
     if (!/^[0-9a-f]{40}$/i.test(String(request.sha ?? "")) || request.checkoutRef !== request.sha) {
       throw new AgentError("invalid exact PR proof ref", 1);
     }
+    if (
+      request.behaviorContract &&
+      (!/^[a-f0-9]{64}$/.test(request.intentDigest) ||
+        !/^[a-f0-9]{64}$/.test(request.behaviorContract.contractDigest ?? "") ||
+        !Array.isArray(request.behaviorContract.checks))
+    ) {
+      throw new AgentError("invalid sealed behavior proof context", 1);
+    }
   }
+  validateVisualBehaviorPlan(request);
   return request;
 }
 
@@ -570,13 +742,15 @@ function baseResult(proofKind, overrides = {}) {
     leaseId: "",
     summary: "Proof has not completed.",
     blocker: "",
+    behaviorReport: null,
+    artifactDigests: [],
     ...overrides
   };
 }
 
-function normalizeResult(result, proofKind) {
+function normalizeResult(result, request) {
   if (!result || typeof result !== "object") throw new AgentError("proof outcome has no result", 1);
-  if (result.proofKind !== proofKind) throw new AgentError("proof outcome kind mismatch", 1);
+  if (result.proofKind !== request.proofKind) throw new AgentError("proof outcome kind mismatch", 1);
   if (!["passed", "failed", "blocked", "skipped"].includes(result.status)) {
     throw new AgentError("proof outcome is not terminal", 1);
   }
@@ -586,8 +760,30 @@ function normalizeResult(result, proofKind) {
     }
   }
   result.artifactUrl ??= "";
+  result.artifactDigests ??= [];
+  result.behaviorReport ??= null;
   for (const name of ["artifactUrl", "provider", "leaseId", "summary", "blocker"]) {
     if (typeof result[name] !== "string") throw new AgentError(`proof outcome has invalid ${name}`, 1);
+  }
+  if (
+    !Array.isArray(result.artifactDigests) ||
+    result.artifactDigests.some(
+      (record) =>
+        typeof record?.name !== "string" ||
+        !record.name ||
+        !/^[a-f0-9]{64}$/.test(record?.sha256 ?? "")
+    )
+  ) {
+    throw new AgentError("proof outcome has invalid artifact digests", 1);
+  }
+  if (result.behaviorReport) {
+    validateBehaviorReport(result.behaviorReport, request.behaviorContract);
+  } else if (
+    request.requested &&
+    request.behaviorContract &&
+    result.status === "passed"
+  ) {
+    throw new AgentError("passing proof outcome has no behavior report", 1);
   }
   return result;
 }
@@ -644,7 +840,20 @@ async function prepareMain(args, config) {
   }
   const requested = isProofRequested(config, details, Boolean(args.explicit));
   const proofKind = requestedProofKind(config, details, args["proof-kind"]);
-  const routes = proofKind === "UI" || proofKind === "GIF" ? deriveAffectedRoutes(details.files, args.route) : [];
+  const behaviorContract = proofContract(details);
+  const proofPlan = implementationProofPlan(details);
+  const routes =
+    proofKind === "UI" || proofKind === "GIF"
+      ? visualRoutes(details, args.route)
+      : [];
+  if (requested) {
+    validateVisualBehaviorPlan({
+      proofKind,
+      routes,
+      behaviorContract,
+      proofPlan
+    });
+  }
   const request = validateRequest({
     kind,
     number,
@@ -652,7 +861,10 @@ async function prepareMain(args, config) {
     proofKind,
     routes,
     sha: details.sha ?? "",
-    checkoutRef: details.sha ?? config.repo.defaultBranch
+    checkoutRef: details.sha ?? config.repo.defaultBranch,
+    intentDigest: details.intentCapsule?.intentDigest ?? "",
+    behaviorContract,
+    proofPlan
   });
   if (args["prepare-file"]) writeJsonFile(args["prepare-file"], request);
   setGitHubOutput({
@@ -697,6 +909,11 @@ async function executeRemoteMain(args, config) {
         blocker: ""
       })
     );
+  } else if (request.proofKind === "service") {
+    throw new AgentError(
+      "service proof must run through the trusted disposable-service lane",
+      1
+    );
   } else if ((request.proofKind === "UI" || request.proofKind === "GIF") && request.routes.length === 0) {
     outcome = terminalOutcome(
       baseResult(request.proofKind, {
@@ -719,23 +936,47 @@ async function executeRemoteMain(args, config) {
       routes: request.routes,
       workdir,
       env: process.env,
-      noSync: request.kind === "pr"
+      noSync: request.kind === "pr",
+      behaviorPlan: visual ? request.proofPlan : null
     });
     const commands = remote.attempted ? [`crabbox run (${remote.provider}) ${command}`] : [];
     const artifactPaths = remoteArtifacts(remote);
+    const artifactDigests = artifactDigestRecords(artifactPaths);
+    const behaviorReport = request.behaviorContract
+      ? visual && remote.behaviorObservations?.length
+        ? browserBehaviorReport({
+            contract: request.behaviorContract,
+            observations: remote.behaviorObservations,
+            routes: request.routes
+          })
+        : commandBehaviorReport({
+            contract: request.behaviorContract,
+            passed: Boolean(remote.ok && remote.attempted),
+            access: request.sha
+              ? `pull request #${request.number} head ${request.sha}`
+              : request.checkoutRef,
+            commands: visual ? [`Open ${request.routes.join(", ")}`] : config.commands.proof,
+            blocker:
+              remote.ok && remote.attempted
+                ? ""
+                : remote.reason || "Crabbox proof did not complete."
+          })
+      : null;
     if (remote.ok && remote.attempted) {
       outcome = terminalOutcome(
         baseResult(request.proofKind, {
           status: "passed",
           commands,
           artifactPaths,
+          artifactDigests,
           provider: remote.provider,
           leaseId: remote.leaseId,
+          behaviorReport,
           summary: visual
             ? request.proofKind === "GIF"
-              ? "Authentic Crabbox video and GIF proof were collected for every affected route."
-              : "Authentic Crabbox UI screenshots were collected for every affected route."
-            : "Configured CI proof passed in Crabbox."
+              ? "Sealed behavior clauses passed in a recorded Crabbox browser run."
+              : "Sealed behavior clauses passed in a source-blind Crabbox browser run."
+            : "Sealed behavior clauses passed with configured CI proof in Crabbox."
         }),
         remote.timing ?? null
       );
@@ -753,8 +994,10 @@ async function executeRemoteMain(args, config) {
           status: remote.attempted ? "failed" : "blocked",
           commands,
           artifactPaths,
+          artifactDigests,
           provider: remote.provider ?? "",
           leaseId: remote.leaseId ?? "",
+          behaviorReport,
           summary: "Required visual proof is unavailable.",
           blocker: remote.reason || "Crabbox visual proof did not complete."
         }),
@@ -780,6 +1023,90 @@ function assertExactCheckout(request, workdir) {
       actual
     });
   }
+}
+
+async function executeServiceMain(args, config) {
+  const request = validateRequest(readModeDocument(args, "request"));
+  if (request.kind !== "pr" || request.proofKind !== "service") {
+    throw new AgentError(
+      "trusted service proof requires an exact pull request service request",
+      1
+    );
+  }
+  const workdir = resolve(args.workdir ?? process.cwd());
+  assertExactCheckout(request, workdir);
+  const commands = config.commands.serviceProof;
+  if (!Array.isArray(commands) || !commands.length) {
+    throw new AgentError("trusted service proof commands are not configured", 1);
+  }
+  const env = untrustedCodeEnvironment(config);
+  if (!String(process.env.DATABASE_URL ?? "").startsWith("postgres")) {
+    throw new AgentError("trusted service proof has no disposable database", 1);
+  }
+  env.DATABASE_URL = process.env.DATABASE_URL;
+  let failedCommand = "";
+  for (const command of commands) {
+    const result = runShell(command, {
+      cwd: workdir,
+      check: false,
+      env
+    });
+    if (result.status !== 0) {
+      failedCommand = command;
+      break;
+    }
+  }
+  const passed = !failedCommand;
+  const evidencePath = resolve(
+    workdir,
+    ".agent-output/service-proof.json"
+  );
+  writeJsonFile(evidencePath, {
+    version: 1,
+    headSha: request.sha,
+    database: "disposable-pgvector-postgres-17",
+    compatibilityRoles: ["anon", "authenticated"],
+    commands,
+    status: passed ? "passed" : "failed",
+    failedCommand
+  });
+  const behaviorReport = request.behaviorContract
+    ? commandBehaviorReport({
+        contract: request.behaviorContract,
+        passed,
+        access: `pull request #${request.number} head ${request.sha} with disposable pgvector Postgres 17`,
+        commands,
+        blocker: failedCommand
+          ? `${failedCommand} failed in trusted service proof.`
+          : ""
+      })
+    : null;
+  const result = baseResult("service", {
+    status: passed ? "passed" : "failed",
+    commands,
+    artifactPaths: [evidencePath],
+    artifactDigests: artifactDigestRecords([evidencePath]),
+    provider: "github-actions",
+    behaviorReport,
+    summary: passed
+      ? "Exact-head build, scenarios, and migrations passed against disposable pgvector Postgres 17."
+      : `Trusted service proof failed while running ${failedCommand}.`,
+    blocker: failedCommand
+      ? `${failedCommand} exited unsuccessfully.`
+      : ""
+  });
+  const outcome = terminalOutcome(result);
+  if (args["outcome-file"]) writeJsonFile(args["outcome-file"], outcome);
+  setGitHubOutput({ outcome_b64: encodeJson(outcome) });
+  finish(
+    {
+      ok: passed,
+      message: `service proof ${result.status}`,
+      outcome
+    },
+    Boolean(args.json),
+    passed ? 0 : 1
+  );
 }
 
 async function executeLocalMain(args, config) {
@@ -822,7 +1149,18 @@ async function executeLocalMain(args, config) {
     summary: failedCommand
       ? `${failedCommand} failed in the credential-free GitHub-hosted fallback.`
       : `GitHub-hosted CI proof passed; Crabbox fallback reason: ${prior.remoteReason}.`,
-    blocker: failedCommand ? `${failedCommand} exited unsuccessfully.` : ""
+    blocker: failedCommand ? `${failedCommand} exited unsuccessfully.` : "",
+    behaviorReport: request.behaviorContract
+      ? commandBehaviorReport({
+          contract: request.behaviorContract,
+          passed: !failedCommand,
+          access: request.sha
+            ? `pull request #${request.number} head ${request.sha}`
+            : request.checkoutRef,
+          commands: [config.commands.install, ...config.commands.proof],
+          blocker: failedCommand ? "" : ""
+        })
+      : null
   });
   const outcome = terminalOutcome(result);
   if (args["outcome-file"]) writeJsonFile(args["outcome-file"], outcome);
@@ -838,11 +1176,31 @@ function failedWorkflowResult(request, summary) {
   return baseResult(request.proofKind, {
     status: "failed",
     summary,
-    blocker: summary
+    blocker: summary,
+    behaviorReport: request.behaviorContract
+      ? commandBehaviorReport({
+          contract: request.behaviorContract,
+          passed: false,
+          access: request.sha
+            ? `pull request #${request.number} head ${request.sha}`
+            : request.checkoutRef,
+          commands: [],
+          blocker: summary
+        })
+      : null
   });
 }
 
-export function resolveTerminalResult({ request, remoteOutcome, remoteJobResult, localOutcome, localJobResult }) {
+export function resolveTerminalResult({
+  request,
+  remoteOutcome,
+  remoteJobResult,
+  localOutcome,
+  localJobResult,
+  serviceOutcome = null,
+  serviceJobResult = "skipped",
+  serviceConfigJobResult = "skipped"
+}) {
   validateRequest(request);
   if (!request.requested) {
     return baseResult(request.proofKind, {
@@ -850,11 +1208,27 @@ export function resolveTerminalResult({ request, remoteOutcome, remoteJobResult,
       summary: "Proof was not requested."
     });
   }
+  if (request.proofKind === "service") {
+    if (
+      serviceJobResult === "success" &&
+      serviceConfigJobResult === "success" &&
+      serviceOutcome?.terminal === true
+    ) {
+      const result = normalizeResult(serviceOutcome.result, request);
+      if (result.status === "passed") return result;
+    }
+    return failedWorkflowResult(
+      request,
+      serviceConfigJobResult === "failure"
+        ? "Trusted Render Blueprint validation failed."
+        : "Trusted service proof failed before producing a passing terminal result."
+    );
+  }
   if (remoteJobResult === "success" && remoteOutcome?.terminal === true) {
-    return normalizeResult(remoteOutcome.result, request.proofKind);
+    return normalizeResult(remoteOutcome.result, request);
   }
   if (request.proofKind === "CI" && localJobResult === "success" && localOutcome?.terminal === true) {
-    const result = normalizeResult(localOutcome.result, "CI");
+    const result = normalizeResult(localOutcome.result, request);
     if (result.status !== "passed") return failedWorkflowResult(request, "Credential-free local proof job reported an inconsistent result.");
     return result;
   }
@@ -882,7 +1256,14 @@ async function finalizeMain(args, config) {
     remoteOutcome,
     remoteJobResult: String(args["remote-job-result"] ?? "skipped"),
     localOutcome,
-    localJobResult: String(args["local-job-result"] ?? "skipped")
+    localJobResult: String(args["local-job-result"] ?? "skipped"),
+    serviceOutcome: args["service-outcome-base64"]
+      ? decodeJson(args["service-outcome-base64"], "service outcome")
+      : null,
+    serviceJobResult: String(args["service-job-result"] ?? "skipped"),
+    serviceConfigJobResult: String(
+      args["service-config-job-result"] ?? "skipped"
+    )
   });
   let timingRecord = remoteOutcome?.timing ?? null;
   let mayMutateTarget = true;
@@ -940,6 +1321,7 @@ async function main(args = parseArgs()) {
   const config = loadConfig();
   if (args["prepare-file"] || args.prepare) return prepareMain(args, config);
   if (args["execute-remote"]) return executeRemoteMain(args, config);
+  if (args["execute-service"]) return executeServiceMain(args, config);
   if (args["execute-local"]) return executeLocalMain(args, config);
   if (args.finalize) return finalizeMain(args, config);
   return legacyMain(args, config);

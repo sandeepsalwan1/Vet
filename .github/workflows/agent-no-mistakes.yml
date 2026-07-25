@@ -28,6 +28,16 @@ on:
     secrets:
       OPENAI_API_KEY:
         required: true
+      VERCEL_TOKEN:
+        required: false
+      VERCEL_OIDC_TOKEN:
+        required: false
+      HCLOUD_TOKEN:
+        required: false
+      HETZNER_TOKEN:
+        required: false
+      HETZNER_API_TOKEN:
+        required: false
   workflow_dispatch:
     inputs:
       pr-number:
@@ -51,7 +61,7 @@ on:
         type: number
         default: 0
       repair-attempt:
-        description: Bounded automated reviewer repair attempt
+        description: Shared semantic revision count
         required: false
         type: number
         default: 0
@@ -60,7 +70,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: agent-no-mistakes-${{ inputs.pr-number }}
+  group: agent-semantic-${{ inputs.pr-number }}
   cancel-in-progress: false
 
 jobs:
@@ -78,6 +88,9 @@ jobs:
       concurrency_group: ${{ steps.concurrency.outputs.group }}
       head_ref: ${{ steps.prepare.outputs.head_ref }}
       head_sha: ${{ steps.prepare.outputs.head_sha }}
+      head_tree: ${{ steps.prepare.outputs.head_tree }}
+      replay_passed: ${{ steps.prepare.outputs.replay_passed }}
+      skip_model: ${{ steps.prepare.outputs.skip_model }}
     steps:
       - name: Validate approval authority
         if: ${{ inputs.approval }}
@@ -87,7 +100,7 @@ jobs:
         run: |
           set -euo pipefail
           test "${APPROVAL_ACTOR,,}" = "${REPOSITORY_OWNER,,}"
-      - name: Mark requested PR head pending
+      - name: Capture requested PR head
         id: pending
         env:
           GH_TOKEN: ${{ github.token }}
@@ -95,7 +108,6 @@ jobs:
         run: |
           set -euo pipefail
           pull_file="$RUNNER_TEMP/no-mistakes-pull.json"
-          payload_file="$RUNNER_TEMP/no-mistakes-pending.json"
           gh pr view "${{ inputs.pr-number }}" --repo "$GITHUB_REPOSITORY" \
             --json headRepository,isCrossRepository,headRefOid > "$pull_file"
           head_repo="$(jq -r '.headRepository.nameWithOwner // ""' "$pull_file")"
@@ -105,15 +117,7 @@ jobs:
             echo "refusing pending status for an untrusted PR head" >&2
             exit 1
           fi
-          jq -n \
-            --arg state pending \
-            --arg context no-mistakes \
-            --arg description "no-mistakes gate preparing" \
-            --arg target_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            '{state: $state, context: $context, description: $description, target_url: $target_url}' \
-            > "$payload_file"
           printf 'head_sha=%s\n' "$head_sha" >> "$GITHUB_OUTPUT"
-          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$head_sha" --input "$payload_file" >/dev/null
       - uses: actions/checkout@v5
         with:
           ref: main
@@ -132,13 +136,24 @@ jobs:
       - name: Validate trusted PR and mark pending
         id: prepare
         env:
+          GATE_INTENT: ${{ inputs.intent }}
           GH_TOKEN: ${{ github.token }}
         run: >-
           node scripts/agent-no-mistakes-gate.mjs
           --pr-number "${{ inputs.pr-number }}"
           --expected-head "${{ inputs.expected-head-sha }}"
+          --intent "$GATE_INTENT"
+          --intent-file .agent-output/no-mistakes-intent
+          --approval-state "${{ inputs.approval }}"
           --prepare
           --json
+      - uses: actions/upload-artifact@v4
+        if: steps.prepare.outputs.skip_model != 'true'
+        with:
+          name: no-mistakes-context-${{ inputs.pr-number }}
+          path: .agent-output/no-mistakes-intent
+          include-hidden-files: true
+          if-no-files-found: error
       - name: Record prepare failure
         if: ${{ always() && steps.pending.outputs.head_sha != '' && steps.prepare.outcome != 'success' }}
         env:
@@ -159,6 +174,7 @@ jobs:
   gate:
     name: run isolated no-mistakes
     needs: prepare
+    if: needs.prepare.outputs.skip_model != 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: ${{ needs.prepare.outputs.concurrency_group }}
@@ -168,192 +184,168 @@ jobs:
       contents: read
       pull-requests: read
       issues: read
-    env:
-      DOCKER_IMAGE: node:22-bookworm@sha256:a25c9934ff6382cd4f08b6bc26c82bf4ea69b1e6f8dabfb2ead457374127c365
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: main
+          ref: ${{ github.workflow_sha }}
           path: trusted
           persist-credentials: false
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.prepare.outputs.head_sha }}
-          path: candidate
+          path: target
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Pin exact candidate branch
-        env:
-          HEAD_REF: ${{ needs.prepare.outputs.head_ref }}
-          HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
-        run: |
-          test "$(git -C candidate rev-parse HEAD)" = "$HEAD_SHA"
-          git -C candidate switch -C "$HEAD_REF" "$HEAD_SHA"
-          test "$(git -C candidate rev-parse HEAD)" = "$HEAD_SHA"
-      - name: Resolve trusted gate intent
-        env:
-          GATE_INTENT: ${{ inputs.intent }}
-          GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
-        run: >-
-          node trusted/scripts/agent-no-mistakes-gate.mjs
-          --pr-number "${{ inputs.pr-number }}"
-          --prepare-gate
-          --expected-head "$HEAD_SHA"
-          --intent "$GATE_INTENT"
-          --intent-file "$RUNNER_TEMP/no-mistakes-intent"
-          --json
-      # Dependency lifecycle code runs before agent auth and only inside a
-      # credential-free container. The host npm invocation never runs scripts.
-      - name: Install candidate dependencies before agent auth
-        working-directory: candidate
-        run: |
-          env -u GH_TOKEN -u GITHUB_TOKEN -u AGENT_PAT -u OPENAI_API_KEY -u CODEX_API_KEY npm ci --ignore-scripts --no-audit --no-fund
-          docker pull "$DOCKER_IMAGE"
-          docker run --rm \
-            --network none \
-            --user "$(id -u):$(id -g)" \
-            --cap-drop ALL \
-            --security-opt no-new-privileges \
-            --read-only \
-            --mount "type=bind,src=$PWD,dst=/workspace,readonly" \
-            --mount "type=bind,src=$PWD/node_modules,dst=/workspace/node_modules" \
-            --mount type=tmpfs,dst=/tmp,tmpfs-mode=1777 \
-            --workdir /workspace \
-            --env HOME=/tmp/home \
-            --env npm_config_cache=/tmp/npm-cache \
-            --env npm_config_nodedir=/usr/local \
-            "$DOCKER_IMAGE" \
-            npm rebuild --offline --no-audit --no-fund
-          git diff --exit-code
-          git diff --cached --exit-code
-      - name: Install pinned gate tools before agent auth
-        env:
-          NO_MISTAKES_TELEMETRY: "0"
-        run: |
-          npm install --global @openai/codex@0.144.1
-          mkdir -p "$RUNNER_TEMP/no-mistakes-bin"
-          curl -fsSL https://github.com/kunchenguid/no-mistakes/releases/download/v1.40.0/no-mistakes-v1.40.0-linux-amd64.tar.gz -o "$RUNNER_TEMP/no-mistakes.tar.gz"
-          echo "2445b65179d0e8e9bbf408322f57190f344f9946cfed3971c84fa16ce4122e91  $RUNNER_TEMP/no-mistakes.tar.gz" | sha256sum --check --strict
-          tar -xzf "$RUNNER_TEMP/no-mistakes.tar.gz" -C "$RUNNER_TEMP/no-mistakes-bin"
-          chmod 755 "$RUNNER_TEMP/no-mistakes-bin/no-mistakes"
-          echo "$RUNNER_TEMP/no-mistakes-bin" >> "$GITHUB_PATH"
-          codex exec \
-            --sandbox read-only \
-            -c 'approval_policy="never"' \
-            -c 'shell_environment_policy.inherit="core"' \
-            -c 'shell_environment_policy.ignore_default_excludes=false' \
-            --help >/dev/null
-      - name: Configure isolated gate home
-        env:
-          NM_HOME: ${{ runner.temp }}/no-mistakes
-        run: |
-          mkdir -p "$NM_HOME"
-          umask 077
-          cat > "$NM_HOME/config.yaml" <<'EOF'
-          agent: codex
-          session_reuse: false
-          intent:
-            enabled: false
-          auto_fix:
-            review: 2
-          agent_args_override:
-            codex:
-              - --model
-              - ${{ needs.prepare.outputs.backend_model }}
-              - -c
-              - 'model_reasoning_effort="${{ needs.prepare.outputs.backend_effort }}"'
-              - --sandbox
-              - workspace-write
-              - -c
-              - 'approval_policy="never"'
-              - -c
-              - 'shell_environment_policy.inherit="core"'
-              - -c
-              - 'shell_environment_policy.ignore_default_excludes=false'
-              - -c
-              - 'shell_environment_policy.exclude=["*KEY*","*SECRET*","*TOKEN*","*PASSWORD*","*CREDENTIAL*"]'
-              - -c
-              - 'developer_instructions="This is an isolated no-mistakes pipeline stage. Execute the requested stage directly. Do not invoke skills, autoreview, no-mistakes, external reviewers, or nested agents. Do not run complete repository tests, builds, linters, or package-manager installs; trusted credential-free steps provide deterministic validation. During review, report findings only. During review-fix, apply only safe non-functional fixes requested by no-mistakes, then run one focused verification. Never modify AGENTS.md, package manifests or lockfiles, agent scripts/configuration, skills, or GitHub workflows. Treat test-only assertion changes as documentation-complete when they do not alter runtime behavior, APIs, configuration, workflows, or user-visible behavior and the trusted intent does not request docs. Return the requested structured JSON."'
-          EOF
-      - name: Run trusted offline test baseline before agent auth
-        working-directory: candidate
-        run: |
-          docker run --rm --pull never \
-            --network none \
-            --read-only \
-            --cap-drop ALL \
-            --pids-limit 512 \
-            --security-opt no-new-privileges \
-            --tmpfs /tmp:rw,nosuid,nodev,size=1073741824 \
-            --mount "type=bind,src=$PWD,dst=/source,readonly" \
-            --mount "type=bind,src=$PWD/node_modules,dst=/workspace/node_modules,readonly" \
-            --mount type=volume,dst=/workspace \
-            --workdir /workspace \
-            --env HOME=/tmp/home \
-            --env npm_config_cache=/tmp/npm-cache \
-            "$DOCKER_IMAGE" sh -lc \
-            'mkdir -p "$HOME" && tar -C /source --exclude=./node_modules --exclude=./.git -cf - . | tar --no-same-owner -xf - -C /workspace && npm run typecheck && npm run build && npm run test:scenarios'
-          git diff --exit-code
-          git diff --cached --exit-code
-      # Codex receives a writable isolated worktree but no GitHub token.
-      # Trusted publication, baseline, and lint commands remain separate.
-      - name: Run isolated no-mistakes without publish credentials
+          cache: npm
+          cache-dependency-path: target/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: no-mistakes-context-${{ inputs.pr-number }}
+          path: target/.agent-output
+      - uses: ./trusted/.github/actions/setup-crabbox
+        with:
+          repo-root: trusted
+          vercel-ready: ${{ vars.CRABBOX_VERCEL_READY }}
+      - name: Run isolated no-mistakes in Crabbox
         id: gate
-        working-directory: candidate
+        continue-on-error: true
         env:
           CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          HEAD_REF: ${{ needs.prepare.outputs.head_ref }}
-          HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
-          NM_HOME: ${{ runner.temp }}/no-mistakes
-          NM_TEST_START_DAEMON: "1"
-          NO_MISTAKES_TELEMETRY: "0"
-          USER_APPROVED: ${{ inputs.approval }}
-          VET_GATE_DEPS: ${{ github.workspace }}/candidate
-        run: |
-          args=(
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_OIDC_TOKEN: ${{ secrets.VERCEL_OIDC_TOKEN }}
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          HETZNER_TOKEN: ${{ secrets.HETZNER_TOKEN }}
+          HETZNER_API_TOKEN: ${{ secrets.HETZNER_API_TOKEN }}
+          CRABBOX_VERCEL_READY: ${{ vars.CRABBOX_VERCEL_READY }}
+          CRABBOX_HETZNER_READY: ${{ vars.CRABBOX_HETZNER_READY }}
+          REMOTE_COMMAND: >-
+            set -e;
+            cd target;
+            export AGENT_TARGET_ROOT="$PWD";
+            agent_key="$CODEX_API_KEY"; unset CODEX_API_KEY OPENAI_API_KEY;
+            external_head="${{ needs.prepare.outputs.head_sha }}";
+            expected_tree="${{ needs.prepare.outputs.head_tree }}";
+            head_ref="${{ needs.prepare.outputs.head_ref }}";
+            result_file=.agent-output/result.json;
+            mkdir -p .agent-output;
+            preserve_setup_failure() {
+              exit_code=$?;
+              trap - EXIT;
+              if [ "$exit_code" -ne 0 ] ||
+                [ ! -s "$result_file" ] ||
+                [ ! -s .agent-output/model-usage.json ]; then
+                unset agent_key CODEX_API_KEY OPENAI_API_KEY;
+                if node ../trusted/scripts/agent-no-mistakes-gate.mjs
+                  --write-setup-failure
+                  --expected-head "$external_head"
+                  --result-file "$result_file"
+                  --usage-file .agent-output/model-usage.json
+                  --model "${{ needs.prepare.outputs.backend_model }}"
+                  --effort "${{ needs.prepare.outputs.backend_effort }}"
+                  --json >/dev/null 2>&1 &&
+                  node ../trusted/scripts/agent-crabbox-run.mjs
+                  --emit-output-lane noMistakesRemote; then
+                  exit 0;
+                fi;
+                if [ "$exit_code" -eq 0 ]; then exit_code=1; fi;
+              fi;
+              exit "$exit_code";
+            };
+            trap preserve_setup_failure EXIT;
+            git init --quiet &&
+            git config user.name "no-mistakes Gate" &&
+            git config user.email "no-mistakes@example.invalid" &&
+            git add --all &&
+            git commit --quiet --allow-empty --no-verify -m "chore: seed exact gate head" &&
+            source_head="$(git rev-parse HEAD)" &&
+            test "$(git rev-parse HEAD^{tree})" = "$expected_tree" &&
+            git switch -C "$head_ref" "$source_head" &&
+            npm ci --ignore-scripts --no-audit --no-fund &&
+            npm run typecheck &&
+            npm run build &&
+            npm run test:scenarios &&
+            npm install --global --ignore-scripts --no-audit --no-fund @openai/codex@0.144.1 &&
+            mkdir -p /tmp/no-mistakes-bin /tmp/no-mistakes-home &&
+            curl -fsSL
+            https://github.com/kunchenguid/no-mistakes/releases/download/v1.40.0/no-mistakes-v1.40.0-linux-amd64.tar.gz
+            -o /tmp/no-mistakes.tar.gz &&
+            echo "2445b65179d0e8e9bbf408322f57190f344f9946cfed3971c84fa16ce4122e91  /tmp/no-mistakes.tar.gz"
+            | sha256sum --check --strict &&
+            tar -xzf /tmp/no-mistakes.tar.gz -C /tmp/no-mistakes-bin &&
+            chmod 755 /tmp/no-mistakes-bin/no-mistakes &&
+            export PATH="/tmp/no-mistakes-bin:$PATH" &&
+            node ../trusted/scripts/agent-no-mistakes-gate.mjs
+            --write-config /tmp/no-mistakes-home/config.yaml
+            --model "${{ needs.prepare.outputs.backend_model }}"
+            --effort "${{ needs.prepare.outputs.backend_effort }}" --json &&
+            approval_flag="";
+            if [ "${{ inputs.approval }}" = "true" ]; then approval_flag="--user-approved"; fi;
+            gate_status=0;
+            export CODEX_API_KEY="$agent_key";
+            export NM_HOME=/tmp/no-mistakes-home;
+            export VET_GATE_DEPS="$PWD";
+            export NO_MISTAKES_TELEMETRY=0;
+            node ../trusted/scripts/agent-no-mistakes-gate.mjs
             --run-gate
-            --expected-head "$HEAD_SHA"
-            --expected-ref "$HEAD_REF"
-            --intent-file "$RUNNER_TEMP/no-mistakes-intent"
-            --fix-patch "$RUNNER_TEMP/no-mistakes-result/fix.patch"
-            --result-file "$RUNNER_TEMP/no-mistakes-result/result.json"
+            --expected-head "$external_head"
+            --expected-source-tree "$expected_tree"
+            --expected-ref "$head_ref"
+            --intent-file .agent-output/no-mistakes-intent
+            --fix-patch .agent-output/fix.patch
+            --result-file .agent-output/result.json
             --repo-dir "$PWD"
-            --json
-          )
-          if [ "$USER_APPROVED" = "true" ]; then
-            args+=(--user-approved)
-          fi
-          env -u GH_TOKEN -u GITHUB_TOKEN -u AGENT_PAT -u OPENAI_API_KEY \
-            -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-            -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_CACHE_URL \
-            -u ACTIONS_RESULTS_URL \
-            node ../trusted/scripts/agent-no-mistakes-gate.mjs "${args[@]}"
+            $approval_flag --json || gate_status=$?;
+            unset agent_key CODEX_API_KEY;
+            test -s .agent-output/result.json &&
+            case "$gate_status" in 0|1) ;; *) exit "$gate_status" ;; esac &&
+            node ../trusted/scripts/agent-no-mistakes-gate.mjs
+            --export-usage .agent-output/result.json
+            --output-file .agent-output/model-usage.json
+            --model "${{ needs.prepare.outputs.backend_model }}"
+            --effort "${{ needs.prepare.outputs.backend_effort }}"
+            --repo-dir "$PWD" --json
+        run: >-
+          node trusted/scripts/agent-crabbox-run.mjs
+          --lane noMistakesRemote
+          --command "$REMOTE_COMMAND"
+          --workdir "$GITHUB_WORKSPACE"
+          --delegated-workdir "$GITHUB_WORKSPACE/target"
+          --remote-harness trusted/scripts/agent-crabbox-run.mjs
+          --record-file target/.agent-output/no-mistakes-remote.json
+          --json
       - name: Upload sanitized gate result and native fix
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: no-mistakes-result-${{ inputs.pr-number }}
-          path: ${{ runner.temp }}/no-mistakes-result
+          path: |
+            target/.agent-output/result.json
+            target/.agent-output/fix.patch
+            target/.agent-output/model-usage.json
+            target/.agent-output/no-mistakes-remote.json
           if-no-files-found: ignore
           retention-days: 1
-      # Pinned no-mistakes uses this isolated detached daemon path to
-      # preserve the already-sanitized ephemeral Codex credential environment.
-      - name: Stop isolated no-mistakes daemon
-        if: ${{ always() }}
-        continue-on-error: true
-        env:
-          NM_HOME: ${{ runner.temp }}/no-mistakes
-          NM_TEST_START_DAEMON: "1"
-        run: no-mistakes daemon stop --force
+      - name: Upload redacted remote diagnostics
+        if: always() && steps.gate.outcome != 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: no-mistakes-remote-diagnostics-${{ inputs.pr-number }}
+          path: |
+            target/.agent-output/crabbox-noMistakesRemote-*.json
+            target/.agent-output/crabbox-noMistakesRemote-*.log
+          include-hidden-files: true
+          if-no-files-found: warn
 
   finalize:
     name: finalize no-mistakes
     needs: [prepare, gate]
-    if: ${{ always() && needs.prepare.result == 'success' }}
+    if: >-
+      always() &&
+      needs.prepare.result == 'success' &&
+      needs.prepare.outputs.skip_model != 'true'
     runs-on: ubuntu-latest
     outputs:
       next-head: ${{ steps.finalize.outputs.next-head }}
@@ -393,8 +385,26 @@ jobs:
           --expected-head "$HEAD_SHA"
           --fix-patch "$RUNNER_TEMP/no-mistakes-result/fix.patch"
           --result-file "$RUNNER_TEMP/no-mistakes-result/result.json"
+          --remote-record "$RUNNER_TEMP/no-mistakes-result/no-mistakes-remote.json"
+          --approval-state "${{ inputs.approval }}"
           --infrastructure-retry "${{ inputs.infrastructure-retry }}"
           --repair-attempt "${{ inputs.repair-attempt }}"
+          --json
+      - name: Record exact no-mistakes cost
+        if: always() && steps.download.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
+        run: >-
+          node scripts/agent-cost.mjs
+          --pr-number "${{ inputs.pr-number }}"
+          --head-sha "$HEAD_SHA"
+          --lane no-mistakes
+          --usage-file "$RUNNER_TEMP/no-mistakes-result/model-usage.json"
+          --remote-record "$RUNNER_TEMP/no-mistakes-result/no-mistakes-remote.json"
+          --remote-lane noMistakesRemote
+          --retry-reason "semantic revision ${{ inputs.repair-attempt }}"
+          --effect decision
           --json
 
   dispatch-repair:
@@ -463,7 +473,7 @@ jobs:
             --ref main \
             -f pr-number="$PR_NUMBER" \
             -f expected-head-sha="$HEAD_SHA" \
-            -f repair-attempt=0
+            -f repair-attempt="${{ needs.finalize.outputs.next-repair-attempt }}"
 
   dispatch-automerge:
     name: dispatch automerge
@@ -473,8 +483,11 @@ jobs:
     if: >-
       always() &&
       needs.prepare.result == 'success' &&
+      ((needs.prepare.outputs.skip_model == 'true' &&
+      needs.prepare.outputs.replay_passed == 'true') ||
+      (needs.prepare.outputs.skip_model != 'true' &&
       needs.finalize.result == 'success' &&
-      needs.finalize.outputs.repair-action == 'none'
+      needs.finalize.outputs.repair-action == 'none'))
     runs-on: ubuntu-latest
     permissions:
       actions: write

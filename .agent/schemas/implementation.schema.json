@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "summary", "changes", "checks", "intentAddendum"],
+  "properties": {
+    "version": { "const": 1 },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "changes": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "type": "string", "minLength": 1, "maxLength": 2000 }
+    },
+    "checks": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "type": "string", "minLength": 1, "maxLength": 2000 }
+    },
+    "intentAddendum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decisions",
+        "assumptions",
+        "scopeClarifications",
+        "verificationDecisions",
+        "proofPlan",
+        "unresolvedQuestions"
+      ],
+      "properties": {
+        "decisions": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        },
+        "assumptions": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        },
+        "scopeClarifications": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        },
+        "verificationDecisions": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        },
+        "proofPlan": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "tasks"],
+          "properties": {
+            "version": { "const": 1 },
+            "tasks": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "clauseIds",
+                  "route",
+                  "actions",
+                  "intermediateAssertions",
+                  "finalAssertions"
+                ],
+                "properties": {
+                  "clauseIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "uniqueItems": true,
+                    "items": { "type": "string", "pattern": "^AC[1-9][0-9]*$" }
+                  },
+                  "route": {
+                    "type": "string",
+                    "pattern": "^/[A-Za-z0-9/_-]*$",
+                    "maxLength": 1000
+                  },
+                  "actions": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": { "$ref": "#/$defs/action" }
+                  },
+                  "intermediateAssertions": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": { "$ref": "#/$defs/assertion" }
+                  },
+                  "finalAssertions": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": { "$ref": "#/$defs/assertion" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "unresolvedQuestions": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "path"],
+          "properties": {
+            "type": { "const": "navigate" },
+            "path": { "type": "string", "pattern": "^/[A-Za-z0-9/_-]*$", "maxLength": 1000 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "selector"],
+          "properties": {
+            "type": { "const": "click" },
+            "selector": { "type": "string", "minLength": 1, "maxLength": 1000 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "selector", "value"],
+          "properties": {
+            "type": { "const": "fill" },
+            "selector": { "type": "string", "minLength": 1, "maxLength": 1000 },
+            "value": { "type": "string", "maxLength": 1000 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "key"],
+          "properties": {
+            "type": { "const": "press" },
+            "key": { "type": "string", "minLength": 1, "maxLength": 1000 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "milliseconds"],
+          "properties": {
+            "type": { "const": "wait" },
+            "milliseconds": { "type": "integer", "minimum": 0, "maximum": 10000 }
+          }
+        }
+      ]
+    },
+    "assertion": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "selector"],
+          "properties": {
+            "type": { "enum": ["visible", "hidden"] },
+            "selector": { "type": "string", "minLength": 1, "maxLength": 1000 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "selector", "value"],
+          "properties": {
+            "type": { "const": "text" },
+            "selector": { "type": "string", "minLength": 1, "maxLength": 1000 },
+            "value": { "type": "string", "maxLength": 1000 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "path"],
+          "properties": {
+            "type": { "const": "url" },
+            "path": { "type": "string", "pattern": "^/[A-Za-z0-9/_-]*$", "maxLength": 1000 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "selector", "name", "value"],
+          "properties": {
+            "type": { "const": "attribute" },
+            "selector": { "type": "string", "minLength": 1, "maxLength": 1000 },
+            "name": { "type": "string", "minLength": 1, "maxLength": 1000 },
+            "value": { "type": "string", "maxLength": 1000 }
+          }
+        }
+      ]
+    }
+  }
+}

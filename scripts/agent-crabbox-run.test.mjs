@@ -1,24 +1,32 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
+  browserBehaviorArgs,
   browserLaunchArgs,
   browserRouteMarker,
   browserRouteMarkerArgs,
   buildRunArgs,
+  emitDelegatedOutput,
   emitImplementationOutput,
   gifArtifactArgs,
   gifEncoderBootstrapCommands,
   parseTimingReport,
+  parseBrowserBehaviorObservation,
   providerChildEnvironment,
   recordedBrowserLaunchScript,
   recoverLeaseHandle,
+  resolveDelegatedWorkdir,
   runCrabboxLane,
+  restoreDelegatedOutput,
   restoreImplementationOutput,
   selectCrabboxProvider,
+  selectCrabboxProviders,
   validateBrowserLaunchOutput,
   validateBrowserRouteMarker,
   validateCollectedArtifacts,
@@ -183,6 +191,98 @@ test("provider choice uses ready credentials, then credential-free visual Crabbo
     selectCrabboxProvider(config, "visualProof", { VERCEL_TOKEN: "configured" }).provider,
     "local-container"
   );
+  assert.deepEqual(
+    selectCrabboxProviders(config, "ciRemote", {
+      VERCEL_TOKEN: "configured",
+      CRABBOX_VERCEL_READY: "true",
+      HCLOUD_TOKEN: "configured",
+      CRABBOX_HETZNER_READY: "true"
+    }).map((candidate) => candidate.provider),
+    ["vercel-sandbox", "hetzner"]
+  );
+  assert.deepEqual(
+    selectCrabboxProviders(config, "visualProof", {
+      HCLOUD_TOKEN: "configured",
+      CRABBOX_HETZNER_READY: "true"
+    }).map((candidate) => candidate.provider),
+    ["hetzner", "local-container"]
+  );
+  assert.equal(
+    selectCrabboxProvider(config, "fallbackReadinessRemote", {}).provider,
+    "local-container"
+  );
+});
+
+test("provider acquisition failure retries the configured fallback before remote execution", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "vet-agent-provider-retry-"));
+  const bin = join(dir, "bin");
+  const workdir = join(dir, "work");
+  const calls = join(dir, "calls.jsonl");
+  mkdirSync(bin);
+  mkdirSync(workdir);
+  writeFileSync(
+    join(bin, "crabbox"),
+    `#!/usr/bin/env node
+import { appendFileSync } from "node:fs";
+const args = process.argv.slice(2);
+const provider = args[args.indexOf("--provider") + 1];
+appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ provider }) + "\\n");
+if (provider === "vercel-sandbox") {
+  process.stderr.write("provider acquisition unavailable\\n");
+  process.exit(1);
+}
+process.stdout.write("AGENT_CRABBOX_REMOTE_COMMAND_STARTED_V1\\n");
+process.stdout.write(JSON.stringify({
+  provider,
+  leaseId: "cbx_fallback",
+  totalMs: 12,
+  exitCode: 0
+}) + "\\n");
+`
+  );
+  chmodSync(join(bin, "crabbox"), 0o755);
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${bin}:${originalPath}`;
+  t.after(() => {
+    process.env.PATH = originalPath;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const result = runCrabboxLane({
+    config,
+    lane: "readinessRemote",
+    command: "true",
+    env: {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      VERCEL_TOKEN: "vercel",
+      CRABBOX_VERCEL_READY: "true",
+      HCLOUD_TOKEN: "hetzner",
+      CRABBOX_HETZNER_READY: "true"
+    },
+    workdir
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.provider, "hetzner");
+  assert.deepEqual(
+    result.providerAttempts.map((attempt) => ({
+      provider: attempt.provider,
+      ok: attempt.ok,
+      remoteCommandStarted: attempt.remoteCommandStarted
+    })),
+    [
+      { provider: "vercel-sandbox", ok: false, remoteCommandStarted: false },
+      { provider: "hetzner", ok: true, remoteCommandStarted: true }
+    ]
+  );
+  assert.deepEqual(
+    readFileSync(calls, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line).provider),
+    ["vercel-sandbox", "hetzner"]
+  );
 });
 
 test("Crabbox child receives only selected provider auth and readiness", () => {
@@ -237,6 +337,14 @@ test("Crabbox child receives only selected provider auth and readiness", () => {
     providerChildEnvironment(config, { provider: "vercel-sandbox", lane: "implementRemote" }, source).CODEX_API_KEY,
     "agent"
   );
+  assert.equal(
+    providerChildEnvironment(config, { provider: "vercel-sandbox", lane: "reviewRemote" }, source).CODEX_API_KEY,
+    "agent"
+  );
+  assert.equal(
+    providerChildEnvironment(config, { provider: "vercel-sandbox", lane: "noMistakesRemote" }, source).CODEX_API_KEY,
+    "agent"
+  );
 });
 
 test("visual artifacts require a readiness marker for every requested route", () => {
@@ -284,14 +392,23 @@ test("local-container browser launch uses container-safe Chromium flags", () => 
     "cbx_123",
     "--browser",
     "--fullscreen",
-    "--url",
-    "http://127.0.0.1:3000/request",
     "--",
     "/usr/local/bin/crabbox-browser",
     "--no-sandbox",
-    "--disable-dev-shm-usage"
+    "--disable-dev-shm-usage",
+    "--remote-debugging-address=127.0.0.1",
+    "--remote-debugging-port=9222",
+    "--no-first-run",
+    "http://127.0.0.1:3000/request"
   ]);
   assert.equal(browserLaunchArgs({ provider: "hetzner", leaseId: "cbx_123", route: "/request" }).includes("--no-sandbox"), false);
+  assert.ok(
+    browserLaunchArgs({
+      provider: "hetzner",
+      leaseId: "cbx_123",
+      route: "/request"
+    }).includes('exec "$BROWSER" --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run "$1"')
+  );
 });
 
 test("GIF capture starts before the browser navigates and encodes that recording", () => {
@@ -324,6 +441,51 @@ test("GIF capture starts before the browser navigates and encodes that recording
       "--trimmed-video-output",
       "/tmp/proof/screen.trimmed.mp4"
     ]
+  );
+});
+
+test("browser behavior handoff is bounded to the retained lease and route", () => {
+  const args = browserBehaviorArgs({
+    provider: "local-container",
+    leaseId: "cbx_123",
+    route: "/request",
+    tasks: [
+      {
+        clauseIds: ["AC1"],
+        route: "/request",
+        actions: [],
+        intermediateAssertions: [],
+        finalAssertions: [{ type: "visible", selector: "main" }]
+      }
+    ]
+  });
+  assert.ok(args.includes("--no-sync"));
+  assert.ok(args.includes("cbx_123"));
+  assert.equal(args.some((value) => value.includes("OPENAI_API_KEY")), false);
+
+  const observation = {
+    route: "/request",
+    status: "pass",
+    taskResults: [
+      {
+        route: "/request",
+        status: "pass",
+        clauseIds: ["AC1"],
+        reproductionSteps: ["Navigate to /request"],
+        assertions: [{ phase: "final", assertion: "main is visible", passed: true }]
+      }
+    ],
+    antiCheatProbes: [
+      { probe: "Rendered route binding", result: "Browser ended on /request." }
+    ]
+  };
+  const output = `noise
+AGENT_BROWSER_BEHAVIOR_V1 ${Buffer.from(JSON.stringify(observation)).toString("base64")}
+`;
+  assert.deepEqual(parseBrowserBehaviorObservation(output, "/request"), observation);
+  assert.throws(
+    () => parseBrowserBehaviorObservation(output, "/other"),
+    /no report|invalid shape/
   );
 });
 
@@ -379,7 +541,11 @@ test("Vercel implementation uses a bounded stdout handoff instead of unsupported
     ["CODEX_API_KEY"]
   );
   assert.equal(vercelArgs.includes("--download"), false);
-  assert.match(vercelArgs.at(-1), /--emit-implementation-output$/);
+  assert.match(vercelArgs.at(-1), /AGENT_CRABBOX_REMOTE_COMMAND_STARTED_V1/);
+  assert.match(
+    vercelArgs.at(-1),
+    /--emit-output-lane implementRemote --output-workdir "\$agent_crabbox_root\/\."$/
+  );
   assert.equal(vercelArgs.includes("--stop-after"), false);
   assert.equal(vercelArgs.includes("GH_TOKEN"), false);
 
@@ -390,11 +556,135 @@ test("Vercel implementation uses a bounded stdout handoff instead of unsupported
     lane: "implementRemote",
     leasePath: "/tmp/unused.json"
   });
-  assert.ok(directArgs.includes(".agent-output/codex.patch=.agent-output/codex.patch"));
-  assert.ok(directArgs.includes(".agent-output/implementation.md=.agent-output/implementation.md"));
+  assert.equal(directArgs.includes("--download"), false);
+  assert.match(
+    directArgs.at(-1),
+    /--emit-output-lane implementRemote --output-workdir "\$agent_crabbox_root\/\."$/
+  );
 });
 
-test("delegated implementation output restores only the two bounded trusted files", (t) => {
+test("remote review uses the same bounded credential-free Crabbox handoff", (t) => {
+  const remote = mkdtempSync(join(tmpdir(), "vet-agent-remote-review-"));
+  const local = mkdtempSync(join(tmpdir(), "vet-agent-local-review-"));
+  t.after(() => {
+    rmSync(remote, { recursive: true, force: true });
+    rmSync(local, { recursive: true, force: true });
+  });
+  mkdirSync(join(remote, ".agent-output"));
+  writeFileSync(join(remote, ".agent-output/review.json"), "{}\n");
+  writeFileSync(join(remote, ".agent-output/review.patch"), "");
+  writeFileSync(join(remote, ".agent-output/model-usage.json"), "{\"complete\":true}\n");
+
+  const args = buildRunArgs({
+    provider: "vercel-sandbox",
+    command: "run reviewer",
+    visual: false,
+    lane: "reviewRemote",
+    leasePath: "/tmp/unused.json",
+  });
+  assert.deepEqual(
+    args.filter((value, index) => args[index - 1] === "--allow-env"),
+    ["CODEX_API_KEY"],
+  );
+  assert.match(
+    args.at(-1),
+    /--emit-output-lane reviewRemote --output-workdir "\$agent_crabbox_root\/\."$/
+  );
+  assert.equal(args.includes("--download"), false);
+  assert.equal(args.includes("GH_TOKEN"), false);
+
+  const output = `review log\n${emitDelegatedOutput("reviewRemote", remote)}\n`;
+  const restored = restoreDelegatedOutput("reviewRemote", output, local);
+  assert.deepEqual(restored, [
+    join(local, ".agent-output/model-usage.json"),
+    join(local, ".agent-output/review.json"),
+    join(local, ".agent-output/review.patch"),
+  ]);
+  assert.equal(readFileSync(join(local, ".agent-output/review.patch"), "utf8"), "");
+});
+
+test("semantic lanes can sync a trusted sibling while restoring only into the candidate", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "vet-agent-semantic-root-"));
+  const target = join(root, "target");
+  const outside = mkdtempSync(join(tmpdir(), "vet-agent-semantic-outside-"));
+  t.after(() => {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+  mkdirSync(target);
+
+  assert.equal(resolveDelegatedWorkdir(root, target), realpathSync(target));
+  assert.throws(
+    () => resolveDelegatedWorkdir(root, outside),
+    /must stay inside the synced workdir/
+  );
+
+  const args = buildRunArgs({
+    provider: "vercel-sandbox",
+    command: "cd target && true",
+    visual: false,
+    lane: "reviewRemote",
+    leasePath: "/tmp/unused.json",
+    remoteHarnessPath: "trusted/scripts/agent-crabbox-run.mjs",
+    remoteOutputPath: "target"
+  });
+  assert.match(args.at(-1), /\( cd target && true \)/);
+  assert.match(
+    args.at(-1),
+    /AGENT_TARGET_ROOT="\$agent_crabbox_root\/target" node "\$agent_crabbox_root\/trusted\/scripts\/agent-crabbox-run\.mjs" --emit-output-lane reviewRemote --output-workdir "\$agent_crabbox_root\/target"$/
+  );
+
+  mkdirSync(join(target, ".agent-output"));
+  writeFileSync(join(target, ".agent-output/review.json"), "{}\n");
+  writeFileSync(join(target, ".agent-output/review.patch"), "");
+  writeFileSync(join(target, ".agent-output/model-usage.json"), "{\"complete\":true}\n");
+  cpSync("scripts", join(root, "trusted/scripts"), { recursive: true });
+  const shellRun = spawnSync("sh", ["-lc", args.at(-1)], {
+    cwd: root,
+    encoding: "utf8"
+  });
+  assert.equal(shellRun.status, 0, shellRun.stderr);
+  assert.match(shellRun.stdout, /AGENT_CRABBOX_REVIEW_OUTPUT_V1 /);
+
+  const emitted = spawnSync(
+    process.execPath,
+    [
+      fileURLToPath(new URL("./agent-crabbox-run.mjs", import.meta.url)),
+      "--emit-output-lane",
+      "reviewRemote",
+      "--output-workdir",
+      target
+    ],
+    {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, AGENT_TARGET_ROOT: root }
+    }
+  );
+  assert.equal(emitted.status, 0, emitted.stderr);
+  assert.match(emitted.stdout, /^AGENT_CRABBOX_REVIEW_OUTPUT_V1 /);
+});
+
+test("remote no-mistakes handoff allows an absent sealed fix patch", (t) => {
+  const remote = mkdtempSync(join(tmpdir(), "vet-agent-remote-gate-"));
+  const local = mkdtempSync(join(tmpdir(), "vet-agent-local-gate-"));
+  t.after(() => {
+    rmSync(remote, { recursive: true, force: true });
+    rmSync(local, { recursive: true, force: true });
+  });
+  mkdirSync(join(remote, ".agent-output"));
+  writeFileSync(join(remote, ".agent-output/result.json"), "{\"status\":\"passed\"}\n");
+  writeFileSync(join(remote, ".agent-output/model-usage.json"), "{\"complete\":true}\n");
+
+  const output = emitDelegatedOutput("noMistakesRemote", remote);
+  const restored = restoreDelegatedOutput("noMistakesRemote", output, local);
+  assert.deepEqual(restored, [
+    join(local, ".agent-output/model-usage.json"),
+    join(local, ".agent-output/result.json"),
+  ]);
+});
+
+test("delegated implementation output restores only the three bounded trusted files", (t) => {
   const remote = mkdtempSync(join(tmpdir(), "vet-agent-remote-output-"));
   const local = mkdtempSync(join(tmpdir(), "vet-agent-local-output-"));
   t.after(() => {
@@ -404,13 +694,15 @@ test("delegated implementation output restores only the two bounded trusted file
   mkdirSync(join(remote, ".agent-output"));
   writeFileSync(join(remote, ".agent-output/codex.patch"), "diff --git a/a b/a\n");
   writeFileSync(join(remote, ".agent-output/implementation.md"), "Implemented the issue.\n");
+  writeFileSync(join(remote, ".agent-output/model-usage.json"), "{\"complete\":true}\n");
 
   const output = `worker log\n${emitImplementationOutput(remote)}\n`;
   const restored = restoreImplementationOutput(output, local);
 
   assert.deepEqual(restored, [
     join(local, ".agent-output/codex.patch"),
-    join(local, ".agent-output/implementation.md")
+    join(local, ".agent-output/implementation.md"),
+    join(local, ".agent-output/model-usage.json")
   ]);
   assert.equal(readFileSync(restored[0], "utf8"), "diff --git a/a b/a\n");
   assert.equal(readFileSync(restored[1], "utf8"), "Implemented the issue.\n");

@@ -26,6 +26,20 @@ import {
   setGitHubOutput,
   upsertManagedComment,
 } from "./agent-lib.mjs";
+import {
+  intentCapsuleForManagedTriage,
+  parseImplementationAddendum
+} from "./agent-intent.mjs";
+import {
+  MAX_SEMANTIC_REVISIONS,
+  loadRepairLedger,
+  openRepairFindings,
+  recordRepairEvaluation,
+  recordRepairRevision,
+  repairEvaluationFor,
+  saveRepairLedger,
+  semanticInputDigest,
+} from "./agent-repair-ledger.mjs";
 
 const ARTIFACT_VERSION = 5;
 const MAX_NATIVE_FIX_PATCH_BYTES = 2_000_000;
@@ -34,7 +48,7 @@ const MIN_SCANNED_SECRET_LENGTH = 12;
 const NO_MISTAKES_COMMENT_MARKER = "<!-- agent-gate-no-mistakes:v1 -->";
 const STATUS_CONTEXT = "no-mistakes";
 export const MAX_INFRASTRUCTURE_RETRIES = 1;
-export const MAX_GATE_REPAIR_ATTEMPTS = 2;
+export const MAX_GATE_REPAIR_ATTEMPTS = MAX_SEMANTIC_REVISIONS;
 const PASSING_OUTCOMES = new Set(["checks-passed", "passed"]);
 const ALLOWED_OUTCOMES = new Set([
   ...PASSING_OUTCOMES,
@@ -73,11 +87,30 @@ const PUBLIC_FAILURE_STAGES = new Set([
   "pr",
   "ci",
 ]);
+
+export function noMistakesReplayState(evaluation) {
+  return {
+    skipModel: Boolean(evaluation),
+    replayPassed: PASSING_OUTCOMES.has(String(evaluation?.outcome ?? "")),
+  };
+}
+
+function readApprovalState(value) {
+  const normalized = String(value ?? "false").trim().toLowerCase();
+  if (!["true", "false"].includes(normalized)) {
+    throw new AgentError("no-mistakes approval state is invalid", 2);
+  }
+  return normalized === "true";
+}
 const GATE_EVIDENCE_BOUNDARY = `Evidence boundary:
 - Configured deterministic scenario, API, or CLI checks count as direct product evidence when their output and assertions demonstrate the requested behavior.
 - Agent Proof owns browser, visual, and live-provider evidence. Require that evidence only when the trusted issue or managed triage explicitly requests it.
 - Do not block solely because UI or live-provider evidence is absent when the trusted request calls for CI or non-visual proof and a configured check directly exercises the behavior.
 - Still block when the requested behavior is not demonstrated by either direct checks or an applicable Agent Proof result.`;
+const CODEX_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
+const CODEX_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);
+const ISOLATED_GATE_INSTRUCTIONS =
+  "This is an isolated no-mistakes pipeline stage. Execute the requested stage directly. Do not invoke skills, autoreview, no-mistakes, external reviewers, or nested agents. Do not run complete repository tests, builds, linters, or package-manager installs; trusted credential-free steps provide deterministic validation. During review, report findings only. During review-fix, apply only safe non-functional fixes requested by no-mistakes, then run one focused verification. Never modify AGENTS.md, package manifests or lockfiles, agent scripts/configuration, skills, or GitHub workflows. Treat test-only assertion changes as documentation-complete when they do not alter runtime behavior, APIs, configuration, workflows, or user-visible behavior and the trusted intent does not request docs. Return the requested structured JSON.";
 
 export function noMistakesCommentMarker(config) {
   return `${config.comments.gate}\n${NO_MISTAKES_COMMENT_MARKER}`;
@@ -100,37 +133,24 @@ export function selectTrustedManagedTriageComment(comments, marker, repoOwner) {
 
 export function composeEffectiveIntent({
   callerIntent,
-  sourceIssue,
-  triageComment,
+  intentCapsule,
+  implementationAddendum,
 }) {
   const policy = String(callerIntent ?? "").trim();
-  const issueNumber = Number(sourceIssue?.number);
-  const issueTitle = String(sourceIssue?.title ?? "").trim();
-  const issueBody =
-    String(sourceIssue?.body ?? "").trim() || "No issue body provided.";
-  const triage = String(triageComment?.body ?? "").trim();
   if (!policy) throw new AgentError("missing caller gate intent", 2);
-  if (!Number.isInteger(issueNumber) || issueNumber < 1 || !issueTitle) {
-    throw new AgentError("source issue is missing required intent context", 1);
-  }
-  if (!triage) {
-    throw new AgentError(
-      `source issue #${issueNumber} has no trusted managed triage context`,
-      1,
-    );
+  if (!intentCapsule || !implementationAddendum) {
+    throw new AgentError("sealed no-mistakes intent context is missing", 1);
   }
   const effective = `Gate policy:
 ${policy}
 
 ${GATE_EVIDENCE_BOUNDARY}
 
-Authoritative source issue #${issueNumber}
-Title: ${issueTitle}
-Body:
-${issueBody}
+Sealed intent capsule:
+${JSON.stringify(intentCapsule, null, 2)}
 
-Managed triage context:
-${triage}`;
+Implementation intent addendum:
+${JSON.stringify(implementationAddendum, null, 2)}`;
   if (Buffer.byteLength(effective, "utf8") > 120_000) {
     throw new AgentError(
       "effective no-mistakes intent exceeds the safe argument limit",
@@ -138,6 +158,168 @@ ${triage}`;
     );
   }
   return effective;
+}
+
+export function noMistakesConfig({ model, effort }) {
+  const resolvedModel = String(model ?? "").trim();
+  const resolvedEffort = String(effort ?? "").trim();
+  if (
+    !CODEX_MODEL_PATTERN.test(resolvedModel) ||
+    !CODEX_EFFORTS.has(resolvedEffort)
+  ) {
+    throw new AgentError("no-mistakes model configuration is invalid", 2);
+  }
+  return `agent: codex
+session_reuse: false
+intent:
+  enabled: false
+auto_fix:
+  review: 2
+agent_args_override:
+  codex:
+    - --model
+    - ${JSON.stringify(resolvedModel)}
+    - -c
+    - ${JSON.stringify(`model_reasoning_effort=${JSON.stringify(resolvedEffort)}`)}
+    - --sandbox
+    - workspace-write
+    - -c
+    - 'approval_policy="never"'
+    - -c
+    - 'shell_environment_policy.inherit="core"'
+    - -c
+    - 'shell_environment_policy.ignore_default_excludes=false'
+    - -c
+    - 'shell_environment_policy.exclude=["*KEY*","*SECRET*","*TOKEN*","*PASSWORD*","*CREDENTIAL*"]'
+    - -c
+    - ${JSON.stringify(`developer_instructions=${JSON.stringify(ISOLATED_GATE_INSTRUCTIONS)}`)}
+`;
+}
+
+function optionalCount(value) {
+  if (value === "-") return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number : undefined;
+}
+
+export function parseNoMistakesUsageStats(output, { runId, model, effort }) {
+  const lines = String(output ?? "").split(/\r?\n/);
+  const header = lines.findIndex(
+    (line) =>
+      line.trimStart().startsWith("STEP") &&
+      line.includes("Δ IN (round)") &&
+      line.includes("CACHE RD (raw)"),
+  );
+  if (header === -1) {
+    return {
+      version: 1,
+      backend: "codex",
+      lane: "no-mistakes",
+      model,
+      effort,
+      complete: false,
+      calls: [],
+    };
+  }
+  const calls = [];
+  for (const line of lines.slice(header + 1)) {
+    if (!line.trim()) break;
+    const fields = line.trim().split(/\s{2,}/);
+    if (fields.length !== 13) continue;
+    const [
+      step,
+      round,
+      purpose,
+      session,
+      deltaInput,
+      deltaOutput,
+      deltaCached,
+      rawInput,
+      rawOutput,
+      rawCached,
+      ,
+      ,
+      reasoning,
+    ] = fields;
+    const raw = {
+      input: optionalCount(rawInput),
+      output: optionalCount(rawOutput),
+      cached: optionalCount(rawCached),
+    };
+    const delta = {
+      input: optionalCount(deltaInput),
+      output: optionalCount(deltaOutput),
+      cached: optionalCount(deltaCached),
+    };
+    const useRaw = delta.input === null && delta.output === null && delta.cached === null && session === "cold";
+    const inputTokens = useRaw ? raw.input : delta.input;
+    const outputTokens = useRaw ? raw.output : delta.output;
+    const cachedInputTokens = useRaw ? raw.cached : delta.cached;
+    if (
+      ![inputTokens, outputTokens, cachedInputTokens].every(
+        (value) => Number.isSafeInteger(value) && value >= 0,
+      ) ||
+      cachedInputTokens > inputTokens
+    ) {
+      continue;
+    }
+    const reasoningOutputTokens = optionalCount(reasoning);
+    calls.push({
+      id: createHash("sha256")
+        .update(
+          `${runId}\0${step}\0${round}\0${purpose}\0${session}\0${inputTokens}\0${outputTokens}`,
+        )
+        .digest("hex"),
+      inputTokens,
+      cachedInputTokens,
+      outputTokens,
+      reasoningOutputTokens:
+        Number.isSafeInteger(reasoningOutputTokens) ? reasoningOutputTokens : null,
+    });
+  }
+  return {
+    version: 1,
+    backend: "codex",
+    lane: "no-mistakes",
+    model,
+    effort,
+    complete: calls.length > 0,
+    calls,
+  };
+}
+
+export function exportNoMistakesUsage(
+  { resultFile, outputFile, model, effort, repoDir },
+  dependencies = {},
+) {
+  const artifact = JSON.parse(readFileSync(resolve(resultFile), "utf8"));
+  const runId = String(artifact?.runId ?? "");
+  if (!runId || !/^[A-Za-z0-9._:-]{1,80}$/.test(runId)) {
+    const usage = {
+      version: 1,
+      backend: "codex",
+      lane: "no-mistakes",
+      model,
+      effort,
+      complete: artifact?.outcome === "setup-failed",
+      calls: [],
+    };
+    writePrivateFile(outputFile, `${JSON.stringify(usage, null, 2)}\n`);
+    return usage;
+  }
+  const execute = dependencies.runCommand ?? runCommand;
+  const stats = execute(
+    "no-mistakes",
+    ["stats", "--run", runId, "--agents"],
+    { cwd: resolve(repoDir), env: gateEnvironment(process.env) },
+  );
+  const usage = parseNoMistakesUsageStats(stats.stdout, {
+    runId,
+    model,
+    effort,
+  });
+  writePrivateFile(outputFile, `${JSON.stringify(usage, null, 2)}\n`);
+  return usage;
 }
 
 function parseCsvRow(line) {
@@ -383,6 +565,7 @@ export function createNativeFixPatch(
     environment = process.env,
     execute = runCommand,
     readDirectory = readdirSync,
+    publishedHead = expectedHead,
   } = {},
 ) {
   if (gate?.status !== "passed" || !gate?.run?.head) return null;
@@ -466,7 +649,7 @@ export function createNativeFixPatch(
   const fixedTree = gateGit(execute, match.gateDir, ["rev-parse", `${match.fixedHead}^{tree}`]).stdout.trim();
   writePrivateFile(patchPath, patch);
   return {
-    baseHead: expectedHead,
+    baseHead: publishedHead,
     fixedHead: match.fixedHead,
     fixedTree,
     patchSha256: createHash("sha256").update(patch).digest("hex"),
@@ -530,10 +713,15 @@ function safeFinding(finding) {
 export function sanitizedGateArtifact(
   gate,
   expectedHead,
-  { nativeFix = null, unpublishedChanges = false, userApproved = false } = {},
+  {
+    nativeFix = null,
+    unpublishedChanges = false,
+    userApproved = false,
+    validatedSourceHead = expectedHead,
+  } = {},
 ) {
   let normalized = gate;
-  const headMatches = validatedHeadMatches(gate, expectedHead);
+  const headMatches = validatedHeadMatches(gate, validatedSourceHead);
   const normalizedNativeFix = normalizeNativeFix(nativeFix, expectedHead);
   let artifactNativeFix = null;
   if (unpublishedChanges) {
@@ -634,6 +822,46 @@ function actionsRunUrl(env = process.env) {
   return `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`;
 }
 
+export function validateNoMistakesRemoteRecord(config, path) {
+  const record = JSON.parse(readFileSync(resolve(path), "utf8"));
+  const providers = new Set(config.crabbox?.nonVisualProviders ?? []);
+  const attempted = record?.attempted === true;
+  const providerValid = attempted
+    ? providers.has(record?.provider)
+    : record?.provider === "";
+  const leaseValid = attempted
+    ? record?.ok
+      ? /^[A-Za-z0-9._:-]+$/.test(String(record?.leaseId ?? ""))
+      : !record?.leaseId ||
+        /^[A-Za-z0-9._:-]+$/.test(String(record.leaseId))
+    : record?.leaseId === "";
+  const timingValid = record?.timing
+    ? record.timing.provider === record.provider &&
+      record.timing.leaseId === record.leaseId &&
+      Number.isInteger(record.timing.exitCode) &&
+      Number.isFinite(record.timing.totalMs) &&
+      record.timing.totalMs >= 0
+    : !record?.ok;
+  if (
+    typeof record?.ok !== "boolean" ||
+    typeof record?.attempted !== "boolean" ||
+    record?.lane !== "noMistakesRemote" ||
+    !providerValid ||
+    !leaseValid ||
+    !timingValid ||
+    (record.ok && (!attempted || record.timing.exitCode !== 0 || String(record?.reason ?? "")))
+  ) {
+    throw new AgentError("Crabbox no-mistakes provenance is invalid", 1);
+  }
+  return {
+    provider: record.provider,
+    leaseId: record.leaseId,
+    totalMs: record.timing?.totalMs ?? 0,
+    ok: record.ok,
+    reason: String(record.reason ?? ""),
+  };
+}
+
 function fetchPullSnapshot(config, prNumber) {
   return getPullSnapshot(config, prNumber);
 }
@@ -657,7 +885,7 @@ export function assertTrustedIntentSource(config, snapshot, context, dependencie
   );
 }
 
-function fetchIntentContext(config, sourceIssueNumber) {
+function fetchIntentContext(config, sourceIssueNumber, pull) {
   const root = `repos/${config.repo.owner}/${config.repo.name}`;
   const sourceIssue = ghApiJson(`${root}/issues/${sourceIssueNumber}`);
   if (sourceIssue?.pull_request) {
@@ -678,7 +906,30 @@ function fetchIntentContext(config, sourceIssueNumber) {
       1,
     );
   }
-  return { sourceIssue, triageComment };
+  const { capsule } = intentCapsuleForManagedTriage({
+    issue: sourceIssue,
+    comments,
+    triageComment,
+    marker: config.comments.triage,
+    repoOwner: config.repo.owner,
+  });
+  const metadata = parseImplementationMetadata(pull?.body);
+  const implementationAddendum = parseImplementationAddendum(pull?.body);
+  if (
+    metadata.intentDigest !== capsule.intentDigest ||
+    metadata.implementationAddendumDigest !== implementationAddendum.digest
+  ) {
+    throw new AgentError(
+      "no-mistakes intent context does not match immutable implementation metadata",
+      1,
+    );
+  }
+  return {
+    sourceIssue,
+    triageComment,
+    intentCapsule: capsule,
+    implementationAddendum,
+  };
 }
 
 function markPending(config, pull, dryRun) {
@@ -693,8 +944,13 @@ function markPending(config, pull, dryRun) {
   });
 }
 
-export function gateRepairDecision(artifact, repairAttempt = 0) {
+export function gateRepairDecision(
+  artifact,
+  repairAttempt = 0,
+  { replayed = false } = {},
+) {
   const attempt = readRepairAttempt(repairAttempt);
+  if (replayed) return { state: "unchanged", nextAttempt: null };
   if (artifact?.outcome === "native-fix" && artifact?.nativeFix) {
     if (attempt < MAX_GATE_REPAIR_ATTEMPTS) {
       return { state: "native-fix", nextAttempt: attempt + 1 };
@@ -712,14 +968,14 @@ export function gateRepairDecision(artifact, repairAttempt = 0) {
     artifact.findings.every((finding) => finding?.action === "auto-fix");
   if (!actionable) return { state: "none", nextAttempt: null };
   if (attempt < MAX_GATE_REPAIR_ATTEMPTS) {
-    return { state: "retry", nextAttempt: attempt + 1 };
+    return { state: "retry", nextAttempt: attempt };
   }
   return { state: "exhausted", nextAttempt: null };
 }
 
-function artifactBlocker(artifact, repairAttempt = 0) {
+function artifactBlocker(artifact, repairAttempt = 0, repairDecision = null) {
   if (artifact.status === "passed") return "";
-  const repair = gateRepairDecision(artifact, repairAttempt);
+  const repair = repairDecision ?? gateRepairDecision(artifact, repairAttempt);
   if (repair.state === "retry") {
     return `automatic reviewer repair pending (${repair.nextAttempt}/${MAX_GATE_REPAIR_ATTEMPTS})`;
   }
@@ -730,6 +986,9 @@ function artifactBlocker(artifact, repairAttempt = 0) {
   }
   if (repair.state === "native-fix") {
     return `native no-mistakes fixes ready to publish (${repair.nextAttempt}/${MAX_GATE_REPAIR_ATTEMPTS})`;
+  }
+  if (repair.state === "unchanged") {
+    return "unchanged exact-head findings already recorded; automatic repair stopped";
   }
   if (artifact.outcome === "invalid-output") {
     return "no-mistakes output remained invalid after its bounded internal retry";
@@ -749,7 +1008,15 @@ function artifactBlocker(artifact, repairAttempt = 0) {
   return "no-mistakes did not return a passing terminal outcome";
 }
 
-export function gateCommentBody({ artifact, branch, sha, runUrl, repairAttempt = 0 }) {
+export function gateCommentBody({
+  artifact,
+  branch,
+  sha,
+  runUrl,
+  repairAttempt = 0,
+  repairDecision = null,
+  remote = null,
+}) {
   return `## no-mistakes Gate
 
 Status: ${artifact.status}
@@ -757,6 +1024,7 @@ Branch: ${branch}
 Head: ${sha}
 Gate mode: ${artifact.userApproved ? "user-approved unattended run for this exact head" : "interactive; ask-user decisions block"}
 ${runUrl ? `Actions run: ${runUrl}\n` : ""}
+${remote ? `Crabbox provider: ${remote.provider}\nCrabbox lease: ${remote.leaseId}\nCrabbox duration: ${remote.totalMs} ms\n` : ""}
 Arbitrary finding descriptions, source intent, and process output are omitted. Known infrastructure summaries use an exact allowlist.
 
 Structured gate:
@@ -771,11 +1039,15 @@ ${markdownJsonBlock({
     `no-mistakes axi run${artifact.userApproved ? " --yes" : ""} --skip rebase,test,document,lint,push,pr,ci`,
   ],
   findings: artifact.findings,
-  blocker: artifactBlocker(artifact, repairAttempt),
+  blocker: artifactBlocker(artifact, repairAttempt, repairDecision),
 })}`;
 }
 
-export function gateLabelChanges(config, artifact, { repairAttempt = 0 } = {}) {
+export function gateLabelChanges(
+  config,
+  artifact,
+  { repairAttempt = 0, repairDecision = null } = {},
+) {
   if (artifact?.status === "passed" && artifact?.userApproved) {
     return {
       add: [config.labels.automerge],
@@ -783,7 +1055,8 @@ export function gateLabelChanges(config, artifact, { repairAttempt = 0 } = {}) {
     };
   }
   if (artifact?.status === "passed") return { add: [], remove: [] };
-  if (["retry", "native-fix"].includes(gateRepairDecision(artifact, repairAttempt).state)) {
+  const repair = repairDecision ?? gateRepairDecision(artifact, repairAttempt);
+  if (["retry", "native-fix"].includes(repair.state)) {
     return { add: [], remove: [] };
   }
   return {
@@ -895,7 +1168,15 @@ export function applyNativeFixPatch(
   return { nextHead, nextRepairAttempt: decision.nextAttempt, paths: stagedPaths };
 }
 
-function recordNativeFix({ artifact, config, nextHead, pull, repairAttempt, dryRun = false }) {
+function recordNativeFix({
+  artifact,
+  config,
+  nextHead,
+  pull,
+  repairAttempt,
+  remote = null,
+  dryRun = false,
+}) {
   const runUrl = actionsRunUrl();
   const status = setCommitStatus({
     config,
@@ -917,6 +1198,7 @@ Branch: ${pull.head.ref}
 Previous head: ${artifact.expectedHead}
 Next head: ${nextHead}
 ${runUrl ? `Actions run: ${runUrl}\n` : ""}
+${remote ? `Crabbox provider: ${remote.provider}\nCrabbox lease: ${remote.leaseId}\nCrabbox duration: ${remote.totalMs} ms\n` : ""}
 Native review auto-fix produced and published a credential-free patch.
 Fresh exact-head CI, independent review, and no-mistakes validation are required before merge.
 
@@ -941,6 +1223,7 @@ export function finalizeNativeFixPublication({
   pull,
   repairAttempt,
   patchPath,
+  remote = null,
   dryRun = false,
   applyPatch = applyNativeFixPatch,
   recordFix = recordNativeFix,
@@ -952,6 +1235,7 @@ export function finalizeNativeFixPublication({
     patchPath,
     pull,
     repairAttempt,
+    remote,
     dryRun,
   });
   const result = recordFix({
@@ -960,6 +1244,7 @@ export function finalizeNativeFixPublication({
     nextHead: published.nextHead || "new exact-head commit created on publish",
     pull,
     repairAttempt,
+    remote,
     dryRun,
   });
   setOutput({
@@ -987,6 +1272,8 @@ function recordTerminal({
   statusSha = pull.head.sha,
   mutatePull = true,
   repairAttempt = 0,
+  repairDecision = null,
+  remote = null,
   dryRun = false,
 }) {
   const failed = artifact.status !== "passed";
@@ -1009,7 +1296,10 @@ function recordTerminal({
       status: commitStatus,
     };
   }
-  const labelChanges = gateLabelChanges(config, artifact, { repairAttempt });
+  const labelChanges = gateLabelChanges(config, artifact, {
+    repairAttempt,
+    repairDecision,
+  });
   const labels = {
     added: addLabels(config, pull.number, labelChanges.add, dryRun),
     removed: removeLabels(config, pull.number, labelChanges.remove, dryRun),
@@ -1024,6 +1314,8 @@ function recordTerminal({
       sha: pull.head.sha,
       runUrl,
       repairAttempt,
+      repairDecision,
+      remote,
     }),
     dryRun,
   });
@@ -1160,7 +1452,7 @@ function readRepairAttempt(value) {
   return attempt;
 }
 
-function setupFailureArtifact(expectedHead) {
+export function setupFailureArtifact(expectedHead) {
   return {
     version: ARTIFACT_VERSION,
     status: "failed",
@@ -1175,11 +1467,98 @@ function setupFailureArtifact(expectedHead) {
   };
 }
 
+export function writeSetupFailureResult({
+  expectedHead,
+  resultFile,
+  usageFile = "",
+  model = "",
+  effort = "",
+}) {
+  if (!resultFile) {
+    throw new AgentError("missing no-mistakes setup failure result path", 2);
+  }
+  const artifact = setupFailureArtifact(readExpectedHead(expectedHead));
+  const resultPath = writePrivateFile(
+    resultFile,
+    `${JSON.stringify(artifact, null, 2)}\n`,
+  );
+  let usagePath = "";
+  if (usageFile) {
+    usagePath = writePrivateFile(
+      usageFile,
+      `${JSON.stringify({
+        version: 1,
+        backend: "codex",
+        lane: "no-mistakes",
+        model,
+        effort,
+        complete: true,
+        calls: [],
+      }, null, 2)}\n`,
+    );
+  }
+  return { artifact, resultPath, usagePath };
+}
+
 async function main() {
   const args = parseArgs();
   const config = loadConfig();
   const dryRun = Boolean(args["dry-run"]);
   const prNumber = Number(args["pr-number"]);
+
+  if (args["write-setup-failure"]) {
+    const result = writeSetupFailureResult({
+      expectedHead: args["expected-head"],
+      resultFile: args["result-file"],
+      usageFile: args["usage-file"],
+      model: args.model,
+      effort: args.effort,
+    });
+    finish(
+      {
+        ok: true,
+        message: "wrote terminal no-mistakes setup failure",
+        resultPath: result.resultPath,
+        usagePath: result.usagePath,
+      },
+      Boolean(args.json),
+    );
+    return;
+  }
+
+  if (args["write-config"]) {
+    const path = writePrivateFile(
+      args["write-config"],
+      noMistakesConfig({ model: args.model, effort: args.effort }),
+    );
+    finish(
+      { ok: true, message: "wrote isolated no-mistakes configuration", path },
+      Boolean(args.json),
+    );
+    return;
+  }
+
+  if (args["export-usage"]) {
+    const usage = exportNoMistakesUsage({
+      resultFile: args["export-usage"],
+      outputFile: args["output-file"],
+      model: args.model,
+      effort: args.effort,
+      repoDir: args["repo-dir"],
+    });
+    finish(
+      {
+        ok: usage.complete,
+        message: usage.complete
+          ? "exported exact no-mistakes usage"
+          : "no-mistakes usage is incomplete",
+        calls: usage.calls.length,
+      },
+      Boolean(args.json),
+      usage.complete ? 0 : 1,
+    );
+    return;
+  }
 
   if (args.prepare) {
     if (!Number.isInteger(prNumber)) {
@@ -1191,12 +1570,65 @@ async function main() {
     if (pull.head.sha !== expectedHead) {
       throw new AgentError("PR head changed before no-mistakes preparation", 1);
     }
-    const context = fetchIntentContext(config, trust.sourceIssue);
+    const context = fetchIntentContext(config, trust.sourceIssue, pull);
     assertTrustedIntentSource(config, snapshot, context, { ghApiJson });
-    const status = markPending(config, pull, dryRun);
-    setGitHubOutput({ head_sha: pull.head.sha, head_ref: pull.head.ref });
+    const commit = ghApiJson(
+      `repos/${config.repo.owner}/${config.repo.name}/git/commits/${expectedHead}`,
+    );
+    const headTree = String(commit?.tree?.sha ?? "");
+    if (!/^[0-9a-f]{40}$/.test(headTree)) {
+      throw new AgentError("PR head has no trusted Git tree", 1);
+    }
+    if (args["intent-file"]) {
+      const intent = composeEffectiveIntent({
+        callerIntent: args.intent,
+        ...context,
+      });
+      if (!dryRun) writePrivateFile(args["intent-file"], `${intent}\n`);
+    }
+    const comments = getIssueComments(config, prNumber);
+    const repairLedger = loadRepairLedger(
+      comments,
+      context.intentCapsule.intentDigest,
+      config.repo.owner,
+    );
+    const inputDigest = semanticInputDigest({
+      lane: "no-mistakes",
+      head: expectedHead,
+      intentDigest: context.intentCapsule.intentDigest,
+      findings: openRepairFindings(repairLedger).filter(
+        (finding) => finding.lane !== "no-mistakes",
+      ),
+      checks: [{
+        name: "owner-approval",
+        state: readApprovalState(args["approval-state"])
+          ? "approved"
+          : "not-approved",
+      }],
+    });
+    const replay = noMistakesReplayState(repairEvaluationFor(repairLedger, {
+      lane: "no-mistakes",
+      head: expectedHead,
+      inputDigest,
+    }));
+    const status = replay.skipModel ? null : markPending(config, pull, dryRun);
+    setGitHubOutput({
+      head_sha: pull.head.sha,
+      head_ref: pull.head.ref,
+      head_tree: headTree,
+      replay_passed: replay.replayPassed,
+      skip_model: replay.skipModel,
+      shared_revision_count: repairLedger.revisionCount,
+    });
     finish(
-      { ok: true, message: `no-mistakes pending for PR #${prNumber}`, status },
+      {
+        ok: true,
+        message: replay.skipModel
+          ? `no-mistakes already evaluated for PR #${prNumber}`
+          : `no-mistakes pending for PR #${prNumber}`,
+        status,
+        ...replay,
+      },
       Boolean(args.json),
     );
     return;
@@ -1212,7 +1644,7 @@ async function main() {
     if (pull.head.sha !== expectedHead) {
       throw new AgentError("PR head changed after the pending status", 1);
     }
-    const context = fetchIntentContext(config, trust.sourceIssue);
+    const context = fetchIntentContext(config, trust.sourceIssue, pull);
     assertTrustedIntentSource(config, snapshot, context, { ghApiJson });
     const intent = composeEffectiveIntent({ callerIntent: args.intent, ...context });
     if (!dryRun) writePrivateFile(args["intent-file"], `${intent}\n`);
@@ -1230,6 +1662,10 @@ async function main() {
   if (args["run-gate"]) {
     const expectedHead = readExpectedHead(args["expected-head"]);
     const expectedRef = String(args["expected-ref"] ?? "").trim();
+    const expectedSourceTree = String(args["expected-source-tree"] ?? "").trim();
+    if (!/^[0-9a-f]{40}$/.test(expectedSourceTree)) {
+      throw new AgentError("missing or invalid --expected-source-tree", 2);
+    }
     const repoDir = resolve(String(args["repo-dir"] ?? ""));
     const fixPatchPath = String(args["fix-patch"] ?? "").trim();
     if (!fixPatchPath) throw new AgentError("missing --fix-patch", 2);
@@ -1239,9 +1675,12 @@ async function main() {
     const actualRef = runCommand("git", ["branch", "--show-current"], {
       cwd: repoDir,
     }).stdout.trim();
-    if (actualHead !== expectedHead || actualRef !== expectedRef) {
+    const actualTree = runCommand("git", ["rev-parse", "HEAD^{tree}"], {
+      cwd: repoDir,
+    }).stdout.trim();
+    if (actualTree !== expectedSourceTree || actualRef !== expectedRef) {
       throw new AgentError(
-        "candidate checkout does not match prepared PR head",
+        "candidate checkout does not match prepared PR tree",
         1,
       );
     }
@@ -1267,7 +1706,7 @@ async function main() {
     if (!intent) throw new AgentError("trusted gate intent file is empty", 1);
     const userApproved = Boolean(args["user-approved"]);
     const run = runNoMistakesGate(intent, repoDir, {
-      expectedHead,
+      expectedHead: actualHead,
       userApproved,
     });
     const postRunHead = runCommand("git", ["rev-parse", "HEAD"], {
@@ -1287,14 +1726,16 @@ async function main() {
     );
     const nativeFix = createNativeFixPatch(
       parsed,
-      expectedHead,
+      actualHead,
       resolve(fixPatchPath),
+      { publishedHead: expectedHead },
     );
     const artifact = sanitizedGateArtifact(parsed, expectedHead, {
       nativeFix,
       userApproved,
+      validatedSourceHead: actualHead,
       unpublishedChanges:
-        postRunHead !== expectedHead ||
+        postRunHead !== actualHead ||
         postRunRef !== expectedRef ||
         Boolean(trackedStatus),
     });
@@ -1322,18 +1763,42 @@ async function main() {
     }
     const expectedHead = readExpectedHead(args["expected-head"]);
     readInfrastructureRetry(args["infrastructure-retry"]);
-    const repairAttempt = readRepairAttempt(args["repair-attempt"]);
+    readRepairAttempt(args["repair-attempt"]);
     const snapshot = fetchTrustedPull(config, prNumber, { ghApiJson });
     const { pull, trust } = snapshot;
-    const context = fetchIntentContext(config, trust.sourceIssue);
+    const context = fetchIntentContext(config, trust.sourceIssue, pull);
     assertTrustedIntentSource(config, snapshot, context, { ghApiJson });
+    const remote = existsSync(resolve(args["remote-record"] ?? ""))
+      ? validateNoMistakesRemoteRecord(config, args["remote-record"])
+      : null;
+    const comments = getIssueComments(config, prNumber);
+    let repairLedger = loadRepairLedger(
+      comments,
+      context.intentCapsule.intentDigest,
+      config.repo.owner,
+    );
+    const repairAttempt = repairLedger.revisionCount;
+    const inputDigest = semanticInputDigest({
+      lane: "no-mistakes",
+      head: expectedHead,
+      intentDigest: context.intentCapsule.intentDigest,
+      findings: openRepairFindings(repairLedger).filter(
+        (finding) => finding.lane !== "no-mistakes",
+      ),
+      checks: [{
+        name: "owner-approval",
+        state: readApprovalState(args["approval-state"])
+          ? "approved"
+          : "not-approved",
+      }],
+    });
     let artifact = setupFailureArtifact(expectedHead);
     if (pull.head.sha !== expectedHead) {
       artifact = {
         ...artifact,
         outcome: "head-mismatch",
       };
-    } else if (existsSync(resolve(args["result-file"]))) {
+    } else if (remote?.ok && existsSync(resolve(args["result-file"]))) {
       try {
         artifact = normalizeGateArtifact(
           JSON.parse(readFileSync(resolve(args["result-file"]), "utf8")),
@@ -1344,14 +1809,39 @@ async function main() {
       }
     }
     const binding = terminalHeadBinding(expectedHead, pull.head.sha);
-    const repair = gateRepairDecision(artifact, repairAttempt);
+    const evaluation = recordRepairEvaluation(repairLedger, {
+      lane: "no-mistakes",
+      head: expectedHead,
+      inputDigest,
+      findings: artifact.status === "passed" ? [] : artifact.findings,
+      outcome: artifact.outcome,
+    });
+    repairLedger = evaluation.ledger;
+    const repair = gateRepairDecision(artifact, repairAttempt, {
+      replayed: evaluation.replayed,
+    });
     if (repair.state === "native-fix") {
-      const { result } = finalizeNativeFixPublication({
+      const { published, result } = finalizeNativeFixPublication({
         artifact,
         config,
         pull,
         repairAttempt,
         patchPath: args["fix-patch"],
+        remote,
+        dryRun,
+      });
+      if (!dryRun) {
+        repairLedger = recordRepairRevision(repairLedger, {
+          lane: "no-mistakes",
+          fromHead: expectedHead,
+          toHead: published.nextHead,
+          findingDigest: evaluation.findingDigest,
+        }).ledger;
+      }
+      const ledgerComment = saveRepairLedger({
+        config,
+        prNumber,
+        ledger: repairLedger,
         dryRun,
       });
       finish(
@@ -1361,6 +1851,7 @@ async function main() {
           outcome: artifact.outcome,
           repair,
           result,
+          ledgerComment,
         },
         Boolean(args.json),
       );
@@ -1377,6 +1868,14 @@ async function main() {
       artifact,
       ...binding,
       repairAttempt,
+      repairDecision: repair,
+      remote,
+      dryRun,
+    });
+    const ledgerComment = saveRepairLedger({
+      config,
+      prNumber,
+      ledger: repairLedger,
       dryRun,
     });
     const exitCode = artifact.status === "passed" ? 0 : 1;
@@ -1387,6 +1886,7 @@ async function main() {
         outcome: artifact.outcome,
         repair,
         result,
+        ledgerComment,
       },
       Boolean(args.json),
       exitCode,

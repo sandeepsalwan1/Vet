@@ -1,0 +1,50 @@
+name: Set up pinned Crabbox
+description: Install the trusted Crabbox binary and optional Vercel Sandbox bridge.
+
+inputs:
+  repo-root:
+    description: Checkout containing the trusted bridge package.
+    required: false
+    default: .
+  vercel-ready:
+    description: Whether the trusted Vercel provider has passed readiness.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Install Crabbox 0.40.0
+      shell: bash
+      run: |
+        set -euo pipefail
+        download="$RUNNER_TEMP/crabbox-download"
+        bin="$RUNNER_TEMP/crabbox-bin"
+        mkdir -p "$download" "$bin"
+        curl -fsSLo "$download/crabbox_0.40.0_linux_amd64.tar.gz" \
+          https://github.com/openclaw/crabbox/releases/download/v0.40.0/crabbox_0.40.0_linux_amd64.tar.gz
+        curl -fsSLo "$download/checksums.txt" \
+          https://github.com/openclaw/crabbox/releases/download/v0.40.0/checksums.txt
+        (cd "$download" && sha256sum --check --ignore-missing checksums.txt)
+        tar -xzf "$download/crabbox_0.40.0_linux_amd64.tar.gz" -C "$bin"
+        chmod 755 "$bin/crabbox"
+        echo "$bin" >> "$GITHUB_PATH"
+    - name: Install Vercel Sandbox bridge
+      if: inputs.vercel-ready == 'true'
+      shell: bash
+      env:
+        REPO_ROOT: ${{ inputs.repo-root }}
+      run: |
+        set -euo pipefail
+        bridge_dir="$RUNNER_TEMP/crabbox-vercel-bridge"
+        bridge="$RUNNER_TEMP/crabbox-vercel-sandbox-bridge"
+        mkdir -p "$bridge_dir"
+        cp "$REPO_ROOT/.agent/crabbox-vercel-bridge/package.json" \
+          "$REPO_ROOT/.agent/crabbox-vercel-bridge/package-lock.json" \
+          "$bridge_dir/"
+        (cd "$bridge_dir" && npm ci --ignore-scripts --no-audit --no-fund)
+        echo '#!/bin/sh' > "$bridge"
+        echo "cd '$bridge_dir'" >> "$bridge"
+        echo 'exec crabbox __vercel-sandbox-bridge "$@"' >> "$bridge"
+        chmod 755 "$bridge"
+        echo "CRABBOX_VERCEL_SANDBOX_BRIDGE=$bridge" >> "$GITHUB_ENV"

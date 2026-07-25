@@ -13,7 +13,7 @@ Vet: one deployed Next.js app, Postgres-backed npm workspace.
 - `docs`: active docs; generated proof is local-only.
 - `opensrc`: upstream mirrors/provenance notes that support package decisions.
 - `scripts`: local smoke, proof, migration, provisioning helpers.
-- `skills` and `.claude/skills`: project-local agent skills; keep secrets out.
+- `.agents/skills` and `.claude/skills`: project-local agent skills; keep secrets out.
 
 ## Commands
 
@@ -30,7 +30,12 @@ Vet: one deployed Next.js app, Postgres-backed npm workspace.
 
 ## AFK Issue Automation
 
-- Redesign intent and failure evidence: `.agent/AFK-AUTOMATION-INTENT.md`; documentation only until the user explicitly requests implementation.
+- AFK redesign intent, failure evidence, pipeline, and acceptance contract: `.agent/AFK-AUTOMATION-INTENT.md`; read before changing automation.
+- Crabbox is the worker environment; `.agents/skills` supplies the Vet worker plus selected review, Render, and database skills.
+- Crabbox workers act proactively: pursue the complete sealed outcome, use relevant skills, repair failures, and verify the real result without waiting for routine direction.
+- AFK scope covers valid Vet code, UI, test, data, proof, GitHub, and configured-service work; route each request to the least-privileged capable lane and relevant project skills.
+- Prefer ChatGPT-managed Codex automation auth when a supported scoped access token exists.
+  Never copy personal Codex `auth.json` into GitHub Actions or a Crabbox lease.
 - New work: open `https://github.com/sandeepsalwan1/Vet/issues/new?template=afk-implementation.yml`; submission adds `agent:implement` automatically.
 - Existing issue: run `gh issue edit <number> --repo sandeepsalwan1/Vet --add-label agent:implement`.
 - Then leave it alone; automation records a zero-model intent seal, creates its branch and draft PR, runs CI, review, and no-mistakes, then safely merges and closes the issue.

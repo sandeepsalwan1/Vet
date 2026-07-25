@@ -17,6 +17,16 @@ on:
     secrets:
       OPENAI_API_KEY:
         required: true
+      VERCEL_TOKEN:
+        required: false
+      VERCEL_OIDC_TOKEN:
+        required: false
+      HCLOUD_TOKEN:
+        required: false
+      HETZNER_TOKEN:
+        required: false
+      HETZNER_API_TOKEN:
+        required: false
   workflow_dispatch:
     inputs:
       pr-number:
@@ -28,7 +38,7 @@ on:
         type: string
         default: ""
       repair-attempt:
-        description: Bounded automated repair attempt
+        description: Shared semantic revision count
         required: false
         type: number
         default: 0
@@ -37,7 +47,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: agent-review-${{ inputs.pr-number }}
+  group: agent-semantic-${{ inputs.pr-number }}
   cancel-in-progress: false
 
 jobs:
@@ -50,6 +60,8 @@ jobs:
       concurrency-group: ${{ steps.concurrency.outputs.group }}
       reviewed-base-sha: ${{ steps.mark-pending.outputs.base-sha }}
       reviewed-head-sha: ${{ steps.mark-pending.outputs.head-sha }}
+      replay-next-gate: ${{ steps.prompt.outputs.replay-next-gate }}
+      skip-model: ${{ steps.prompt.outputs.skip-model }}
     permissions:
       actions: write
       checks: read
@@ -58,7 +70,7 @@ jobs:
       issues: read
       statuses: write
     steps:
-      - name: Capture review head and mark pending
+      - name: Capture review head
         id: mark-pending
         env:
           GH_TOKEN: ${{ github.token }}
@@ -77,12 +89,6 @@ jobs:
           fi
           printf 'base-sha=%s\n' "$base_sha" >> "$GITHUB_OUTPUT"
           printf 'head-sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
-          gh api "repos/$GITHUB_REPOSITORY/statuses/$sha" \
-            --method POST \
-            -f state=pending \
-            -f context=agent-review \
-            -f description='agent review running' \
-            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
       - uses: actions/checkout@v5
         with:
           ref: main
@@ -111,6 +117,7 @@ jobs:
           --wait-for-ci
           --json
       - name: Build exact-head review prompt
+        id: prompt
         env:
           GH_TOKEN: ${{ github.token }}
           REVIEWED_HEAD_SHA: ${{ steps.mark-pending.outputs.head-sha }}
@@ -120,7 +127,20 @@ jobs:
           --expected-head-sha "$REVIEWED_HEAD_SHA"
           --write-prompt .agent-output/review-prompt.md
           --json
+      - name: Mark review pending
+        if: steps.prompt.outputs.skip-model != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVIEWED_HEAD_SHA: ${{ steps.mark-pending.outputs.head-sha }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$REVIEWED_HEAD_SHA" \
+            --method POST \
+            -f state=pending \
+            -f context=agent-review \
+            -f description='agent review running' \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
       - name: Dispatch trusted pull request CodeQL
+        if: steps.prompt.outputs.skip-model != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REVIEWED_HEAD_SHA: ${{ steps.mark-pending.outputs.head-sha }}
@@ -143,6 +163,7 @@ jobs:
   generate-review:
     name: generate-review
     needs: prepare-review
+    if: needs.prepare-review.outputs.skip-model != 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: ${{ needs.prepare-review.outputs.concurrency-group }}
@@ -155,50 +176,94 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
           ref: ${{ needs.prepare-review.outputs.reviewed-head-sha }}
+          path: target
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: target/package-lock.json
       - uses: actions/download-artifact@v4
         with:
           name: agent-review-context-${{ inputs.pr-number }}
-          path: .agent-output
-      - name: Install trusted candidate dependencies before model auth
-        run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Run Codex reviewer
-        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
+          path: target/.agent-output
+      - uses: ./trusted/.github/actions/setup-crabbox
         with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          prompt-file: .agent-output/review-prompt.md
-          sandbox: workspace-write
-          model: ${{ needs.prepare-review.outputs.backend-model }}
-          effort: ${{ needs.prepare-review.outputs.backend-effort }}
-          allow-users: ${{ github.repository_owner }}
-          allow-bots: true
-          codex-version: "0.144.1"
-          output-schema-file: .agent-output/review.schema.json
-          output-file: .agent-output/review.json
-      - name: Repair deterministic whitespace failures
+          repo-root: trusted
+          vercel-ready: ${{ vars.CRABBOX_VERCEL_READY }}
+      - name: Review exact head in Crabbox
+        env:
+          CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_OIDC_TOKEN: ${{ secrets.VERCEL_OIDC_TOKEN }}
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          HETZNER_TOKEN: ${{ secrets.HETZNER_TOKEN }}
+          HETZNER_API_TOKEN: ${{ secrets.HETZNER_API_TOKEN }}
+          CRABBOX_VERCEL_READY: ${{ vars.CRABBOX_VERCEL_READY }}
+          CRABBOX_HETZNER_READY: ${{ vars.CRABBOX_HETZNER_READY }}
+          REMOTE_COMMAND: >-
+            cd target &&
+            export AGENT_TARGET_ROOT="$PWD";
+            agent_key="$CODEX_API_KEY"; unset CODEX_API_KEY OPENAI_API_KEY;
+            git init --quiet &&
+            git config user.name "Agent Reviewer" &&
+            git config user.email "agent-review@example.invalid" &&
+            git add --all &&
+            git commit --quiet --no-verify -m "chore: seed exact review head" &&
+            npm ci --ignore-scripts --no-audit --no-fund &&
+            npm install --global --ignore-scripts --no-audit --no-fund @openai/codex@0.144.1 &&
+            codex debug prompt-input 'skill discovery probe'
+            > /tmp/vet-review-prompt-input.json &&
+            node ../trusted/scripts/agent-skill-discovery.mjs
+            --input /tmp/vet-review-prompt-input.json --json &&
+            CODEX_API_KEY="$agent_key" node ../trusted/scripts/agent-worker.mjs
+            --lane review
+            --model "${{ needs.prepare-review.outputs.backend-model }}"
+            --effort "${{ needs.prepare-review.outputs.backend-effort }}"
+            --sandbox danger-full-access
+            --prompt-file .agent-output/review-prompt.md
+            --schema .agent-output/review.schema.json
+            --usage-file .agent-output/model-usage.json
+            --output-file .agent-output/review.json &&
+            unset agent_key && node ../trusted/scripts/agent-review.mjs
+            --pr-number "${{ inputs.pr-number }}"
+            --create-patch .agent-output/review.patch --json
         run: >-
-          node scripts/agent-review.mjs
-          --pr-number "${{ inputs.pr-number }}"
-          --base-sha "${{ needs.prepare-review.outputs.reviewed-base-sha }}"
-          --expected-head-sha "${{ needs.prepare-review.outputs.reviewed-head-sha }}"
-          --repair-whitespace
-          --json
-      - name: Capture reviewer fixes
-        run: >-
-          node scripts/agent-review.mjs
-          --pr-number "${{ inputs.pr-number }}"
-          --create-patch .agent-output/review.patch
+          node trusted/scripts/agent-crabbox-run.mjs
+          --lane reviewRemote
+          --command "$REMOTE_COMMAND"
+          --workdir "$GITHUB_WORKSPACE"
+          --delegated-workdir "$GITHUB_WORKSPACE/target"
+          --remote-harness trusted/scripts/agent-crabbox-run.mjs
+          --record-file target/.agent-output/review-remote.json
           --json
       - uses: actions/upload-artifact@v4
         with:
           name: agent-review-result-${{ inputs.pr-number }}
           path: |
-            .agent-output/review.json
-            .agent-output/review.patch
+            target/.agent-output/review.json
+            target/.agent-output/review.patch
+            target/.agent-output/model-usage.json
+            target/.agent-output/review-remote.json
           include-hidden-files: true
           if-no-files-found: error
+      - name: Upload redacted remote diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-review-remote-diagnostics-${{ inputs.pr-number }}
+          path: |
+            target/.agent-output/crabbox-reviewRemote-*.json
+            target/.agent-output/crabbox-reviewRemote-*.log
+          include-hidden-files: true
+          if-no-files-found: warn
 
   apply-review:
     name: apply-review
@@ -206,6 +271,7 @@ jobs:
     needs:
       - prepare-review
       - generate-review
+    if: needs.prepare-review.outputs.skip-model != 'true'
     permissions:
       actions: write
       checks: read
@@ -239,13 +305,37 @@ jobs:
           --expected-head-sha "$REVIEWED_HEAD_SHA"
           --from-file .agent-output/review.json
           --apply-patch .agent-output/review.patch
+          --remote-record .agent-output/review-remote.json
           --repair-attempt "${{ inputs.repair-attempt }}"
+          --json
+      - name: Record exact review cost
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVIEWED_HEAD_SHA: ${{ needs.prepare-review.outputs.reviewed-head-sha }}
+        run: >-
+          node scripts/agent-cost.mjs
+          --pr-number "${{ inputs.pr-number }}"
+          --head-sha "$REVIEWED_HEAD_SHA"
+          --lane review
+          --usage-file .agent-output/model-usage.json
+          --remote-record .agent-output/review-remote.json
+          --remote-lane reviewRemote
+          --retry-reason "semantic revision ${{ inputs.repair-attempt }}"
+          --effect decision
           --json
 
   dispatch-no-mistakes:
     name: dispatch final gate
-    needs: apply-review
-    if: needs.apply-review.result == 'success'
+    needs:
+      - prepare-review
+      - apply-review
+    if: >-
+      always() &&
+      needs.prepare-review.result == 'success' &&
+      ((needs.prepare-review.outputs.skip-model == 'true' &&
+      needs.prepare-review.outputs.replay-next-gate != '') ||
+      (needs.prepare-review.outputs.skip-model != 'true' &&
+      needs.apply-review.result == 'success'))
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -257,10 +347,17 @@ jobs:
       - name: Dispatch standalone no-mistakes gate
         env:
           GH_TOKEN: ${{ github.token }}
-          NEXT_GATE: ${{ needs.apply-review.outputs.next-gate }}
+          APPLIED_NEXT_GATE: ${{ needs.apply-review.outputs.next-gate }}
           PR_NUMBER: ${{ inputs.pr-number }}
+          REPLAY_NEXT_GATE: ${{ needs.prepare-review.outputs.replay-next-gate }}
+          SKIP_MODEL: ${{ needs.prepare-review.outputs.skip-model }}
         run: |
           set -euo pipefail
+          if [ "$SKIP_MODEL" = true ]; then
+            NEXT_GATE="$REPLAY_NEXT_GATE"
+          else
+            NEXT_GATE="$APPLIED_NEXT_GATE"
+          fi
           head_sha="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)"
           [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
           review_state="$(
@@ -318,6 +415,7 @@ jobs:
     if: >-
       always() &&
       needs.prepare-review.outputs.reviewed-head-sha != '' &&
+      needs.prepare-review.outputs.skip-model != 'true' &&
       (needs.prepare-review.result != 'success' ||
       needs.generate-review.result != 'success' ||
       needs.apply-review.result != 'success')

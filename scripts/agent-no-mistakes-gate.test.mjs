@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -27,20 +27,27 @@ import {
   isRetryableReviewEnvironmentBlock,
   isRetryableTestEnvironmentBlock,
   isRetryableTechnicalFailure,
+  noMistakesReplayState,
+  noMistakesConfig,
+  parseNoMistakesUsageStats,
   noMistakesCommentMarker,
   normalizeGateArtifact,
   parseAxiResult,
   runNoMistakesGate,
   sanitizedGateArtifact,
   selectTrustedManagedTriageComment,
+  setupFailureArtifact,
   terminalHeadBinding,
+  validateNoMistakesRemoteRecord,
   validatedHeadMatches,
+  writeSetupFailureResult,
 } from "./agent-no-mistakes-gate.mjs";
 
 const HEAD = "abcdef1234567890abcdef1234567890abcdef12";
 const config = {
   repo: { owner: "owner", name: "repo", defaultBranch: "main" },
   comments: { gate: "<!-- agent-gate:v1 -->" },
+  crabbox: { nonVisualProviders: ["vercel-sandbox", "hetzner"] },
 };
 const safeFiles = [{ filename: "apps/internal/src/app/page.tsx" }];
 
@@ -85,73 +92,74 @@ function nativeFixFixture(relativePath = "apps/internal/native-fix.txt") {
   return { artifact, baseHead, branch, fixedHead, gate, origin, patchPath, root };
 }
 
-test("authenticated reviewer auto-fixes only inside the credential-free sealed handoff", () => {
+test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", () => {
   const workflow = readFileSync(new URL("../.github/workflows/agent-no-mistakes.yml", import.meta.url), "utf8");
   const automergeWorkflow = readFileSync(new URL("../.github/workflows/agent-automerge.yml", import.meta.url), "utf8");
-  const repoConfig = readFileSync(new URL("../.no-mistakes.yaml", import.meta.url), "utf8");
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const gate = readFileSync(new URL("./agent-no-mistakes-gate.mjs", import.meta.url), "utf8");
   const review = readFileSync(new URL("./agent-review.mjs", import.meta.url), "utf8");
 
-  assert.match(workflow, /- --sandbox\s+- workspace-write/);
-  assert.match(workflow, /auto_fix:\n\s+review: 2/);
-  assert.match(
-    workflow,
-    /Treat test-only assertion changes as documentation-complete/,
-  );
   assert.match(workflow, /--validate-backend --lane no-mistakes --json/);
-  assert.match(workflow, /- --model\s+- \$\{\{ needs\.prepare\.outputs\.backend_model \}\}/);
+  assert.match(workflow, /--lane noMistakesRemote/);
+  assert.match(workflow, /uses: \.\/trusted\/\.github\/actions\/setup-crabbox/);
+  assert.match(workflow, /node trusted\/scripts\/agent-crabbox-run\.mjs/);
+  assert.match(workflow, /export AGENT_TARGET_ROOT="\$PWD"/);
+  assert.match(workflow, /node \.\.\/trusted\/scripts\/agent-no-mistakes-gate\.mjs/);
+  assert.match(workflow, /node \.\.\/trusted\/scripts\/agent-crabbox-run\.mjs/);
+  assert.match(workflow, /--workdir "\$GITHUB_WORKSPACE"/);
+  assert.match(workflow, /--delegated-workdir "\$GITHUB_WORKSPACE\/target"/);
+  assert.match(workflow, /--remote-harness trusted\/scripts\/agent-crabbox-run\.mjs/);
   assert.match(
     workflow,
-    /model_reasoning_effort="\$\{\{ needs\.prepare\.outputs\.backend_effort \}\}"/,
+    /--record-file target\/\.agent-output\/no-mistakes-remote\.json/
   );
-  assert.match(workflow, /- 'approval_policy="never"'/);
+  assert.match(workflow, /head_tree: \$\{\{ steps\.prepare\.outputs\.head_tree \}\}/);
+  assert.match(workflow, /test "\$\(git rev-parse HEAD\^\{tree\}\)" = "\$expected_tree"/);
+  assert.match(workflow, /--expected-source-tree "\$expected_tree"/);
+  assert.match(workflow, /--intent-file \.agent-output\/no-mistakes-intent/);
+  assert.match(workflow, /trap preserve_setup_failure EXIT/);
+  assert.match(workflow, /--write-setup-failure/);
   assert.match(
     workflow,
-    /shell_environment_policy\.exclude=\["\*KEY\*","\*SECRET\*","\*TOKEN\*","\*PASSWORD\*","\*CREDENTIAL\*"\]/,
+    /if node \.\.\/trusted\/scripts\/agent-no-mistakes-gate\.mjs[\s\S]*?--write-setup-failure[\s\S]*?--emit-output-lane noMistakesRemote; then[\s\S]*?exit 0;/,
   );
-  assert.doesNotMatch(workflow, /- --ask-for-approval/);
-  assert.match(workflow, /codex exec \\\n\s+--sandbox read-only/);
-  assert.match(workflow, /NM_TEST_START_DAEMON: "1"/);
+  assert.match(workflow, /--approval-state "\$\{\{ inputs\.approval \}\}"/);
+  assert.match(
+    workflow,
+    /needs\.prepare\.outputs\.skip_model == 'true'[\s\S]*?needs\.prepare\.outputs\.replay_passed == 'true'/,
+  );
   assert.match(
     workflow,
     /approval:\n\s+description: User approved unattended gate decisions for this exact head/,
   );
   assert.match(
     workflow,
-    /if \[ "\$USER_APPROVED" = "true" \]; then\n\s+args\+=\(--user-approved\)/,
+    /if \[ "\$\{\{ inputs\.approval \}\}" = "true" \]; then approval_flag="--user-approved"; fi/,
   );
+  assert.match(workflow, /export CODEX_API_KEY="\$agent_key";/);
+  assert.match(workflow, /export NM_HOME=\/tmp\/no-mistakes-home;/);
   assert.match(
     workflow,
     /name: Validate approval authority\n\s+if: \$\{\{ inputs\.approval \}\}[\s\S]*?test "\$\{APPROVAL_ACTOR,,\}" = "\$\{REPOSITORY_OWNER,,\}"/,
   );
-  assert.match(workflow, /session_reuse: false/);
-  assert.match(
-    workflow,
-    /Do not invoke skills, autoreview, no-mistakes, external reviewers, or nested agents/,
+  assert.match(workflow, /@openai\/codex@0\.144\.1/);
+  assert.match(workflow, /v1\.40\.0\/no-mistakes-v1\.40\.0-linux-amd64\.tar\.gz/);
+  assert.match(workflow, /--write-config \/tmp\/no-mistakes-home\/config\.yaml/);
+  assert.match(workflow, /npm run typecheck &&\n\s+npm run build &&\n\s+npm run test:scenarios/);
+  assert.ok(
+    workflow.indexOf("npm run test:scenarios") <
+      workflow.indexOf('CODEX_API_KEY="$agent_key"'),
   );
   assert.match(
     workflow,
-    /trusted credential-free steps provide deterministic validation/,
+    /path: \|\n\s+target\/\.agent-output\/result\.json\n\s+target\/\.agent-output\/fix\.patch\n\s+target\/\.agent-output\/model-usage\.json\n\s+target\/\.agent-output\/no-mistakes-remote\.json/,
   );
+  assert.match(workflow, /--remote-record "\$RUNNER_TEMP\/no-mistakes-result\/no-mistakes-remote\.json"/);
   assert.match(gate, /"--skip",\s+"rebase,test,document,lint,push,pr,ci"/);
   assert.doesNotMatch(workflow, /git config --global user\./);
-  assert.match(workflow, /if: \$\{\{ always\(\) \}\}\n\s+continue-on-error: true\n[\s\S]*?run: no-mistakes daemon stop --force/);
-  assert.match(workflow, /Never modify AGENTS\.md, package manifests or lockfiles, agent scripts\/configuration/);
-  assert.match(workflow, /v1\.40\.0\/no-mistakes-v1\.40\.0-linux-amd64\.tar\.gz/);
   assert.match(workflow, /--fix-patch "\$RUNNER_TEMP\/no-mistakes-result\/fix\.patch"/);
   assert.match(gate, /--force-with-lease/);
   assert.match(workflow, /dispatch-native-fix:/);
-  const baseline = workflow.indexOf("- name: Run trusted offline test baseline before agent auth");
-  const modelAuth = workflow.indexOf("CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}");
-  assert.ok(baseline > 0 && modelAuth > baseline);
-  assert.match(workflow, /npm run typecheck && npm run build && npm run test:scenarios/);
-  assert.match(workflow, /tar -C \/source --exclude=\.\/node_modules --exclude=\.\/\.git/);
-  assert.match(workflow, /npm rebuild --offline/);
-  assert.match(workflow, /npm_config_nodedir=\/usr\/local/);
-  assert.match(workflow, /--user "\$\(id -u\):\$\(id -g\)"/);
-  assert.match(workflow, /src=\$PWD,dst=\/workspace,readonly/);
-  assert.match(workflow, /--read-only/);
   assert.match(workflow, /gh workflow run agent-automerge\.yml/);
   assert.match(workflow, /--repo "\$GITHUB_REPOSITORY"/);
   assert.match(workflow, /-f pr-number="\$\{\{ inputs\.pr-number \}\}"/);
@@ -163,7 +171,11 @@ test("authenticated reviewer auto-fixes only inside the credential-free sealed h
   assert.match(workflow, /dispatch-automerge:\n[\s\S]*?needs:\n\s+- prepare\n\s+- finalize/);
   assert.match(workflow, /repair-attempt:/);
   assert.match(workflow, /dispatch-repair:\n[\s\S]*?gh workflow run agent-review\.yml/);
-  assert.match(workflow, /-f repair-attempt=0/);
+  assert.match(
+    workflow,
+    /-f repair-attempt="\$\{\{ needs\.finalize\.outputs\.next-repair-attempt \}\}"/,
+  );
+  assert.match(workflow, /group: agent-semantic-\$\{\{ inputs\.pr-number \}\}/);
   assert.match(workflow, /needs\.finalize\.outputs\.repair-action == 'retry'/);
   assert.doesNotMatch(workflow, /retry-infrastructure:/);
   assert.doesNotMatch(workflow, /-f infrastructure-retry=1/);
@@ -175,10 +187,118 @@ test("authenticated reviewer auto-fixes only inside the credential-free sealed h
   assert.equal(packageJson.scripts["lint:duplicates"], "jscpd");
   assert.equal(packageJson.devDependencies.knip, "^6.26.0");
   assert.equal(packageJson.devDependencies.jscpd, "^5.0.12");
-  assert.equal([...repoConfig.matchAll(/tar --no-same-owner -xf/g)].length, 2);
-  assert.match(repoConfig, /review: 2/);
   assert.match(gate, /"--untracked-files=all"/);
   assert.match(gate, /createNativeFixPatch/);
+});
+
+test("cached no-mistakes results resume only a passing gate", () => {
+  assert.deepEqual(noMistakesReplayState(null), {
+    skipModel: false,
+    replayPassed: false,
+  });
+  assert.deepEqual(noMistakesReplayState({ outcome: "checks-passed" }), {
+    skipModel: true,
+    replayPassed: true,
+  });
+  assert.deepEqual(noMistakesReplayState({ outcome: "ask-user" }), {
+    skipModel: true,
+    replayPassed: false,
+  });
+});
+
+test("early no-mistakes setup failures produce terminal sanitized artifacts", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "vet-no-mistakes-setup-"));
+  const resultFile = join(dir, "result.json");
+  const usageFile = join(dir, "usage.json");
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const written = writeSetupFailureResult({
+    expectedHead: HEAD,
+    resultFile,
+    usageFile,
+    model: "gpt-5.4-mini",
+    effort: "medium",
+  });
+  assert.deepEqual(written.artifact, setupFailureArtifact(HEAD));
+  assert.equal(JSON.parse(readFileSync(resultFile)).outcome, "setup-failed");
+  assert.deepEqual(JSON.parse(readFileSync(usageFile)).calls, []);
+});
+
+test("no-mistakes stats export preserves exact per-invocation token deltas", () => {
+  const output = `run run_123 (completed), parked at gates 0s total
+
+STEP  ROUND  PURPOSE  AGENT  MODEL  SESSION  KEY  DURATION  MODEL  SUBPROC  RT  TOOLS (w/t/e/r/g/o)  FIND  WORK (f/l)  FALLBACK  EXIT
+review  1  review  codex  gpt-5.4-mini  cold  key  4s  3s  1s  1  -  0  2/20  -  success
+
+STEP  ROUND  PURPOSE  SESSION  Δ IN (round)  Δ OUT  Δ CACHE RD  IN (raw)  OUT (raw)  CACHE RD (raw)  CACHE WR  FRESH IN  REASON
+review  1  review  cold  1200  80  900  1200  80  900  0  300  20
+`;
+  const usage = parseNoMistakesUsageStats(output, {
+    runId: "run_123",
+    model: "gpt-5.4-mini",
+    effort: "medium",
+  });
+
+  assert.equal(usage.complete, true);
+  assert.equal(usage.calls.length, 1);
+  assert.deepEqual(usage.calls[0], {
+    id: usage.calls[0].id,
+    inputTokens: 1200,
+    cachedInputTokens: 900,
+    outputTokens: 80,
+    reasoningOutputTokens: 20,
+  });
+  assert.match(usage.calls[0].id, /^[a-f0-9]{64}$/);
+});
+
+test("isolated no-mistakes config binds the selected model and excludes credentials", () => {
+  const value = noMistakesConfig({
+    model: "gpt-5.4-mini",
+    effort: "medium",
+  });
+  assert.match(value, /gpt-5\.4-mini/);
+  assert.match(value, /model_reasoning_effort/);
+  assert.match(value, /shell_environment_policy\.exclude/);
+  assert.match(value, /Do not invoke skills, autoreview, no-mistakes/);
+  assert.throws(
+    () => noMistakesConfig({ model: "bad value", effort: "medium" }),
+    /configuration is invalid/,
+  );
+});
+
+test("no-mistakes provenance accepts a real Crabbox result and rejects a forged provider", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "vet-no-mistakes-provenance-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "record.json");
+  writeFileSync(path, JSON.stringify({
+    ok: true,
+    attempted: true,
+    lane: "noMistakesRemote",
+    provider: "vercel-sandbox",
+    leaseId: "vsbx_gate_123",
+    reason: "",
+    timing: {
+      provider: "vercel-sandbox",
+      leaseId: "vsbx_gate_123",
+      totalMs: 321,
+      exitCode: 0,
+    },
+  }));
+  assert.deepEqual(validateNoMistakesRemoteRecord(config, path), {
+    provider: "vercel-sandbox",
+    leaseId: "vsbx_gate_123",
+    totalMs: 321,
+    ok: true,
+    reason: "",
+  });
+  const forged = JSON.parse(readFileSync(path, "utf8"));
+  forged.provider = "github-actions";
+  forged.timing.provider = "github-actions";
+  writeFileSync(path, JSON.stringify(forged));
+  assert.throws(
+    () => validateNoMistakesRemoteRecord(config, path),
+    /provenance is invalid/,
+  );
 });
 
 test("native no-mistakes fixes become a sealed non-privileged patch", () => {
@@ -195,6 +315,10 @@ test("native no-mistakes fixes become a sealed non-privileged patch", () => {
     nextAttempt: 1,
   });
   assert.deepEqual(gateRepairDecision(fixture.artifact, 2), {
+    state: "native-fix",
+    nextAttempt: 3,
+  });
+  assert.deepEqual(gateRepairDecision(fixture.artifact, 3), {
     state: "exhausted",
     nextAttempt: null,
   });
@@ -508,27 +632,36 @@ test("stale finalizers bind status to the validated head without mutating the ne
   assert.throws(() => terminalHeadBinding("bad", HEAD), /terminal status head is invalid/);
 });
 
-test("effective intent includes caller policy, full source issue, and managed triage", () => {
+test("effective intent includes caller policy, sealed capsule, and implementation addendum", () => {
   const intent = composeEffectiveIntent({
     callerIntent: "Require every automated gate to pass.",
-    sourceIssue: {
-      number: 42,
+    intentCapsule: {
+      sourceIssue: 42,
       title: "Preserve the complete user request",
-      body: "Acceptance criterion one.\n\nAcceptance criterion two.",
+      acceptanceCriteria: [
+        "Acceptance criterion one.",
+        "Acceptance criterion two."
+      ],
+      intentDigest: "a".repeat(64)
     },
-    triageComment: {
-      body: "<!-- agent-triage:v1 -->\nRisk: medium\nDo not remove the fallback.",
-    },
+    implementationAddendum: {
+      intentAddendum: {
+        decisions: ["Do not remove the fallback."],
+        assumptions: [],
+        scopeClarifications: [],
+        verificationDecisions: [],
+        unresolvedQuestions: []
+      },
+      digest: "b".repeat(64)
+    }
   });
 
   assert.match(intent, /Require every automated gate to pass/);
   assert.match(intent, /deterministic scenario, API, or CLI checks count as direct product evidence/);
   assert.match(intent, /Agent Proof owns browser, visual, and live-provider evidence/);
-  assert.match(intent, /Authoritative source issue #42/);
-  assert.match(
-    intent,
-    /Acceptance criterion one\.\n\nAcceptance criterion two\./,
-  );
+  assert.match(intent, /"sourceIssue": 42/);
+  assert.match(intent, /Acceptance criterion one/);
+  assert.match(intent, /Acceptance criterion two/);
   assert.match(intent, /Do not remove the fallback/);
 });
 
@@ -687,9 +820,13 @@ help[1]:
   ]);
   assert.deepEqual(gateRepairDecision(artifact, 0), {
     state: "retry",
-    nextAttempt: 1,
+    nextAttempt: 0,
   });
   assert.deepEqual(gateRepairDecision(artifact, 2), {
+    state: "retry",
+    nextAttempt: 2,
+  });
+  assert.deepEqual(gateRepairDecision(artifact, 3), {
     state: "exhausted",
     nextAttempt: null,
   });
@@ -1128,6 +1265,10 @@ test("terminal failures block while exact-head auto-fix findings receive bounded
     remove: [],
   });
   assert.deepEqual(gateLabelChanges(labelConfig, repairable, { repairAttempt: 2 }), {
+    add: [],
+    remove: [],
+  });
+  assert.deepEqual(gateLabelChanges(labelConfig, repairable, { repairAttempt: 3 }), {
     add: ["agent:blocked"],
     remove: ["agent:automerge"],
   });
@@ -1282,4 +1423,21 @@ test("sanitized artifact cannot prove a different head", () => {
       ),
     /cannot prove this head/,
   );
+});
+
+test("remote synthetic commit may prove only the trusted matching Git tree", () => {
+  const syntheticHead = "1".repeat(40);
+  const artifact = sanitizedGateArtifact(
+    {
+      status: "passed",
+      outcome: "passed",
+      run: { id: "remote-run", head: syntheticHead.slice(0, 12) },
+      findings: [],
+    },
+    HEAD,
+    { validatedSourceHead: syntheticHead },
+  );
+  assert.equal(artifact.status, "passed");
+  assert.equal(artifact.expectedHead, HEAD);
+  assert.equal(artifact.validatedHead, HEAD);
 });

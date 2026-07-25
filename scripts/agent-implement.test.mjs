@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { createIntentCapsule } from "./agent-intent.mjs";
 import { AgentError } from "./agent-lib.mjs";
 import {
   alignRecoveredAgentBranch,
@@ -34,6 +35,48 @@ const config = {
 const issue = { number: 42, title: "Fix duplicate intake" };
 const metadata = { sourceIssue: 42, automergeEligible: true };
 
+function implementationIntent(
+  sourceLabels = ["agent:implement", "agent:automerge"],
+  overrides = {}
+) {
+  return createIntentCapsule({
+    issue: {
+      number: 42,
+      title: "Focused work",
+      body: "Exact scope",
+      labels: sourceLabels.map((name) => ({ name })),
+      ...overrides
+    },
+    decision: {
+      value: "medium",
+      priority: "medium",
+      risk: "medium",
+      alignment: "yes",
+      implementationScope: "Implement the focused work.",
+      proofNeeded: "CI",
+      automationDecision: "implement",
+      humanQuestion: ""
+    }
+  });
+}
+
+function implementationOutput(overrides = {}) {
+  return JSON.stringify({
+    version: 1,
+    summary: "Implemented and tested.",
+    changes: ["Updated the focused behavior."],
+    checks: ["Focused checks passed."],
+    intentAddendum: {
+      decisions: ["Reused the existing module boundary."],
+      assumptions: [],
+      scopeClarifications: [],
+      verificationDecisions: ["Ran the focused checks."],
+      unresolvedQuestions: []
+    },
+    ...overrides
+  });
+}
+
 test("upsertPullRequest creates a draft PR through GraphQL", () => {
   let payload;
   let apiArgs;
@@ -42,7 +85,7 @@ test("upsertPullRequest creates a draft PR through GraphQL", () => {
       config,
       issue,
       branch: "agent/issue-42-fix-duplicate-intake",
-      codexOutput: "Implemented and tested.",
+      codexOutput: implementationOutput(),
       metadata,
       existingPull: null
     },
@@ -78,7 +121,7 @@ test("upsertPullRequest updates an existing PR instead of creating a duplicate",
       config,
       issue,
       branch: "agent/issue-42-old-title",
-      codexOutput: "Retry output.",
+      codexOutput: implementationOutput({ summary: "Retry output." }),
       metadata,
       existingPull: { number: 9, node_id: "PR_9" }
     },
@@ -316,7 +359,19 @@ test("automation control-plane files are privileged patch paths", () => {
 test("implementation refuses a source issue changed after triage", () => {
   const snapshot = "f".repeat(64);
   const triage = {
-    body: `<!-- agent-triage:v1 -->\n\`\`\`json\n${JSON.stringify({ issueSnapshotSha256: snapshot })}\n\`\`\``
+    body: `<!-- agent-triage:v1 -->\n\`\`\`json\n${JSON.stringify({
+      value: "medium",
+      priority: "medium",
+      risk: "medium",
+      alignment: "yes",
+      implementationScope: "Focused work",
+      proofNeeded: "CI",
+      automationDecision: "implement",
+      humanQuestion: "",
+      issueSnapshotSha256: snapshot,
+      ownerClarifications: [],
+      intentDigest: "e".repeat(64)
+    })}\n\`\`\``
   };
 
   assert.throws(
@@ -347,16 +402,16 @@ test("isolated validation binds patch, output, base, and result tree", (t) => {
   git("restore", "file.txt");
   const outputPath = join(cwd, "implementation.md");
   const manifestPath = join(cwd, "integrity.json");
-  const snapshotSha256 = "b".repeat(64);
-  writeFileSync(outputPath, "Implemented safely.\n");
+  const intent = implementationIntent([
+    "agent:implement",
+    "agent:automerge",
+    "priority:trivial"
+  ]);
+  const snapshotSha256 = intent.issueSnapshotSha256;
+  writeFileSync(outputPath, implementationOutput());
   writeFileSync(
     join(cwd, "implementation-intent.json"),
-    `${JSON.stringify({
-      version: 1,
-      issueNumber: 42,
-      issueSnapshotSha256: snapshotSha256,
-      sourceLabels: ["agent:implement", "agent:automerge", "priority:trivial"],
-    })}\n`
+    `${JSON.stringify(intent)}\n`
   );
 
   assert.throws(
@@ -395,7 +450,8 @@ test("isolated validation binds patch, output, base, and result tree", (t) => {
     outputPath,
     manifestPath,
     cwd,
-    snapshotSha256
+    snapshotSha256,
+    intent.intentDigest
   );
 
   assert.equal(prepared.baseSha, git("rev-parse", "HEAD").trim());
@@ -403,12 +459,26 @@ test("isolated validation binds patch, output, base, and result tree", (t) => {
   assert.equal(manifest.baseSha, prepared.baseSha);
   assert.equal(manifest.resultTree, git("write-tree").trim());
   assert.deepEqual(manifest.changedPaths, ["file.txt"]);
-  assert.deepEqual(manifest.sourceLabels, ["agent:implement", "agent:automerge", "priority:trivial"]);
+  assert.deepEqual(manifest.sourceLabels, [
+    "agent:automerge",
+    "agent:implement",
+    "priority:trivial"
+  ]);
   assert.deepEqual(verified, manifest);
 
   writeFileSync(patchPath, `${readFileSync(patchPath, "utf8")}\n# tampered\n`);
   assert.throws(
-    () => verifyValidatedArtifactBase(config, 42, patchPath, outputPath, manifestPath, cwd, snapshotSha256),
+    () =>
+      verifyValidatedArtifactBase(
+        config,
+        42,
+        patchPath,
+        outputPath,
+        manifestPath,
+        cwd,
+        snapshotSha256,
+        intent.intentDigest
+      ),
     /patch integrity check failed/
   );
 });
@@ -432,15 +502,10 @@ test("final validation seal rejects changes to the prepared host tree", (t) => {
   writeFileSync(patchPath, git("diff", "--binary", "HEAD", "--", "file.txt"));
   git("restore", "file.txt");
   const outputPath = join(cwd, "implementation.md");
-  writeFileSync(outputPath, "Implemented safely.\n");
+  writeFileSync(outputPath, implementationOutput());
   writeFileSync(
     join(cwd, "implementation-intent.json"),
-    `${JSON.stringify({
-      version: 1,
-      issueNumber: 42,
-      issueSnapshotSha256: "d".repeat(64),
-      sourceLabels: ["agent:implement", "agent:automerge"],
-    })}\n`
+    `${JSON.stringify(implementationIntent())}\n`
   );
   const preparedPath = join(root, "prepared.json");
   preparePatchValidation(config, 42, patchPath, outputPath, preparedPath, join(root, "candidate"), cwd);
@@ -482,52 +547,58 @@ test("isolated validation command environment removes credentials and workflow c
 
 test("implementation workflow isolates candidate checks from credentials, artifacts, and command channels", () => {
   const workflow = readFileSync(join(process.cwd(), ".github/workflows/agent-implement.yml"), "utf8");
+  const crabboxAction = readFileSync(
+    join(process.cwd(), ".github/actions/setup-crabbox/action.yml"),
+    "utf8"
+  );
   const implementationScript = readFileSync(join(process.cwd(), "scripts/agent-implement.mjs"), "utf8");
   const labels = JSON.parse(readFileSync(join(process.cwd(), ".agent/labels.json"), "utf8"));
   const policy = readFileSync(join(process.cwd(), ".agent/agent-policy.md"), "utf8");
   const prepare = workflow.slice(workflow.indexOf("  prepare-prompt:"), workflow.indexOf("  generate-patch-remote:"));
-  const remote = workflow.slice(workflow.indexOf("  generate-patch-remote:"), workflow.indexOf("  generate-patch:"));
-  const fallback = workflow.slice(workflow.indexOf("  generate-patch:"), workflow.indexOf("  validate-patch:"));
+  const remote = workflow.slice(workflow.indexOf("  generate-patch-remote:"), workflow.indexOf("  validate-patch:"));
   const validation = workflow.slice(workflow.indexOf("  validate-patch:"), workflow.indexOf("  open-pr:"));
   const openPr = workflow.slice(workflow.indexOf("  open-pr:"), workflow.indexOf("  report-failure:"));
 
-  assert.match(workflow, /codex-version: "0\.144\.1"/);
-  assert.match(workflow, /v0\.40\.0/);
-  assert.match(workflow, /crabbox_0\.40\.0_linux_amd64\.tar\.gz/);
-  assert.doesNotMatch(workflow, /0\.38\.4/);
+  assert.match(workflow, /@openai\/codex@0\.144\.1/);
+  assert.match(workflow, /uses: \.\/\.github\/actions\/setup-crabbox/);
+  assert.match(crabboxAction, /v0\.40\.0/);
+  assert.match(crabboxAction, /crabbox_0\.40\.0_linux_amd64\.tar\.gz/);
+  assert.doesNotMatch(`${workflow}\n${crabboxAction}`, /0\.38\.4/);
   assert.equal(labels.some((label) => label.name === "priority:trivial"), true);
   assert.match(policy, /priority:trivial/);
   assert.match(policy, /Every published native fix starts fresh exact-head CI/);
-  assert.match(implementationScript, /sourceLabels: issueLabels\(issue\)/);
+  assert.match(implementationScript, /intentCapsuleForManagedTriage/);
   assert.match(implementationScript, /sourceLabels: intent\.sourceLabels/);
   assert.match(implementationScript, /implementationCommitMessage/);
   assert.match(prepare, /concurrency-group: \$\{\{ steps\.concurrency\.outputs\.group \}\}/);
   assert.match(prepare, /agent-concurrency-slot\.mjs --lane implement --key "\$CONCURRENCY_KEY" --json/);
   assert.match(prepare, /id: backend\n\s+run: node scripts\/agent-worker\.mjs --validate-backend --lane implement --json/);
-  for (const generator of [remote, fallback]) {
-    assert.match(generator, /concurrency:\n      group: \$\{\{ needs\.prepare-prompt\.outputs\.concurrency-group \}\}/);
-    assert.match(generator, /cancel-in-progress: false/);
-    assert.match(generator, /queue: max/);
-  }
-  assert.match(remote, /continue-on-error: true/);
+  assert.match(remote, /concurrency:\n      group: \$\{\{ needs\.prepare-prompt\.outputs\.concurrency-group \}\}/);
+  assert.match(remote, /cancel-in-progress: false/);
+  assert.match(remote, /queue: max/);
+  assert.doesNotMatch(remote, /continue-on-error:/);
   assert.match(
     remote,
     /generated: \$\{\{ steps\.generate\.outcome == 'success' && steps\.implementation-artifact\.outcome == 'success' \}\}/
   );
   assert.match(remote, /git init --quiet/);
   assert.match(remote, /git commit --quiet --no-verify/);
+  assert.match(remote, /codex debug prompt-input 'skill discovery probe'/);
+  assert.match(remote, /node scripts\/agent-skill-discovery\.mjs/);
+  assert.match(remote, /--input \/tmp\/vet-worker-prompt-input\.json --json/);
+  assert.doesNotMatch(remote, /grep -Fq "\$skill"/);
   assert.match(remote, /--sandbox danger-full-access/);
+  assert.match(remote, /--schema \.agent\/schemas\/implementation\.schema\.json/);
   assert.doesNotMatch(remote, /npm ci && npm install --global/);
   assert.match(remote, /name: agent-implementation-remote-diagnostics-\$\{\{ inputs\.issue-number \}\}/);
   assert.match(
     remote,
     /if: always\(\) && \(steps\.generate\.outcome != 'success' \|\| steps\.implementation-artifact\.outcome != 'success'\)/
   );
-  assert.match(fallback, /needs\.generate-patch-remote\.outputs\.generated != 'true'/);
-  assert.match(fallback, /sandbox: \$\{\{ needs\.prepare-prompt\.outputs\.backend-sandbox \}\}/);
-  assert.match(fallback, /model: \$\{\{ needs\.prepare-prompt\.outputs\.backend-model \}\}/);
-  assert.match(fallback, /effort: \$\{\{ needs\.prepare-prompt\.outputs\.backend-effort \}\}/);
-  assert.doesNotMatch(fallback, /^    env:\n(?:      .+\n)*      (?:OPENAI|CODEX)_API_KEY:/m);
+  assert.doesNotMatch(workflow, /\n  generate-patch:\n/);
+  assert.doesNotMatch(workflow, /uses: openai\/codex-action@/);
+  assert.match(validation, /needs: generate-patch-remote/);
+  assert.match(validation, /if: needs\.generate-patch-remote\.outputs\.generated == 'true'/);
   assert.match(validation, /node:22-bookworm@sha256:[a-f0-9]{64}/);
   assert.match(validation, /npm ci --ignore-scripts/);
   assert.match(validation, /npm rebuild --offline/);
@@ -648,15 +719,10 @@ test("prepared validation checks both sides of a privileged rename", (t) => {
   git("restore", ".");
   rmSync(join(cwd, "notes.md"));
   const outputPath = join(cwd, "implementation.md");
-  writeFileSync(outputPath, "Renamed safely.\n");
+  writeFileSync(outputPath, implementationOutput({ summary: "Renamed safely." }));
   writeFileSync(
     join(cwd, "implementation-intent.json"),
-    `${JSON.stringify({
-      version: 1,
-      issueNumber: 42,
-      issueSnapshotSha256: "c".repeat(64),
-      sourceLabels: ["agent:implement", "agent:automerge"],
-    })}\n`
+    `${JSON.stringify(implementationIntent())}\n`
   );
 
   assert.throws(
@@ -672,4 +738,11 @@ test("prepared validation checks both sides of a privileged rename", (t) => {
       ),
     (error) => error.code === 1 && error.details.paths.includes("AGENTS.md")
   );
+});
+
+test("routine implementation prompt excludes the long AFK rebuild contract", () => {
+  const prompt = readFileSync(join(process.cwd(), ".agent/prompts/implement.md"), "utf8");
+
+  assert.match(prompt, /Do not load `\.agent\/AFK-AUTOMATION-INTENT\.md` for a routine product issue/);
+  assert.match(prompt, /included only when the approved issue changes AFK automation/);
 });

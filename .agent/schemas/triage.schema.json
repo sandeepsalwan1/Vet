@@ -18,7 +18,7 @@
     "risk": { "enum": ["low", "medium", "high"] },
     "alignment": { "enum": ["yes", "no", "unclear"] },
     "implementationScope": { "type": "string" },
-    "proofNeeded": { "enum": ["none", "CI", "UI", "GIF"] },
+    "proofNeeded": { "enum": ["none", "CI", "UI", "GIF", "service"] },
     "automationDecision": {
       "enum": ["implement", "manual-review", "blocked", "reject"]
     },

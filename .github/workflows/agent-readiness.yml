@@ -1,0 +1,132 @@
+name: Agent Readiness
+run-name: Agent Readiness ${{ github.sha }}
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "17 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  checks: write
+  contents: read
+  issues: write
+
+concurrency:
+  group: agent-readiness
+  cancel-in-progress: false
+
+jobs:
+  readiness:
+    name: zero-model readiness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install trusted dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run deterministic automation tests
+        id: static-tests
+        continue-on-error: true
+        run: node --test scripts/agent-*.test.mjs
+      - name: Audit production dependencies
+        continue-on-error: true
+        run: |
+          mkdir -p .agent-output
+          if npm audit --omit=dev --json > .agent-output/readiness-audit-raw.json; then
+            jq -n '{ok: true}' > .agent-output/readiness-audit.json
+          else
+            jq -n '{ok: false}' > .agent-output/readiness-audit.json
+          fi
+      - name: Wait for exact-head baseline checks
+        id: baseline
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/agent-readiness.mjs
+          --wait-baseline
+          --wait-seconds 900
+          --expected-head "${{ github.sha }}"
+          --json
+      - uses: ./.github/actions/setup-crabbox
+        with:
+          vercel-ready: ${{ vars.CRABBOX_VERCEL_READY }}
+      - name: Exercise primary provider without model access
+        continue-on-error: true
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_OIDC_TOKEN: ${{ secrets.VERCEL_OIDC_TOKEN }}
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          HETZNER_TOKEN: ${{ secrets.HETZNER_TOKEN }}
+          HETZNER_API_TOKEN: ${{ secrets.HETZNER_API_TOKEN }}
+          CRABBOX_VERCEL_READY: ${{ vars.CRABBOX_VERCEL_READY }}
+          CRABBOX_HETZNER_READY: ${{ vars.CRABBOX_HETZNER_READY }}
+        run: >-
+          node scripts/agent-crabbox-run.mjs
+          --lane readinessRemote
+          --command "test -f package.json && node --version"
+          --record-file .agent-output/readiness-provider.json
+          --json
+      - name: Exercise credential-free fallback without model access
+        continue-on-error: true
+        run: >-
+          node scripts/agent-crabbox-run.mjs
+          --lane fallbackReadinessRemote
+          --command "test -f package.json && node --version"
+          --record-file .agent-output/readiness-fallback-provider.json
+          --json
+      - name: Install pinned Render CLI
+        continue-on-error: true
+        uses: ./.github/actions/setup-render
+      - name: Verify trusted Render baseline
+        continue-on-error: true
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: >-
+          node scripts/agent-render-proof.mjs
+          --output-file .agent-output/readiness-render.json
+          --json
+      - name: Publish exact readiness state
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          READINESS_EXPECTED_HEAD: ${{ github.sha }}
+          AGENT_AUTH_PRESENT: ${{ secrets.OPENAI_API_KEY != '' }}
+          PRIMARY_PROVIDER_AUTH_PRESENT: ${{ (vars.CRABBOX_VERCEL_READY == 'true' && (secrets.VERCEL_TOKEN != '' || secrets.VERCEL_OIDC_TOKEN != '')) || (vars.CRABBOX_HETZNER_READY == 'true' && (secrets.HCLOUD_TOKEN != '' || secrets.HETZNER_TOKEN != '' || secrets.HETZNER_API_TOKEN != '')) }}
+          RENDER_AUTH_PRESENT: ${{ secrets.RENDER_API_KEY != '' }}
+          STATIC_AGENT_TESTS_PASSED: ${{ steps.static-tests.outcome == 'success' }}
+        run: >-
+          node scripts/agent-readiness.mjs
+          --provider-record .agent-output/readiness-provider.json
+          --fallback-provider-record .agent-output/readiness-fallback-provider.json
+          --render-record .agent-output/readiness-render.json
+          --audit-record .agent-output/readiness-audit.json
+          --publish --json
+      - name: Upload redacted readiness evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-readiness-${{ github.sha }}
+          path: |
+            .agent-output/readiness-audit.json
+            .agent-output/readiness-provider.json
+            .agent-output/readiness-fallback-provider.json
+            .agent-output/readiness-render.json
+            .agent-output/crabbox-readinessRemote-*.json
+            .agent-output/crabbox-readinessRemote-*.log
+            .agent-output/crabbox-fallbackReadinessRemote-*.json
+            .agent-output/crabbox-fallbackReadinessRemote-*.log
+          include-hidden-files: true
+          if-no-files-found: warn

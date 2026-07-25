@@ -30,6 +30,11 @@
     "description": "Automation needs human input or a failed gate"
   },
   {
+    "name": "agent:post-merge-failed",
+    "color": "b60205",
+    "description": "Merged revision needs trusted service recovery"
+  },
+  {
     "name": "priority:high",
     "color": "d93f0b",
     "description": "Important or risky work; manual review required"

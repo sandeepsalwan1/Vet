@@ -23,18 +23,15 @@ import {
   upsertManagedComment
 } from "./agent-lib.mjs";
 import { evaluateResumeRequest, ownerFollowUpForComment } from "./agent-resume.mjs";
+import {
+  BASE_TRIAGE_FIELDS,
+  PROOF_KINDS,
+  createIntentCapsule,
+  parseIssueSections
+} from "./agent-intent.mjs";
 
-const TRIAGE_MANIFEST_VERSION = 2;
-const DECISION_FIELDS = [
-  "value",
-  "priority",
-  "risk",
-  "alignment",
-  "implementationScope",
-  "proofNeeded",
-  "automationDecision",
-  "humanQuestion"
-];
+const TRIAGE_MANIFEST_VERSION = 3;
+const MAX_OWNER_CLARIFICATIONS = 10;
 
 function fetchIssue(config, issueNumber) {
   const issue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${issueNumber}`);
@@ -90,11 +87,54 @@ function failedBody(snapshotSha256) {
 Triage did not complete. A trusted retriage is required before implementation.`;
 }
 
-export function writeTriageManifest(path, issue, ownerFollowUp = null) {
+function numericCommentId(comment) {
+  return Number(comment?.database_id ?? comment?.id);
+}
+
+export function trustedOwnerClarifications(comments, repoOwner) {
+  const owner = String(repoOwner ?? "").toLowerCase();
+  const values = (comments ?? [])
+    .filter((comment) => String(comment?.user?.login ?? "").toLowerCase() === owner)
+    .map((comment) => {
+      const id = numericCommentId(comment);
+      const body = String(comment?.body ?? "").replace(/\r\n?/g, "\n").trim();
+      if (!Number.isSafeInteger(id) || id <= 0 || !body) {
+        throw new AgentError("repository-owner clarification is invalid", 1);
+      }
+      return {
+        id,
+        body,
+        sha256: createHash("sha256").update(body).digest("hex")
+      };
+    });
+  if (values.length > MAX_OWNER_CLARIFICATIONS) {
+    throw new AgentError("too many repository-owner clarifications for one bounded intent", 1);
+  }
+  return values;
+}
+
+export function writeTriageManifest(
+  path,
+  issue,
+  ownerFollowUp = null,
+  ownerClarifications = []
+) {
+  const clarifications = [...ownerClarifications];
+  if (
+    ownerFollowUp &&
+    !clarifications.some((clarification) => Number(clarification.id) === Number(ownerFollowUp.id))
+  ) {
+    clarifications.push(ownerFollowUp);
+  }
+  clarifications.sort((left, right) => Number(left.id) - Number(right.id));
   const manifest = {
     version: TRIAGE_MANIFEST_VERSION,
     issueNumber: Number(issue.number),
     issueSnapshotSha256: issueSnapshotSha256(issue),
+    ownerClarifications: clarifications.map((clarification) => ({
+      commentId: Number(clarification.id),
+      sha256: String(clarification.sha256)
+    })),
     resumeCommentId: ownerFollowUp?.id ?? 0,
     resumeCommentSha256: ownerFollowUp?.sha256 ?? null
   };
@@ -115,11 +155,29 @@ export function readTriageManifest(path) {
     !manifest ||
     Array.isArray(manifest) ||
     JSON.stringify(keys) !==
-      JSON.stringify(["issueNumber", "issueSnapshotSha256", "resumeCommentId", "resumeCommentSha256", "version"]) ||
+      JSON.stringify([
+        "issueNumber",
+        "issueSnapshotSha256",
+        "ownerClarifications",
+        "resumeCommentId",
+        "resumeCommentSha256",
+        "version"
+      ]) ||
     manifest.version !== TRIAGE_MANIFEST_VERSION ||
     !Number.isInteger(manifest.issueNumber) ||
     manifest.issueNumber < 1 ||
     !/^[a-f0-9]{64}$/.test(manifest.issueSnapshotSha256 ?? "") ||
+    !Array.isArray(manifest.ownerClarifications) ||
+    manifest.ownerClarifications.some(
+      (clarification) =>
+        JSON.stringify(Object.keys(clarification ?? {}).sort()) !==
+          JSON.stringify(["commentId", "sha256"]) ||
+        !Number.isSafeInteger(clarification.commentId) ||
+        clarification.commentId <= 0 ||
+        !/^[a-f0-9]{64}$/.test(clarification.sha256 ?? "")
+    ) ||
+    new Set(manifest.ownerClarifications.map((value) => value.commentId)).size !==
+      manifest.ownerClarifications.length ||
     !Number.isSafeInteger(manifest.resumeCommentId) ||
     manifest.resumeCommentId < 0 ||
     (manifest.resumeCommentId === 0
@@ -176,7 +234,7 @@ export function validateTriageDecision(decision) {
   if (
     !decision ||
     Array.isArray(decision) ||
-    JSON.stringify(keys) !== JSON.stringify([...DECISION_FIELDS].sort()) ||
+    JSON.stringify(keys) !== JSON.stringify([...BASE_TRIAGE_FIELDS].sort()) ||
     !["low", "medium", "high"].includes(decision.value) ||
     !["low", "medium", "high"].includes(decision.priority) ||
     !["low", "medium", "high"].includes(decision.risk) ||
@@ -184,7 +242,7 @@ export function validateTriageDecision(decision) {
     typeof decision.implementationScope !== "string" ||
     decision.implementationScope.trim() === "" ||
     decision.implementationScope.includes("```") ||
-    !["none", "CI", "UI", "GIF"].includes(decision.proofNeeded) ||
+    !PROOF_KINDS.includes(decision.proofNeeded) ||
     !["implement", "manual-review", "blocked", "reject"].includes(decision.automationDecision) ||
     typeof decision.humanQuestion !== "string" ||
     decision.humanQuestion.includes("```")
@@ -196,28 +254,94 @@ export function validateTriageDecision(decision) {
 
 export function lightweightTriageDecision(config, issue) {
   const labels = issueLabels(issue);
-  const priority = labels.includes(config.labels.priorityHigh)
-    ? "high"
-    : labels.includes(config.labels.priorityLow) || labels.includes(config.labels.priorityTrivial)
-      ? "low"
-      : "medium";
-  const issueText = `${issue?.title ?? ""}\n${issue?.body ?? ""}`;
-  const proofNeeded = /\b(?:gif|video|screen recording)\b/i.test(issueText)
+  const sections = parseIssueSections(issue?.body ?? "");
+  const outcome = String(sections.outcome || issue?.title || "").trim();
+  const acceptance = String(
+    sections["acceptance criteria"] ||
+      (Object.keys(sections).length === 0 ? issue?.body ?? "" : "")
+  ).trim();
+  const requestText = `${issue?.title ?? ""}\n${outcome}\n${acceptance}\n${issue?.body ?? ""}`;
+  const compactRequest = `${outcome}\n${acceptance}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  const explicitHigh = labels.includes(config.labels.priorityHigh);
+  const explicitLow =
+    labels.includes(config.labels.priorityLow) ||
+    labels.includes(config.labels.priorityTrivial);
+  const lowWork =
+    /\b(?:readme|documentation|docs|copy|wording|typo|test coverage|dead code|cleanup|lint)\b/i.test(
+      requestText
+    );
+  const urgentWork =
+    /\b(?:urgent|outage|incident|patient safety|security incident|clinic blocked|production down)\b/i.test(
+      requestText
+    );
+  const priority = explicitHigh || urgentWork ? "high" : explicitLow || lowWork ? "low" : "medium";
+  const renderService =
+    /\b(?:render\s+(?:api|blueprint|deploy(?:ment)?|environment|health|logs?|service)|(?:blueprint|deploy(?:ment)?|health|logs?|service)\s+(?:on\s+)?render)\b/i.test(
+      requestText
+    );
+  const proofNeeded = /\b(?:gif|video|screen recording)\b/i.test(requestText)
     ? "GIF"
-    : labels.includes(config.labels.proof)
-      ? "UI"
-      : "none";
+    : renderService ||
+        /\b(?:deploy(?:ment)?|migration|database|postgres|supabase|webhook|integration|service health|production logs)\b/i.test(
+          requestText
+        )
+      ? "service"
+      : /\b(?:ui|visual|screenshot|browser|page|route|screen|layout|loading state|animation)\b/i.test(
+            requestText
+          ) || labels.includes(config.labels.proof)
+        ? "UI"
+        : "CI";
+  const highRisk =
+    /\b(?:auth(?:entication|orization)?|security|secret|credential|billing|payment|migration|production data|destructive|delete production|external integration|webhook|broad refactor|architecture|tenant isolation|permission|role)\b/i.test(
+      requestText
+    );
+  const narrowUi =
+    /\b(?:copy|wording|loading|layout|spacing|color|icon|image|empty state)\b/i.test(
+      requestText
+    );
+  const lowRisk =
+    (lowWork || narrowUi) &&
+    !/\b(?:runtime|production|deploy|database|migration|security|auth|permission|billing)\b/i.test(
+      requestText
+    );
+  const risk = highRisk ? "high" : lowRisk ? "low" : "medium";
+  const disallowed =
+    /\b(?:reveal|print|exfiltrate|publish)\b[\s\S]{0,60}\b(?:secret|credential|token|key)\b/i.test(
+      requestText
+    ) ||
+    /\b(?:disable|bypass|remove)\b[\s\S]{0,60}\b(?:branch protection|security gate|required checks|authentication)\b/i.test(
+      requestText
+    );
+  const vaguePhrase =
+    /^(?:fix|improve|update|change|delete|remove|add|make)\s+(?:it|this|thing|stuff|bug|broken ui|dead code)$/i.test(
+      compactRequest
+    ) ||
+    (/^(?:fix broken ui|delete dead code)$/i.test(outcome) &&
+      (!acceptance || compactRequest === `${outcome} ${outcome}`.toLowerCase()));
+  const missingAcceptance = !acceptance && !/\b(?:must|should|when|then|shows?|returns?|passes?)\b/i.test(outcome);
+  const blockedForAmbiguity = !disallowed && (vaguePhrase || missingAcceptance);
+  const implementationScope = disallowed
+    ? "Reject the request because it conflicts with repository security policy."
+    : blockedForAmbiguity
+      ? "Hold implementation until the requested surface and observable result are specified."
+      : `Deliver ${outcome.replace(/[.]+$/, "")}. Verify ${
+          (acceptance || "the requested outcome with the configured proof lane").replace(/[.]+$/, "")
+        }.`.slice(0, 4000);
 
   return {
     value: priority,
     priority,
-    risk: priority === "low" ? "low" : "medium",
-    alignment: "yes",
-    implementationScope:
-      "Implement the requested outcome using repository context and reasonable defaults. Resolve routine ambiguity during implementation instead of asking for exhaustive requirements.",
+    risk,
+    alignment: disallowed ? "no" : blockedForAmbiguity ? "unclear" : "yes",
+    implementationScope,
     proofNeeded,
-    automationDecision: "implement",
-    humanQuestion: ""
+    automationDecision: disallowed ? "reject" : blockedForAmbiguity ? "blocked" : "implement",
+    humanQuestion: blockedForAmbiguity
+      ? "Name the affected route, component, package, or files, and the observable result that should be true."
+      : ""
   };
 }
 
@@ -258,6 +382,8 @@ export function triageBody(decision, ownerFollowUp = null) {
 - proof needed: ${decision.proofNeeded}
 - automation: ${decision.automationDecision}
 - issue snapshot: ${decision.issueSnapshotSha256}
+- intent digest: ${decision.intentDigest}
+- owner clarifications: ${decision.ownerClarifications.length}
 
 Scope:
 
@@ -280,11 +406,11 @@ export function triageLabelChanges(config, decision, currentLabels = []) {
     decision.automationDecision === "manual-review" ||
     decision.automationDecision === "reject" ||
     decision.humanQuestion.trim() !== "";
-  const requiresVisualProof = decision.proofNeeded === "UI" || decision.proofNeeded === "GIF";
+  const requiresProof = ["UI", "GIF", "service"].includes(decision.proofNeeded);
 
   if (decision.priority === "high") add.push(config.labels.priorityHigh);
   if (decision.priority === "low" && !stickyHighPriority) add.push(config.labels.priorityLow);
-  if (requiresVisualProof) add.push(config.labels.proof);
+  if (requiresProof) add.push(config.labels.proof);
 
   if (blocked) {
     add.push(config.labels.blocked);
@@ -334,7 +460,13 @@ export function prepareTriage(
     mkdirSync(dirname(promptPath), { recursive: true });
     writeFileSync(promptPath, prompt);
   }
-  const manifest = writeTriageManifest(manifestPath, issue, ownerFollowUp);
+  const ownerClarifications = trustedOwnerClarifications(comments, config.repo.owner);
+  const manifest = writeTriageManifest(
+    manifestPath,
+    issue,
+    ownerFollowUp,
+    ownerClarifications
+  );
   const comment = upsertManagedComment({
     config,
     number: issueNumber,
@@ -351,6 +483,22 @@ export function applyDecision(config, issueNumber, decision, manifestPath, dryRu
   const { issue, comments } = fetchIssue(config, issueNumber);
   assertTriageSnapshot(issue, manifest, issueNumber);
   let ownerFollowUp = null;
+  const ownerClarifications = manifest.ownerClarifications.map((clarification) => {
+    const value = ownerFollowUpForComment(
+      comments,
+      clarification.commentId,
+      config.repo.owner,
+      false
+    );
+    if (value.sha256 !== clarification.sha256) {
+      throw new AgentError("owner clarification changed after triage started", 1);
+    }
+    return {
+      commentId: clarification.commentId,
+      sha256: clarification.sha256,
+      body: value.body
+    };
+  });
   if (manifest.resumeCommentId) {
     ownerFollowUp = ownerFollowUpForComment(
       comments,
@@ -363,9 +511,20 @@ export function applyDecision(config, issueNumber, decision, manifestPath, dryRu
       throw new AgentError("owner reply changed after resumed triage started", 1);
     }
   }
+  const validatedDecision = validateTriageDecision(decision);
+  const capsule = createIntentCapsule({
+    issue,
+    decision: validatedDecision,
+    ownerClarifications
+  });
   const authoritativeDecision = {
-    ...validateTriageDecision(decision),
-    issueSnapshotSha256: manifest.issueSnapshotSha256
+    ...validatedDecision,
+    issueSnapshotSha256: manifest.issueSnapshotSha256,
+    ownerClarifications: capsule.ownerClarifications.map(({ commentId, sha256 }) => ({
+      commentId,
+      sha256
+    })),
+    intentDigest: capsule.intentDigest
   };
   const changes = triageLabelChanges(config, authoritativeDecision, issueLabels(issue));
 

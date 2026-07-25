@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -49,7 +52,7 @@ function codexArgs(args, config) {
   const settings = resolveCodexSettings(config, args.lane);
   const sandbox = args.sandbox ?? settings.sandbox;
   if (!CODEX_SANDBOXES.has(sandbox)) throw new AgentError(`unsupported Codex sandbox: ${sandbox}`, 2);
-  const command = ["exec", "--sandbox", sandbox];
+  const command = ["exec", "--json", "--sandbox", sandbox];
   const model = args.model ?? settings.model;
   const effort = args.effort ?? settings.effort;
   if (model) {
@@ -62,10 +65,87 @@ function codexArgs(args, config) {
     if (!CODEX_EFFORTS.has(value)) throw new AgentError(`unsupported Codex effort: ${value}`, 2);
     command.push("--config", `model_reasoning_effort=${JSON.stringify(value)}`);
   }
+  command.push(
+    "--config",
+    `shell_environment_policy.exclude=${JSON.stringify([
+      ...new Set([
+        config.secrets?.agentAuth,
+        "CODEX_API_KEY",
+        "OPENAI_API_KEY",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "AGENT_PAT",
+        "CRABBOX_COORDINATOR_TOKEN",
+        ...(config.secrets?.crabboxProviders ?? []),
+        ...(config.secrets?.vercel ?? [])
+      ].filter(Boolean))
+    ])}`
+  );
   if (args.schema) command.push("--output-schema", args.schema);
   if (outputFile) command.push("--output-last-message", outputFile);
   command.push("-");
   return command;
+}
+
+function tokenCount(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+export function parseCodexUsage(output, settings) {
+  let threadId = "";
+  const calls = [];
+  for (const line of String(output ?? "").split(/\r?\n/)) {
+    if (!line.trim().startsWith("{")) continue;
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (event?.type === "thread.started" && typeof event.thread_id === "string") {
+      threadId = event.thread_id;
+      continue;
+    }
+    if (event?.type !== "turn.completed" || !event.usage || typeof event.usage !== "object") continue;
+    const inputTokens = tokenCount(event.usage.input_tokens);
+    const cachedInputTokens = tokenCount(event.usage.cached_input_tokens);
+    const outputTokens = tokenCount(event.usage.output_tokens);
+    const reasoningOutputTokens = tokenCount(event.usage.reasoning_output_tokens);
+    if (
+      inputTokens === null ||
+      cachedInputTokens === null ||
+      outputTokens === null ||
+      reasoningOutputTokens === null ||
+      cachedInputTokens > inputTokens
+    ) {
+      continue;
+    }
+    const index = calls.length + 1;
+    calls.push({
+      id: createHash("sha256")
+        .update(`${settings.lane}\0${threadId}\0${index}\0${inputTokens}\0${outputTokens}`)
+        .digest("hex"),
+      inputTokens,
+      cachedInputTokens,
+      outputTokens,
+      reasoningOutputTokens
+    });
+  }
+  return {
+    version: 1,
+    backend: "codex",
+    lane: settings.lane,
+    model: settings.model,
+    effort: settings.effort,
+    complete: calls.length > 0,
+    calls
+  };
+}
+
+function writeUsage(path, usage) {
+  const target = resolve(path);
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, `${JSON.stringify(usage, null, 2)}\n`, { mode: 0o600 });
 }
 
 function codexAuthNames(config) {
@@ -187,6 +267,16 @@ export async function main(argv = process.argv.slice(2)) {
     stdio: ["pipe", "pipe", "pipe"],
     check: false
   });
+  if (args["usage-file"]) {
+    const usage = parseCodexUsage(
+      result.stdout,
+      resolveCodexSettings(config, args.lane)
+    );
+    writeUsage(args["usage-file"], usage);
+    if (result.status === 0 && !usage.complete) {
+      throw new AgentError("Codex completed without exact token usage", 1);
+    }
+  }
   process.stdout.write(result.stdout);
   process.stderr.write(result.stderr);
   process.exitCode = result.status;

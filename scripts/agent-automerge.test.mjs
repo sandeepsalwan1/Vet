@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { createIntentCapsule } from "./agent-intent.mjs";
 import {
   implementationCommitMessage,
   issueSnapshotSha256,
@@ -8,6 +9,7 @@ import {
 } from "./agent-lib.mjs";
 
 import {
+  addLabelArgs,
   agentWorkflowLabels,
   assertTrustedMergedAgentPull,
   checkState,
@@ -20,6 +22,7 @@ import {
   isStaleBase,
   isUpdateBranchMergeConflict,
   nativeMergeArgs,
+  openIssueArgs,
   postMergeDispatchArgs,
   postMergeRunName,
   recoverStaleBase,
@@ -40,6 +43,7 @@ const sha = "a".repeat(40);
 const baseSha = "b".repeat(40);
 const updatedSha = "c".repeat(40);
 const mergeSha = "d".repeat(40);
+const postMergeTarget = { prNumber: 18, sourceIssue: 17 };
 const config = {
   repo: { owner: "sandeepsalwan1", name: "Vet", defaultBranch: "main" },
   labels: {
@@ -49,6 +53,7 @@ const config = {
     automerge: "agent:automerge",
     proof: "agent:proof",
     blocked: "agent:blocked",
+    postMergeFailed: "agent:post-merge-failed",
     priorityHigh: "priority:high",
     priorityTrivial: "priority:trivial",
     priorityLow: "priority:low"
@@ -111,8 +116,8 @@ function sourceIssue() {
   };
 }
 
-function triage(overrides = {}) {
-  const decision = {
+function triage(overrides = {}, issue = sourceIssue()) {
+  const baseDecision = {
     value: "medium",
     priority: "medium",
     risk: "medium",
@@ -121,8 +126,17 @@ function triage(overrides = {}) {
     proofNeeded: "CI",
     automationDecision: "implement",
     humanQuestion: "",
-    issueSnapshotSha256: issueSnapshotSha256(sourceIssue()),
     ...overrides
+  };
+  const capsule = createIntentCapsule({
+    issue,
+    decision: baseDecision
+  });
+  const decision = {
+    ...baseDecision,
+    issueSnapshotSha256: capsule.issueSnapshotSha256,
+    ownerClarifications: [],
+    intentDigest: capsule.intentDigest
   };
   return {
     id: 1,
@@ -219,13 +233,21 @@ function cleanupHarness(decision, { failLabel = "", failWorkflow = "" } = {}) {
       }
       if (args[0] === "issue" && args[1] === "edit") {
         const number = Number(args[2]);
-        const label = args[args.indexOf("--remove-label") + 1];
-        if (number === 18 && label === failLabel) throw new Error("label service unavailable");
         const issue = state.get(number);
-        issue.labels = issue.labels.filter((item) => item !== label);
+        if (args.includes("--remove-label")) {
+          const label = args[args.indexOf("--remove-label") + 1];
+          if (number === 18 && label === failLabel) {
+            throw new Error("label service unavailable");
+          }
+          issue.labels = issue.labels.filter((item) => item !== label);
+        }
+        if (args.includes("--add-label")) {
+          const label = args[args.indexOf("--add-label") + 1];
+          if (!issue.labels.includes(label)) issue.labels.push(label);
+        }
       }
       if (args[0] === "api" && String(args[1]).endsWith("/issues/17")) {
-        state.get(17).state = "closed";
+        state.get(17).state = args.includes("state=open") ? "open" : "closed";
       }
     }
   };
@@ -247,6 +269,7 @@ test("trivial cost lane skips only the paid no-mistakes status", () => {
   const value = fixture();
   value.pullIssue.labels.push({ name: "priority:trivial" });
   value.sourceIssue.labels.push({ name: "priority:trivial" });
+  value.sourceComments = [triage({}, value.sourceIssue)];
   value.pull.body = value.pull.body.replace(
     '"sourceLabels":["agent:automerge"]',
     '"sourceLabels":["agent:automerge","priority:trivial"]',
@@ -320,7 +343,7 @@ test("eligible PR is merged immediately after making a draft ready", () => {
   assert.deepEqual(harness.commands, [
     ["gh", ["pr", "ready", "18", "--repo", "sandeepsalwan1/Vet"]],
     ["gh", nativeMergeArgs(18, config, sha)],
-    ...postMergeDispatchArgs(config, mergeSha).map((args) => ["gh", args]),
+    ...postMergeDispatchArgs(config, mergeSha, postMergeTarget).map((args) => ["gh", args]),
     ...expectedCleanupCommands()
   ]);
   assert.equal(outcome.result.postMerge.mergeSha, mergeSha);
@@ -340,7 +363,7 @@ test("eligible PR revokes stale native automerge before immediate merge", () => 
   assert.deepEqual(harness.commands, [
     ["gh", disableNativeAutomergeArgs(18, config)],
     ["gh", nativeMergeArgs(18, config, sha)],
-    ...postMergeDispatchArgs(config, mergeSha).map((args) => ["gh", args]),
+    ...postMergeDispatchArgs(config, mergeSha, postMergeTarget).map((args) => ["gh", args]),
     ...expectedCleanupCommands()
   ]);
 });
@@ -357,6 +380,18 @@ test("post-merge checks are dispatched against the exact merge commit", () => {
   assert.deepEqual(
     commands,
     postMergeDispatchArgs(config, mergeSha).map((args) => ["gh", args])
+  );
+  const withService = postMergeDispatchArgs(
+    config,
+    mergeSha,
+    postMergeTarget
+  );
+  assert.equal(withService.length, 3);
+  assert.ok(withService[2].includes("agent-post-merge.yml"));
+  assert.ok(withService[2].includes(`merge-sha=${mergeSha}`));
+  assert.equal(
+    postMergeRunName("agent-post-merge.yml", mergeSha),
+    `Agent Post-Merge ${mergeSha}`
   );
   assert.throws(() => postMergeDispatchArgs(config, "not-a-sha"), /commit SHA is invalid/);
 });
@@ -407,7 +442,7 @@ test("merged pull reconciliation validates identity and backfills checks before 
 
   assert.equal(outcome.code, 0);
   assert.deepEqual(harness.commands, [
-    ...postMergeDispatchArgs(config, mergeSha).map((args) => ["gh", args]),
+    ...postMergeDispatchArgs(config, mergeSha, postMergeTarget).map((args) => ["gh", args]),
     ...expectedCleanupCommands()
   ]);
   assert.throws(
@@ -427,7 +462,7 @@ test("merged pull reconciliation validates identity and backfills checks before 
   );
 });
 
-test("post-merge dispatch failure is visible after merge and cleanup still completes", () => {
+test("post-merge dispatch failure reopens and marks the source issue", () => {
   const value = fixture();
   const decision = evaluate(value);
   const harness = cleanupHarness(decision, { failWorkflow: "codeql.yml" });
@@ -442,8 +477,32 @@ test("post-merge dispatch failure is visible after merge and cleanup still compl
   assert.match(outcome.result.message, /post-merge check dispatch failed/);
   assert.equal(outcome.result.postMerge.ok, false);
   assert.equal(outcome.result.postMerge.dispatchErrors.length, 1);
-  assert.equal(outcome.result.cleanup.ok, true);
-  assert.ok(harness.commands.some(([, args]) => args.join(" ") === closeIssueArgs(17, config).join(" ")));
+  assert.equal(outcome.result.cleanup, null);
+  assert.equal(outcome.result.hold.ok, true);
+  assert.ok(
+    harness.commands.some(
+      ([, args]) =>
+        args.join(" ") ===
+        addLabelArgs(17, config, "agent:post-merge-failed").join(" ")
+    )
+  );
+  assert.ok(
+    harness.commands.some(
+      ([, args]) =>
+        args.join(" ") === addLabelArgs(17, config, "agent:blocked").join(" ")
+    )
+  );
+  assert.ok(
+    harness.commands.some(
+      ([, args]) => args.join(" ") === openIssueArgs(17, config).join(" ")
+    )
+  );
+  assert.equal(
+    harness.commands.some(
+      ([, args]) => args.join(" ") === closeIssueArgs(17, config).join(" ")
+    ),
+    false
+  );
 });
 
 test("stale base recovery uses the authorized head and reruns head-bound gates", async () => {
@@ -783,7 +842,8 @@ test("post-merge cleanup removes only workflow labels and closes the source issu
     "agent:review",
     "agent:automerge",
     "agent:proof",
-    "agent:blocked"
+    "agent:blocked",
+    "agent:post-merge-failed"
   ]);
   assert.deepEqual(harness.commands, [
     ["gh", removeLabelArgs(18, config, "agent:review")],

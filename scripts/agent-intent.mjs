@@ -1,0 +1,782 @@
+#!/usr/bin/env node
+
+import { createHash } from "node:crypto";
+
+import {
+  AgentError,
+  extractJson,
+  issueLabels,
+  issueSnapshotSha256
+} from "./agent-lib.mjs";
+
+export const INTENT_CAPSULE_VERSION = 2;
+export const IMPLEMENTATION_RESULT_VERSION = 1;
+export const IMPLEMENTATION_ADDENDUM_MARKER =
+  "<!-- agent-intent-addendum:v1 -->";
+export const PROOF_KINDS = Object.freeze(["none", "CI", "UI", "GIF", "service"]);
+export const BASE_TRIAGE_FIELDS = Object.freeze([
+  "value",
+  "priority",
+  "risk",
+  "alignment",
+  "implementationScope",
+  "proofNeeded",
+  "automationDecision",
+  "humanQuestion"
+]);
+export const MANAGED_TRIAGE_FIELDS = Object.freeze([
+  ...BASE_TRIAGE_FIELDS,
+  "intentDigest",
+  "issueSnapshotSha256",
+  "ownerClarifications"
+]);
+
+const MAX_ISSUE_BODY_BYTES = 48_000;
+const MAX_SECTION_BYTES = 16_000;
+const MAX_CLARIFICATION_BYTES = 8_000;
+const MAX_TRANSCRIPT_SUMMARY_BYTES = 8_000;
+const MAX_REQUIREMENTS = 50;
+const MAX_REQUIREMENT_BYTES = 1_000;
+const MAX_IMPLEMENTATION_ITEMS = 50;
+const MAX_IMPLEMENTATION_ITEM_BYTES = 2_000;
+const MAX_PROOF_TASKS = 20;
+const MAX_PROOF_STEPS = 20;
+const MAX_PROOF_VALUE_BYTES = 1_000;
+
+function normalizedText(value) {
+  return String(value ?? "").replace(/\r\n?/g, "\n").trim();
+}
+
+function boundedText(value, maxBytes, label) {
+  const text = normalizedText(value);
+  if (Buffer.byteLength(text, "utf8") > maxBytes) {
+    throw new AgentError(`${label} exceeds its bounded intent limit`, 1);
+  }
+  return text;
+}
+
+function sha256(value) {
+  return createHash("sha256").update(String(value), "utf8").digest("hex");
+}
+
+function safeProofRoute(value, label = "proof route") {
+  const route = normalizedText(value);
+  if (
+    !route ||
+    !/^\/[A-Za-z0-9/_-]*$/.test(route) ||
+    route.includes("..") ||
+    route.includes("//") ||
+    route.startsWith("/api/")
+  ) {
+    throw new AgentError(`${label} is invalid`, 1);
+  }
+  return route.length > 1 ? route.replace(/\/+$/, "") : route;
+}
+
+function boundedStringArray(value, label) {
+  if (
+    !Array.isArray(value) ||
+    value.length > MAX_IMPLEMENTATION_ITEMS ||
+    value.some((item) => typeof item !== "string" || !item.trim())
+  ) {
+    throw new AgentError(`${label} is invalid`, 1);
+  }
+  return value.map((item) =>
+    boundedText(item, MAX_IMPLEMENTATION_ITEM_BYTES, label)
+  );
+}
+
+function boundedProofValue(value, label, { allowEmpty = false } = {}) {
+  if (typeof value !== "string" || (!allowEmpty && !value.trim())) {
+    throw new AgentError(`${label} is invalid`, 1);
+  }
+  return boundedText(value, MAX_PROOF_VALUE_BYTES, label);
+}
+
+function validateProofAction(action) {
+  const shapes = {
+    navigate: ["path", "type"],
+    click: ["selector", "type"],
+    fill: ["selector", "type", "value"],
+    press: ["key", "type"],
+    wait: ["milliseconds", "type"]
+  };
+  const expected = shapes[action?.type];
+  if (
+    !action ||
+    Array.isArray(action) ||
+    !expected ||
+    JSON.stringify(Object.keys(action).sort()) !== JSON.stringify(expected)
+  ) {
+    throw new AgentError("implementation proof action is invalid", 1);
+  }
+  if (action.type === "navigate") return { type: action.type, path: safeProofRoute(action.path) };
+  if (action.type === "wait") {
+    if (!Number.isInteger(action.milliseconds) || action.milliseconds < 0 || action.milliseconds > 10_000) {
+      throw new AgentError("implementation proof wait is invalid", 1);
+    }
+    return { type: action.type, milliseconds: action.milliseconds };
+  }
+  if (action.type === "press") {
+    return { type: action.type, key: boundedProofValue(action.key, "implementation proof key") };
+  }
+  const normalized = {
+    type: action.type,
+    selector: boundedProofValue(action.selector, "implementation proof selector")
+  };
+  if (action.type === "fill") {
+    normalized.value = boundedProofValue(action.value, "implementation proof value", {
+      allowEmpty: true
+    });
+  }
+  return normalized;
+}
+
+function validateProofAssertion(assertion) {
+  const shapes = {
+    visible: ["selector", "type"],
+    hidden: ["selector", "type"],
+    text: ["selector", "type", "value"],
+    url: ["path", "type"],
+    attribute: ["name", "selector", "type", "value"]
+  };
+  const expected = shapes[assertion?.type];
+  if (
+    !assertion ||
+    Array.isArray(assertion) ||
+    !expected ||
+    JSON.stringify(Object.keys(assertion).sort()) !== JSON.stringify(expected)
+  ) {
+    throw new AgentError("implementation proof assertion is invalid", 1);
+  }
+  if (assertion.type === "url") return { type: assertion.type, path: safeProofRoute(assertion.path) };
+  const normalized = {
+    type: assertion.type,
+    selector: boundedProofValue(assertion.selector, "implementation proof selector")
+  };
+  if (assertion.type === "text" || assertion.type === "attribute") {
+    normalized.value = boundedProofValue(assertion.value, "implementation proof expected value", {
+      allowEmpty: true
+    });
+  }
+  if (assertion.type === "attribute") {
+    normalized.name = boundedProofValue(assertion.name, "implementation proof attribute");
+  }
+  return normalized;
+}
+
+export function validateProofPlan(plan) {
+  if (
+    !plan ||
+    Array.isArray(plan) ||
+    JSON.stringify(Object.keys(plan).sort()) !== JSON.stringify(["tasks", "version"]) ||
+    plan.version !== 1 ||
+    !Array.isArray(plan.tasks) ||
+    plan.tasks.length > MAX_PROOF_TASKS
+  ) {
+    throw new AgentError("implementation proof plan is invalid", 1);
+  }
+  return {
+    version: 1,
+    tasks: plan.tasks.map((task) => {
+      const keys = [
+        "actions",
+        "clauseIds",
+        "finalAssertions",
+        "intermediateAssertions",
+        "route"
+      ];
+      if (
+        !task ||
+        Array.isArray(task) ||
+        JSON.stringify(Object.keys(task).sort()) !== JSON.stringify(keys) ||
+        !Array.isArray(task.clauseIds) ||
+        task.clauseIds.length === 0 ||
+        task.clauseIds.length > MAX_REQUIREMENTS ||
+        task.clauseIds.some((id) => !/^AC[1-9][0-9]*$/.test(id)) ||
+        new Set(task.clauseIds).size !== task.clauseIds.length
+      ) {
+        throw new AgentError("implementation proof task is invalid", 1);
+      }
+      for (const field of ["actions", "intermediateAssertions", "finalAssertions"]) {
+        if (!Array.isArray(task[field]) || task[field].length > MAX_PROOF_STEPS) {
+          throw new AgentError(`implementation proof task ${field} is invalid`, 1);
+        }
+      }
+      return {
+        clauseIds: task.clauseIds,
+        route: safeProofRoute(task.route),
+        actions: task.actions.map(validateProofAction),
+        intermediateAssertions: task.intermediateAssertions.map(validateProofAssertion),
+        finalAssertions: task.finalAssertions.map(validateProofAssertion)
+      };
+    })
+  };
+}
+
+function cleanSectionValue(value) {
+  const text = normalizedText(value);
+  return /^_?no response_?$/i.test(text) ? "" : text;
+}
+
+export function parseIssueSections(body) {
+  const sections = {};
+  let current = "";
+  for (const line of normalizedText(body).split("\n")) {
+    const heading = line.match(/^###\s+(.+?)\s*$/);
+    if (heading) {
+      current = heading[1].trim().toLowerCase();
+      sections[current] ??= [];
+      continue;
+    }
+    if (current) sections[current].push(line);
+  }
+  return Object.fromEntries(
+    Object.entries(sections).map(([name, lines]) => [
+      name,
+      boundedText(cleanSectionValue(lines.join("\n")), MAX_SECTION_BYTES, `issue section ${name}`)
+    ])
+  );
+}
+
+function requirementLines(value) {
+  const text = cleanSectionValue(value);
+  if (!text) return [];
+  const bullets = text
+    .split("\n")
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^[-*]\s+(?:\[[ xX]\]\s*)?/, "")
+        .replace(/^\d+[.)]\s+/, "")
+        .trim()
+    )
+    .filter(Boolean);
+  const values = bullets.length > 1 ? bullets : [text];
+  if (values.length > MAX_REQUIREMENTS) {
+    throw new AgentError("acceptance criteria exceed the bounded intent limit", 1);
+  }
+  return values.map((requirement) =>
+    boundedText(requirement, MAX_REQUIREMENT_BYTES, "acceptance criterion")
+  );
+}
+
+function exclusionLines(value) {
+  return cleanSectionValue(value)
+    .split("\n")
+    .map((line) => line.replace(/^[-*]\s+/, "").trim())
+    .filter(
+      (line) =>
+        line &&
+        /\b(?:do not|don't|must not|never|without|exclude|only|out of scope|no\s+\w+)/i.test(line)
+    )
+    .slice(0, MAX_REQUIREMENTS)
+    .map((line) => boundedText(line, MAX_REQUIREMENT_BYTES, "explicit exclusion"));
+}
+
+function transcriptContext(sections) {
+  const summary = boundedText(
+    sections["conversation intent summary"],
+    MAX_TRANSCRIPT_SUMMARY_BYTES,
+    "conversation intent summary"
+  );
+  const sourceDigest = normalizedText(sections["conversation source digest"]).toLowerCase();
+  if (!summary || !/^[a-f0-9]{64}$/.test(sourceDigest)) return null;
+  return { summary, sourceDigest };
+}
+
+function normalizedClarifications(clarifications) {
+  const values = (clarifications ?? []).map((clarification) => {
+    const commentId = Number(clarification?.commentId ?? clarification?.id);
+    const body = boundedText(
+      clarification?.body,
+      MAX_CLARIFICATION_BYTES,
+      "owner clarification"
+    );
+    const bodySha256 = sha256(body);
+    const expectedSha256 = clarification?.sha256 ?? clarification?.bodySha256 ?? bodySha256;
+    if (
+      !Number.isSafeInteger(commentId) ||
+      commentId <= 0 ||
+      !body ||
+      expectedSha256 !== bodySha256
+    ) {
+      throw new AgentError("owner clarification is invalid", 1);
+    }
+    return { commentId, sha256: bodySha256, body };
+  });
+  values.sort((left, right) => left.commentId - right.commentId);
+  if (new Set(values.map((value) => value.commentId)).size !== values.length) {
+    throw new AgentError("owner clarifications contain duplicate comments", 1);
+  }
+  return values;
+}
+
+function decisionCapsuleFields(decision) {
+  return {
+    value: decision.value,
+    priority: decision.priority,
+    risk: decision.risk,
+    alignment: decision.alignment,
+    implementationScope: decision.implementationScope,
+    proofNeeded: decision.proofNeeded,
+    automationDecision: decision.automationDecision,
+    humanQuestion: decision.humanQuestion
+  };
+}
+
+function capsulePayload(capsule) {
+  const { intentDigest: _intentDigest, ...payload } = capsule;
+  return payload;
+}
+
+function proofRoutes(sections) {
+  const value = cleanSectionValue(sections["proof route"]);
+  if (!value) return [];
+  return [...new Set(value.split(/\s+/).filter(Boolean).map((route) => safeProofRoute(route)))].sort();
+}
+
+function behaviorContract({
+  outcome,
+  acceptanceCriteria,
+  explicitExclusions,
+  sections,
+  proofKind
+}) {
+  const userTasks = requirementLines(sections["proof interaction"]);
+  const payload = {
+    version: 1,
+    goal: outcome,
+    target: {
+      kind:
+        proofKind === "service"
+          ? "service"
+          : proofKind === "UI" || proofKind === "GIF"
+            ? "web"
+            : "repository",
+      proofKind
+    },
+    routes: proofRoutes(sections),
+    userTasks,
+    checks: acceptanceCriteria.map((statement, index) => ({
+      id: `AC${index + 1}`,
+      statement
+    })),
+    antiCheatProbes:
+      proofKind === "GIF"
+        ? [
+            "Capture starts before the triggering action.",
+            "The requested intermediate and final states are both observed.",
+            "The final route and visible page are not substituted with a different surface."
+          ]
+        : proofKind === "UI"
+          ? [
+              "The requested behavior is exercised through the rendered user surface.",
+              "The final route and visible page are not substituted with a different surface."
+            ]
+          : proofKind === "service"
+            ? [
+                "Evidence comes from the trusted configured service and exact merged revision.",
+                "Secrets and production records are not included in proof."
+              ]
+            : [
+                "Checks execute against the exact candidate revision.",
+                "A successful process exit without the configured assertions is insufficient."
+              ],
+    evidenceRequired:
+      proofKind === "GIF"
+        ? ["clause results", "browser assertions", "video", "GIF", "artifact digests"]
+        : proofKind === "UI"
+          ? ["clause results", "browser assertions", "screenshot", "artifact digests"]
+          : proofKind === "service"
+            ? ["clause results", "deployment revision", "health", "logs", "artifact digests"]
+            : ["clause results", "commands", "exit status"],
+    outOfScope: explicitExclusions,
+    captureBeforeAction: proofKind === "GIF"
+  };
+  return {
+    ...payload,
+    contractDigest: sha256(JSON.stringify(payload))
+  };
+}
+
+function validateBehaviorContract(contract, acceptanceCriteria, proofKind) {
+  const expectedKeys = [
+    "antiCheatProbes",
+    "captureBeforeAction",
+    "checks",
+    "contractDigest",
+    "evidenceRequired",
+    "goal",
+    "outOfScope",
+    "routes",
+    "target",
+    "userTasks",
+    "version"
+  ];
+  const { contractDigest: _contractDigest, ...payload } = contract ?? {};
+  if (
+    !contract ||
+    Array.isArray(contract) ||
+    JSON.stringify(Object.keys(contract).sort()) !== JSON.stringify(expectedKeys) ||
+    contract.version !== 1 ||
+    !/^[a-f0-9]{64}$/.test(contract.contractDigest ?? "") ||
+    sha256(JSON.stringify(payload)) !== contract.contractDigest ||
+    contract.target?.proofKind !== proofKind ||
+    !["repository", "web", "service"].includes(contract.target?.kind) ||
+    typeof contract.goal !== "string" ||
+    !contract.goal ||
+    typeof contract.captureBeforeAction !== "boolean" ||
+    !Array.isArray(contract.routes) ||
+    !Array.isArray(contract.userTasks) ||
+    !Array.isArray(contract.checks) ||
+    !Array.isArray(contract.antiCheatProbes) ||
+    !Array.isArray(contract.evidenceRequired) ||
+    !Array.isArray(contract.outOfScope) ||
+    JSON.stringify(contract.checks) !==
+      JSON.stringify(
+        acceptanceCriteria.map((statement, index) => ({
+          id: `AC${index + 1}`,
+          statement
+        }))
+      )
+  ) {
+    throw new AgentError("behavior contract is invalid", 1);
+  }
+  for (const route of contract.routes) {
+    if (safeProofRoute(route) !== route) throw new AgentError("behavior contract route is invalid", 1);
+  }
+  return contract;
+}
+
+function createIntentCapsuleVersion({
+  issue,
+  decision,
+  ownerClarifications = [],
+  version = INTENT_CAPSULE_VERSION
+}) {
+  const issueNumber = Number(issue?.number);
+  const title = boundedText(issue?.title, 512, "issue title");
+  const body = boundedText(issue?.body, MAX_ISSUE_BODY_BYTES, "issue body");
+  if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0 || !title) {
+    throw new AgentError("source issue is invalid", 1);
+  }
+  const sections = parseIssueSections(body);
+  const acceptanceCriteria = requirementLines(sections["acceptance criteria"]);
+  const outcome = boundedText(sections.outcome || title, MAX_SECTION_BYTES, "issue outcome");
+  const criteria = acceptanceCriteria.length
+    ? acceptanceCriteria
+    : [boundedText(sections.outcome || title, MAX_REQUIREMENT_BYTES, "fallback acceptance criterion")];
+  const explicitExclusions = exclusionLines(sections.constraints);
+  const capsule = {
+    version,
+    sourceIssue: issueNumber,
+    issueSnapshotSha256: issueSnapshotSha256(issue),
+    sourceLabels: [...new Set(issueLabels(issue))].sort(),
+    title,
+    body,
+    outcome,
+    context: boundedText(sections["plan or context"], MAX_SECTION_BYTES, "issue context"),
+    acceptanceCriteria: criteria,
+    constraints: boundedText(sections.constraints, MAX_SECTION_BYTES, "issue constraints"),
+    explicitExclusions,
+    ownerClarifications: normalizedClarifications(ownerClarifications),
+    transcriptContext: transcriptContext(sections),
+    decision: decisionCapsuleFields(decision)
+  };
+  if (version === INTENT_CAPSULE_VERSION) {
+    capsule.behaviorContract = behaviorContract({
+      outcome,
+      acceptanceCriteria: criteria,
+      explicitExclusions,
+      sections,
+      proofKind: decision.proofNeeded
+    });
+  }
+  return {
+    ...capsule,
+    intentDigest: sha256(JSON.stringify(capsule))
+  };
+}
+
+export function createIntentCapsule({ issue, decision, ownerClarifications = [] }) {
+  return createIntentCapsuleVersion({ issue, decision, ownerClarifications });
+}
+
+export function validateIntentCapsule(capsule) {
+  const legacyKeys = [
+    "acceptanceCriteria",
+    "body",
+    "constraints",
+    "context",
+    "decision",
+    "explicitExclusions",
+    "intentDigest",
+    "issueSnapshotSha256",
+    "outcome",
+    "ownerClarifications",
+    "sourceIssue",
+    "sourceLabels",
+    "title",
+    "transcriptContext",
+    "version"
+  ];
+  const expectedKeys =
+    capsule?.version === INTENT_CAPSULE_VERSION
+      ? [...legacyKeys, "behaviorContract"].sort()
+      : legacyKeys;
+  if (
+    !capsule ||
+    Array.isArray(capsule) ||
+    JSON.stringify(Object.keys(capsule).sort()) !== JSON.stringify(expectedKeys) ||
+    ![1, INTENT_CAPSULE_VERSION].includes(capsule.version) ||
+    !Number.isSafeInteger(capsule.sourceIssue) ||
+    capsule.sourceIssue <= 0 ||
+    !/^[a-f0-9]{64}$/.test(capsule.issueSnapshotSha256 ?? "") ||
+    !/^[a-f0-9]{64}$/.test(capsule.intentDigest ?? "") ||
+    sha256(JSON.stringify(capsulePayload(capsule))) !== capsule.intentDigest ||
+    !Array.isArray(capsule.sourceLabels) ||
+    !Array.isArray(capsule.acceptanceCriteria) ||
+    capsule.acceptanceCriteria.length === 0 ||
+    !Array.isArray(capsule.explicitExclusions) ||
+    !Array.isArray(capsule.ownerClarifications) ||
+    typeof capsule.title !== "string" ||
+    !capsule.title ||
+    typeof capsule.body !== "string" ||
+    typeof capsule.outcome !== "string" ||
+    !capsule.outcome ||
+    typeof capsule.context !== "string" ||
+    typeof capsule.constraints !== "string" ||
+    !capsule.decision ||
+    Array.isArray(capsule.decision) ||
+    !PROOF_KINDS.includes(capsule.decision.proofNeeded)
+  ) {
+    throw new AgentError("intent capsule is invalid", 1);
+  }
+  normalizedClarifications(capsule.ownerClarifications);
+  if (capsule.version === INTENT_CAPSULE_VERSION) {
+    validateBehaviorContract(
+      capsule.behaviorContract,
+      capsule.acceptanceCriteria,
+      capsule.decision.proofNeeded
+    );
+  }
+  return capsule;
+}
+
+export function validateImplementationResult(result) {
+  const expectedKeys = [
+    "changes",
+    "checks",
+    "intentAddendum",
+    "summary",
+    "version"
+  ];
+  const addendumKeys = [
+    "assumptions",
+    "decisions",
+    "proofPlan",
+    "scopeClarifications",
+    "unresolvedQuestions",
+    "verificationDecisions"
+  ];
+  const legacyAddendumKeys = addendumKeys.filter((key) => key !== "proofPlan");
+  const actualAddendumKeys = Object.keys(result?.intentAddendum ?? {}).sort();
+  const supportedAddendum =
+    JSON.stringify(actualAddendumKeys) === JSON.stringify(addendumKeys) ||
+    JSON.stringify(actualAddendumKeys) === JSON.stringify(legacyAddendumKeys);
+  if (
+    !result ||
+    Array.isArray(result) ||
+    JSON.stringify(Object.keys(result).sort()) !== JSON.stringify(expectedKeys) ||
+    result.version !== IMPLEMENTATION_RESULT_VERSION ||
+    typeof result.summary !== "string" ||
+    !result.summary.trim() ||
+    !result.intentAddendum ||
+    Array.isArray(result.intentAddendum) ||
+    !supportedAddendum
+  ) {
+    throw new AgentError("implementation result is invalid", 1);
+  }
+  if (result.intentAddendum.unresolvedQuestions.length > 1) {
+    throw new AgentError(
+      "implementation result must consolidate unresolved questions",
+      1
+    );
+  }
+  return {
+    version: IMPLEMENTATION_RESULT_VERSION,
+    summary: boundedText(result.summary, 4_000, "implementation summary"),
+    changes: boundedStringArray(result.changes, "implementation changes"),
+    checks: boundedStringArray(result.checks, "implementation checks"),
+    intentAddendum: {
+      decisions: boundedStringArray(
+        result.intentAddendum.decisions,
+        "implementation decisions"
+      ),
+      assumptions: boundedStringArray(
+        result.intentAddendum.assumptions,
+        "implementation assumptions"
+      ),
+      scopeClarifications: boundedStringArray(
+        result.intentAddendum.scopeClarifications,
+        "scope clarifications"
+      ),
+      verificationDecisions: boundedStringArray(
+        result.intentAddendum.verificationDecisions,
+        "verification decisions"
+      ),
+      proofPlan: validateProofPlan(
+        result.intentAddendum.proofPlan ?? { version: 1, tasks: [] }
+      ),
+      unresolvedQuestions: boundedStringArray(
+        result.intentAddendum.unresolvedQuestions,
+        "unresolved questions"
+      )
+    }
+  };
+}
+
+export function implementationAddendumEnvelope(result) {
+  const validated = validateImplementationResult(result);
+  return {
+    version: IMPLEMENTATION_RESULT_VERSION,
+    intentAddendum: validated.intentAddendum,
+    digest: sha256(JSON.stringify(validated.intentAddendum))
+  };
+}
+
+export function parseImplementationAddendum(body) {
+  const text = String(body ?? "");
+  if (text.split(IMPLEMENTATION_ADDENDUM_MARKER).length !== 2) {
+    throw new AgentError("PR must contain exactly one implementation intent addendum", 1);
+  }
+  const afterMarker = text.slice(
+    text.indexOf(IMPLEMENTATION_ADDENDUM_MARKER) +
+      IMPLEMENTATION_ADDENDUM_MARKER.length
+  );
+  const match = afterMarker.match(/^\s*Implementation intent addendum:\s*```json\s*([\s\S]*?)```/i);
+  if (!match) throw new AgentError("implementation intent addendum JSON is missing", 1);
+  const envelope = extractJson(match[1]);
+  const expectedKeys = ["digest", "intentAddendum", "version"];
+  if (
+    !envelope ||
+    Array.isArray(envelope) ||
+    JSON.stringify(Object.keys(envelope).sort()) !== JSON.stringify(expectedKeys) ||
+    envelope.version !== IMPLEMENTATION_RESULT_VERSION ||
+    !/^[a-f0-9]{64}$/.test(envelope.digest ?? "")
+  ) {
+    throw new AgentError("implementation intent addendum is invalid", 1);
+  }
+  if (sha256(JSON.stringify(envelope.intentAddendum)) !== envelope.digest) {
+    throw new AgentError("implementation intent addendum digest does not match", 1);
+  }
+  const validated = validateImplementationResult({
+    version: IMPLEMENTATION_RESULT_VERSION,
+    summary: "Validated implementation addendum.",
+    changes: [],
+    checks: [],
+    intentAddendum: envelope.intentAddendum
+  });
+  return {
+    ...envelope,
+    intentAddendum: validated.intentAddendum
+  };
+}
+
+export function parseManagedTriageDecision(comment, marker) {
+  const text = String(comment?.body ?? "");
+  const markerIndex = text.indexOf(String(marker));
+  if (markerIndex < 0) throw new AgentError("managed triage marker is missing", 1);
+  const afterMarker = text.slice(markerIndex + String(marker).length);
+  const fences = [...afterMarker.matchAll(/```json\s*([\s\S]*?)```/gi)];
+  if (fences.length !== 1) {
+    throw new AgentError("managed triage must contain exactly one decision JSON block", 1);
+  }
+  const decision = extractJson(fences[0][1]);
+  const clarificationValid = (decision?.ownerClarifications ?? []).every(
+    (clarification) =>
+      Number.isSafeInteger(clarification?.commentId) &&
+      clarification.commentId > 0 &&
+      /^[a-f0-9]{64}$/.test(clarification?.sha256 ?? "")
+  );
+  if (
+    !decision ||
+    Array.isArray(decision) ||
+    JSON.stringify(Object.keys(decision).sort()) !==
+      JSON.stringify([...MANAGED_TRIAGE_FIELDS].sort()) ||
+    !["low", "medium", "high"].includes(decision.value) ||
+    !["low", "medium", "high"].includes(decision.priority) ||
+    !["low", "medium", "high"].includes(decision.risk) ||
+    !["yes", "no", "unclear"].includes(decision.alignment) ||
+    typeof decision.implementationScope !== "string" ||
+    !decision.implementationScope.trim() ||
+    !PROOF_KINDS.includes(decision.proofNeeded) ||
+    !["implement", "manual-review", "blocked", "reject"].includes(
+      decision.automationDecision
+    ) ||
+    typeof decision.humanQuestion !== "string" ||
+    !/^[a-f0-9]{64}$/.test(decision.issueSnapshotSha256 ?? "") ||
+    !/^[a-f0-9]{64}$/.test(decision.intentDigest ?? "") ||
+    !Array.isArray(decision.ownerClarifications) ||
+    !clarificationValid ||
+    new Set(decision.ownerClarifications.map((value) => value.commentId)).size !==
+      decision.ownerClarifications.length
+  ) {
+    throw new AgentError("managed triage JSON is invalid", 1);
+  }
+  return decision;
+}
+
+export function resolveOwnerClarifications(comments, decision, repoOwner) {
+  const owner = String(repoOwner ?? "").toLowerCase();
+  return decision.ownerClarifications.map((expected) => {
+    const comment = (comments ?? []).find(
+      (entry) => Number(entry?.database_id ?? entry?.id) === expected.commentId
+    );
+    const body = normalizedText(comment?.body);
+    if (
+      !comment ||
+      String(comment?.user?.login ?? "").toLowerCase() !== owner ||
+      !body ||
+      sha256(body) !== expected.sha256
+    ) {
+      throw new AgentError("sealed owner clarification is missing or changed", 1);
+    }
+    return {
+      commentId: expected.commentId,
+      sha256: expected.sha256,
+      body
+    };
+  });
+}
+
+export function intentCapsuleForManagedTriage({
+  issue,
+  comments,
+  triageComment,
+  marker,
+  repoOwner
+}) {
+  const decision = parseManagedTriageDecision(triageComment, marker);
+  if (issueSnapshotSha256(issue) !== decision.issueSnapshotSha256) {
+    throw new AgentError(`source issue #${issue?.number} changed after trusted triage`, 1);
+  }
+  let capsule = createIntentCapsule({
+    issue,
+    decision,
+    ownerClarifications: resolveOwnerClarifications(comments, decision, repoOwner)
+  });
+  if (capsule.intentDigest !== decision.intentDigest) {
+    capsule = createIntentCapsuleVersion({
+      issue,
+      decision,
+      ownerClarifications: resolveOwnerClarifications(comments, decision, repoOwner),
+      version: 1
+    });
+    if (capsule.intentDigest !== decision.intentDigest) {
+      throw new AgentError("managed triage intent digest does not match its sealed capsule", 1);
+    }
+  }
+  return { decision, capsule };
+}

@@ -7,7 +7,6 @@ import {
   AgentError,
   addLabels,
   dispatchWorkflow,
-  extractJson,
   fail,
   finish,
   getIssueComments,
@@ -30,10 +29,19 @@ import {
   repoRoot,
   runCommand,
   runShell,
+  setGitHubOutput,
   slugify,
   upsertManagedComment,
   withTempJson
 } from "./agent-lib.mjs";
+import {
+  IMPLEMENTATION_ADDENDUM_MARKER,
+  implementationAddendumEnvelope,
+  intentCapsuleForManagedTriage,
+  parseManagedTriageDecision,
+  validateImplementationResult,
+  validateIntentCapsule
+} from "./agent-intent.mjs";
 
 function fetchIssue(config, issueNumber) {
   const issue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${issueNumber}`);
@@ -46,35 +54,25 @@ function writePrompt(config, issueNumber, outputPath) {
   assertImplementationSource(config, issue);
   const triage = newestManagedComment(comments, config.comments.triage, config.repo.owner);
   if (!triage) throw new AgentError(`source issue #${issueNumber} has no trusted managed triage`, 1);
-  const snapshotSha256 = assertIssueMatchesTriageSnapshot(issue, triage, config.comments.triage);
+  const { capsule } = intentCapsuleForManagedTriage({
+    issue,
+    comments,
+    triageComment: triage,
+    marker: config.comments.triage,
+    repoOwner: config.repo.owner
+  });
   const prompt = `${readText(join(repoRoot(), ".agent/prompts/implement.md"))}
 
-## Issue
+## Sealed Intent Capsule
 
-Number: ${issue.number}
-Title: ${issue.title}
-Labels: ${issueLabels(issue).join(", ") || "none"}
-
-Body:
-
-${issue.body ?? ""}
-
-## Agent Triage
-
-${triage.body}
+\`\`\`json
+${JSON.stringify(capsule, null, 2)}
+\`\`\`
 `;
   mkdirSync(join(repoRoot(), ".agent-output"), { recursive: true });
   writeFileSync(outputPath, prompt);
   const intentPath = join(dirname(outputPath), "implementation-intent.json");
-  writeFileSync(
-    intentPath,
-    `${JSON.stringify({
-      version: 1,
-      issueNumber,
-      issueSnapshotSha256: snapshotSha256,
-      sourceLabels: issueLabels(issue),
-    }, null, 2)}\n`
-  );
+  writeFileSync(intentPath, `${JSON.stringify(capsule, null, 2)}\n`);
   return { issueNumber, outputPath, intentPath };
 }
 
@@ -95,7 +93,25 @@ function createPatch(outputPath) {
   return { outputPath, bytes: Buffer.byteLength(diff) };
 }
 
+function implementationResultFromText(text) {
+  let result;
+  try {
+    result = JSON.parse(String(text ?? ""));
+  } catch {
+    throw new AgentError("implementation result is not valid JSON", 1);
+  }
+  return validateImplementationResult(result);
+}
+
+function markdownList(values, empty = "none") {
+  return values.length
+    ? values.map((value) => `- ${value}`).join("\n")
+    : `- ${empty}`;
+}
+
 export function prBody(issue, codexOutput, metadata) {
+  const result = implementationResultFromText(codexOutput);
+  const addendum = implementationAddendumEnvelope(result);
   return `Agent implementation for #${issue.number}.
 
 Closes #${issue.number}
@@ -106,7 +122,19 @@ ${issue.title}
 
 ## Agent Output
 
-${codexOutput?.trim() || "No final agent output captured."}
+${result.summary}
+
+Changes:
+
+${markdownList(result.changes)}
+
+Checks:
+
+${markdownList(result.checks, "not reported")}
+
+${IMPLEMENTATION_ADDENDUM_MARKER}
+Implementation intent addendum:
+${markdownJsonBlock(addendum)}
 
 <!-- agent-implementation:v1 -->
 Agent implementation metadata:
@@ -381,15 +409,7 @@ function sha256(path) {
 }
 
 export function triageSnapshotSha256(comment, marker) {
-  const text = String(comment?.body ?? "");
-  const afterMarker = text.slice(text.indexOf(marker) + String(marker).length);
-  const fences = [...afterMarker.matchAll(/```json\s*([\s\S]*?)```/gi)];
-  if (fences.length !== 1) throw new AgentError("trusted triage must contain exactly one structured decision", 1);
-  const decision = extractJson(fences[0][1]);
-  if (!/^[a-f0-9]{64}$/.test(String(decision?.issueSnapshotSha256 ?? ""))) {
-    throw new AgentError("trusted triage issue snapshot is invalid", 1);
-  }
-  return decision.issueSnapshotSha256;
+  return parseManagedTriageDecision(comment, marker).issueSnapshotSha256;
 }
 
 export function assertIssueMatchesTriageSnapshot(issue, triage, marker) {
@@ -424,7 +444,9 @@ function readArtifactMetadata(path, label = "integrity manifest") {
     "changedPaths",
     "checks",
     "codexOutputSha256",
+    "implementationAddendumDigest",
     "issueNumber",
+    "intentDigest",
     "issueSnapshotSha256",
     "patchSha256",
     "resultTree",
@@ -432,9 +454,12 @@ function readArtifactMetadata(path, label = "integrity manifest") {
     "version"
   ];
   if (
-    JSON.stringify(Object.keys(manifest ?? {}).sort()) !== JSON.stringify(expectedKeys) ||
+    JSON.stringify(Object.keys(manifest ?? {}).sort()) !==
+      JSON.stringify([...expectedKeys].sort()) ||
     manifest?.version !== 1 ||
     !Number.isInteger(manifest.issueNumber) ||
+    !/^[a-f0-9]{64}$/.test(manifest.implementationAddendumDigest ?? "") ||
+    !/^[a-f0-9]{64}$/.test(manifest.intentDigest ?? "") ||
     !/^[a-f0-9]{64}$/.test(manifest.issueSnapshotSha256 ?? "") ||
     !/^[a-f0-9]{40,64}$/.test(manifest.baseSha ?? "") ||
     !/^[a-f0-9]{40,64}$/.test(manifest.resultTree ?? "") ||
@@ -466,17 +491,9 @@ function readImplementationIntent(path, issueNumber) {
   } catch {
     throw new AgentError("implementation intent is not valid JSON", 1);
   }
-  if (
-    JSON.stringify(Object.keys(intent ?? {}).sort()) !==
-      JSON.stringify(["issueNumber", "issueSnapshotSha256", "sourceLabels", "version"]) ||
-    intent.version !== 1 ||
-    intent.issueNumber !== issueNumber ||
-    !/^[a-f0-9]{64}$/.test(intent.issueSnapshotSha256 ?? "") ||
-    !Array.isArray(intent.sourceLabels) ||
-    !intent.sourceLabels.every((label) => typeof label === "string" && label.length > 0) ||
-    new Set(intent.sourceLabels).size !== intent.sourceLabels.length
-  ) {
-    throw new AgentError("implementation intent is invalid", 1);
+  validateIntentCapsule(intent);
+  if (intent.sourceIssue !== issueNumber) {
+    throw new AgentError("implementation intent issue does not match", 1);
   }
   return intent;
 }
@@ -519,6 +536,12 @@ export function preparePatchValidation(
   if (existsSync(candidateDir)) throw new AgentError(`candidate directory already exists: ${candidateDir}`, 2);
   const baseSha = exactBaseSha(config, cwd);
   const intent = readImplementationIntent(intentPath, issueNumber);
+  const implementationResult = implementationResultFromText(
+    readText(codexOutputPath)
+  );
+  const implementationAddendum = implementationAddendumEnvelope(
+    implementationResult
+  );
   const patchAction = applyPatchIdempotently(patchPath, cwd);
   if (patchAction !== "applied") throw new AgentError("validation patch must apply cleanly to the exact base", 1);
   const changed = stagedChangedPaths(cwd);
@@ -531,6 +554,8 @@ export function preparePatchValidation(
   const prepared = {
     version: 1,
     issueNumber,
+    implementationAddendumDigest: implementationAddendum.digest,
+    intentDigest: intent.intentDigest,
     issueSnapshotSha256: intent.issueSnapshotSha256,
     sourceLabels: intent.sourceLabels,
     baseSha,
@@ -579,6 +604,15 @@ export function finalizePatchValidation(
   if (prepared.codexOutputSha256 !== sha256(codexOutputPath)) {
     throw new AgentError("prepared agent output integrity check failed", 1);
   }
+  const implementationResult = implementationResultFromText(
+    readText(codexOutputPath)
+  );
+  if (
+    prepared.implementationAddendumDigest !==
+    implementationAddendumEnvelope(implementationResult).digest
+  ) {
+    throw new AgentError("prepared implementation addendum integrity check failed", 1);
+  }
   const unstaged = runCommand("git", ["diff", "--no-renames", "--name-only"], { cwd }).stdout.trim();
   if (unstaged) throw new AgentError("prepared validation checkout has unstaged changes", 1);
   const changed = stagedChangedPaths(cwd);
@@ -601,7 +635,8 @@ export function verifyValidatedArtifactBase(
   codexOutputPath,
   manifestPath,
   cwd = repoRoot(),
-  expectedIssueSnapshotSha256
+  expectedIssueSnapshotSha256,
+  expectedIntentDigest
 ) {
   if (typeof patchPath !== "string" || !existsSync(patchPath)) throw new AgentError(`patch not found: ${patchPath}`, 2);
   if (typeof codexOutputPath !== "string" || !existsSync(codexOutputPath)) {
@@ -612,10 +647,22 @@ export function verifyValidatedArtifactBase(
   if (manifest.issueSnapshotSha256 !== expectedIssueSnapshotSha256) {
     throw new AgentError("integrity manifest source issue snapshot does not match", 1);
   }
+  if (manifest.intentDigest !== expectedIntentDigest) {
+    throw new AgentError("integrity manifest sealed intent digest does not match", 1);
+  }
   if (manifest.baseSha !== exactBaseSha(config, cwd)) throw new AgentError("integrity manifest base does not match", 1);
   if (manifest.patchSha256 !== sha256(patchPath)) throw new AgentError("patch integrity check failed", 1);
   if (manifest.codexOutputSha256 !== sha256(codexOutputPath)) {
     throw new AgentError("agent output integrity check failed", 1);
+  }
+  const implementationResult = implementationResultFromText(
+    readText(codexOutputPath)
+  );
+  if (
+    manifest.implementationAddendumDigest !==
+    implementationAddendumEnvelope(implementationResult).digest
+  ) {
+    throw new AgentError("implementation addendum integrity check failed", 1);
   }
   if (JSON.stringify(manifest.checks) !== JSON.stringify(config.commands.defaultImplementChecks)) {
     throw new AgentError("integrity manifest checks do not match trusted config", 1);
@@ -749,7 +796,14 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
   assertImplementationSource(config, issue);
   const triage = newestManagedComment(comments, config.comments.triage, config.repo.owner);
   if (!triage) throw new AgentError(`source issue #${issueNumber} has no trusted managed triage`, 1);
-  const snapshotSha256 = assertIssueMatchesTriageSnapshot(issue, triage, config.comments.triage);
+  const { capsule } = intentCapsuleForManagedTriage({
+    issue,
+    comments,
+    triageComment: triage,
+    marker: config.comments.triage,
+    repoOwner: config.repo.owner
+  });
+  const snapshotSha256 = capsule.issueSnapshotSha256;
   if (!dryRun) runCommand("gh", ["auth", "setup-git", "--hostname", "github.com"]);
   const preferredBranch = preferredBranchName(issueNumber, issue.title);
   const existingPull = selectExistingPull(listPulls(config), config, issueNumber, preferredBranch);
@@ -757,6 +811,12 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
   const branch = chooseAgentBranch(preferredBranch, existingPull, remoteBranches);
   const remoteExists = remoteBranches.includes(branch);
   const codexOutput = codexOutputPath && existsSync(codexOutputPath) ? readText(codexOutputPath) : "";
+  const implementationResult = implementationResultFromText(codexOutput);
+  const implementationAddendum = implementationAddendumEnvelope(
+    implementationResult
+  );
+  const unresolvedQuestion =
+    implementationResult.intentAddendum.unresolvedQuestions[0] ?? "";
 
   if (existingPull?.merged_at) {
     if (!dryRun) removeLabels(config, issueNumber, [config.labels.implement], false);
@@ -781,17 +841,21 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
     codexOutputPath,
     manifestPath,
     repoRoot(),
-    snapshotSha256
+    snapshotSha256,
+    capsule.intentDigest
   );
   const sealedLabels = manifest.sourceLabels;
   const metadata = {
     sourceIssue: issue.number,
     sourceLabels: sealedLabels,
     issueSnapshotSha256: snapshotSha256,
+    intentDigest: capsule.intentDigest,
+    implementationAddendumDigest: implementationAddendum.digest,
     automergeEligible:
       sealedLabels.includes(config.labels.automerge) &&
       !sealedLabels.includes(config.labels.priorityHigh) &&
-      !sealedLabels.includes(config.labels.blocked)
+      !sealedLabels.includes(config.labels.blocked) &&
+      !unresolvedQuestion
   };
   if (dryRun) {
     return {
@@ -841,15 +905,23 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
   const pull = upsertPullRequest({ config, issue, branch, codexOutput, metadata, existingPull });
   const prLabels = implementationPullLabels(config, sealedLabels);
   addLabels(config, pull.number, prLabels, false);
+  if (unresolvedQuestion) {
+    addLabels(config, issueNumber, [config.labels.blocked], false);
+    addLabels(config, pull.number, [config.labels.blocked], false);
+    removeLabels(config, issueNumber, [config.labels.automerge], false);
+    removeLabels(config, pull.number, [config.labels.automerge], false);
+  }
   const dispatch = {
     ci: dispatchCandidateCi(config, pull.number, candidateSha),
-    review: dispatchWorkflow(
-      config,
-      "agent-review.yml",
-      { "pr-number": pull.number, "expected-head-sha": candidateSha },
-      false,
-      config.repo.defaultBranch
-    )
+    review: unresolvedQuestion
+      ? null
+      : dispatchWorkflow(
+          config,
+          "agent-review.yml",
+          { "pr-number": pull.number, "expected-head-sha": candidateSha },
+          false,
+          config.repo.defaultBranch
+        )
   };
   removeLabels(config, issueNumber, [config.labels.implement], false);
   upsertManagedComment({
@@ -864,11 +936,24 @@ ${markdownJsonBlock({
   branch,
   patchAction,
   committed,
-  checks: config.commands.defaultImplementChecks
+  checks: config.commands.defaultImplementChecks,
+  intentDigest: capsule.intentDigest,
+  implementationAddendumDigest: implementationAddendum.digest,
+  humanQuestion: unresolvedQuestion
 })}`,
     dryRun: false
   });
-  return { branch, pr: pull.number, url: pull.url, action: pull.action, patchAction, committed, dispatch };
+  return {
+    branch,
+    pr: pull.number,
+    head: candidateSha,
+    url: pull.url,
+    action: pull.action,
+    patchAction,
+    committed,
+    dispatch,
+    humanQuestion: unresolvedQuestion
+  };
 }
 
 export async function main() {
@@ -953,6 +1038,10 @@ export async function main() {
         args["integrity-manifest"],
         dryRun
       );
+      setGitHubOutput({
+        pr_number: result.pr,
+        head_sha: result.head
+      });
       finish(
         { ok: true, message: `${dryRun ? "would upsert" : "upserted"} implementation PR for #${issueNumber}`, result },
         Boolean(args.json)

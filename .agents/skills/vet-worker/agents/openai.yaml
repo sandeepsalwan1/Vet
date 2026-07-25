@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vet Worker"
+  short_description: "Implement and prove Vet issues remotely"
+  default_prompt: "Use $vet-worker to implement this Vet issue and prove the real user outcome."

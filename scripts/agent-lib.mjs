@@ -2,10 +2,10 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const HARNESS_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const GITHUB_READ_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000];
 const SYNC_SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
 
@@ -16,6 +16,16 @@ export class AgentError extends Error {
     this.details = details;
   }
 }
+
+export function resolveAgentTargetRoot(value, fallback = HARNESS_ROOT) {
+  if (!value) return resolve(fallback);
+  if (!isAbsolute(value)) {
+    throw new AgentError("AGENT_TARGET_ROOT must be an absolute path", 2);
+  }
+  return resolve(value);
+}
+
+const ROOT = resolveAgentTargetRoot(process.env.AGENT_TARGET_ROOT);
 
 export function repoRoot() {
   return ROOT;
@@ -47,7 +57,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
 }
 
 export function loadConfig() {
-  return readJson(join(ROOT, ".agent/config.json"));
+  return readJson(join(HARNESS_ROOT, ".agent/config.json"));
 }
 
 export function readJson(path) {
@@ -324,18 +334,32 @@ export function parseImplementationMetadata(body) {
   if (!match) throw new AgentError("agent implementation metadata JSON is missing", 1);
   const metadata = extractJson(match[1]);
   const keys = Object.keys(metadata ?? {}).sort();
-  const expectedKeys = ["automergeEligible", "issueSnapshotSha256", "sourceIssue", "sourceLabels"];
+  const expectedKeys = [
+    ["automergeEligible", "issueSnapshotSha256", "sourceIssue", "sourceLabels"],
+    [
+      "automergeEligible",
+      "implementationAddendumDigest",
+      "intentDigest",
+      "issueSnapshotSha256",
+      "sourceIssue",
+      "sourceLabels"
+    ]
+  ];
   if (
     !metadata ||
     Array.isArray(metadata) ||
-    JSON.stringify(keys) !== JSON.stringify(expectedKeys) ||
+    !expectedKeys.some((expected) => JSON.stringify(keys) === JSON.stringify(expected)) ||
     !Number.isInteger(metadata.sourceIssue) ||
     metadata.sourceIssue <= 0 ||
     !Array.isArray(metadata.sourceLabels) ||
     !metadata.sourceLabels.every((label) => typeof label === "string" && label.length > 0) ||
     new Set(metadata.sourceLabels).size !== metadata.sourceLabels.length ||
     typeof metadata.automergeEligible !== "boolean" ||
-    !/^[a-f0-9]{64}$/.test(metadata.issueSnapshotSha256)
+    !/^[a-f0-9]{64}$/.test(metadata.issueSnapshotSha256) ||
+    (metadata.intentDigest !== undefined &&
+      !/^[a-f0-9]{64}$/.test(metadata.intentDigest)) ||
+    (metadata.implementationAddendumDigest !== undefined &&
+      !/^[a-f0-9]{64}$/.test(metadata.implementationAddendumDigest))
   ) {
     throw new AgentError("agent implementation metadata is invalid", 1);
   }

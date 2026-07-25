@@ -22,6 +22,7 @@ import {
   newestManagedComment,
   parseImplementationMetadata,
   privilegedCandidatePaths,
+  resolveAgentTargetRoot,
   runCommand,
   skipsNoMistakesForCost,
   trustedManagedComment,
@@ -30,6 +31,14 @@ import {
 
 const marker = "<!-- agent-triage:v1 -->";
 const config = { repo: { owner: "repo-owner", name: "repo" } };
+
+test("trusted harness accepts only absolute candidate roots", () => {
+  assert.equal(resolveAgentTargetRoot("/tmp/vet-target"), "/tmp/vet-target");
+  assert.throws(
+    () => resolveAgentTargetRoot("target"),
+    /AGENT_TARGET_ROOT must be an absolute path/
+  );
+});
 
 test("runCommand accepts an explicit capture limit for bounded delegated output", () => {
   const result = runCommand(process.execPath, ["-e", "process.stdout.write('x'.repeat(1_500_000))"], {
