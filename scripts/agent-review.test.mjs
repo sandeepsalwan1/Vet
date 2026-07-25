@@ -677,6 +677,13 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(generate, /node \.\.\/trusted\/scripts\/agent-worker\.mjs/);
   assert.match(generate, /node \.\.\/trusted\/scripts\/agent-review\.mjs/);
   assert.match(generate, /--lane reviewRemote/);
+  assert.match(generate, /--stage-input-lane reviewRemote/);
+  assert.match(generate, /--restore-input-lane reviewRemote/);
+  assert.match(generate, /REMOTE_COMMAND: >-\n\s+set -e;/);
+  assert.ok(
+    generate.indexOf("--restore-input-lane reviewRemote") <
+      generate.indexOf("cd target")
+  );
   assert.match(generate, /--sandbox danger-full-access/);
   assert.match(generate, /--schema \.agent-output\/review\.schema\.json/);
   assert.match(generate, /--workdir "\$GITHUB_WORKSPACE"/);

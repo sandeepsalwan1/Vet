@@ -121,6 +121,8 @@ jobs:
         with:
           name: agent-implementation-context-${{ inputs.issue-number }}
           path: .agent-output
+      - name: Stage trusted remote input
+        run: node scripts/agent-crabbox-run.mjs --stage-input-lane implementRemote --json
       - uses: ./.github/actions/setup-crabbox
         with:
           vercel-ready: ${{ vars.CRABBOX_VERCEL_READY }}
@@ -136,6 +138,9 @@ jobs:
           CRABBOX_VERCEL_READY: ${{ vars.CRABBOX_VERCEL_READY }}
           CRABBOX_HETZNER_READY: ${{ vars.CRABBOX_HETZNER_READY }}
           REMOTE_COMMAND: >-
+            set -e;
+            node scripts/agent-crabbox-run.mjs
+            --restore-input-lane implementRemote --json &&
             agent_key="$CODEX_API_KEY"; unset CODEX_API_KEY OPENAI_API_KEY;
             git init --quiet &&
             git config user.name "Agent Worker" &&

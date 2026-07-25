@@ -194,6 +194,12 @@ jobs:
         with:
           name: agent-review-context-${{ inputs.pr-number }}
           path: target/.agent-output
+      - name: Stage trusted remote input
+        run: >-
+          node trusted/scripts/agent-crabbox-run.mjs
+          --stage-input-lane reviewRemote
+          --input-workdir "$GITHUB_WORKSPACE/target"
+          --json
       - uses: ./trusted/.github/actions/setup-crabbox
         with:
           repo-root: trusted
@@ -209,6 +215,10 @@ jobs:
           CRABBOX_VERCEL_READY: ${{ vars.CRABBOX_VERCEL_READY }}
           CRABBOX_HETZNER_READY: ${{ vars.CRABBOX_HETZNER_READY }}
           REMOTE_COMMAND: >-
+            set -e;
+            node trusted/scripts/agent-crabbox-run.mjs
+            --restore-input-lane reviewRemote
+            --input-workdir target --json &&
             cd target &&
             export AGENT_TARGET_ROOT="$PWD";
             agent_key="$CODEX_API_KEY"; unset CODEX_API_KEY OPENAI_API_KEY;

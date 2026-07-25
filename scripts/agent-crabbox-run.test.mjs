@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -23,10 +23,12 @@ import {
   recoverLeaseHandle,
   resolveDelegatedWorkdir,
   runCrabboxLane,
+  restoreDelegatedInput,
   restoreDelegatedOutput,
   restoreImplementationOutput,
   selectCrabboxProvider,
   selectCrabboxProviders,
+  stageDelegatedInput,
   validateBrowserLaunchOutput,
   validateBrowserRouteMarker,
   validateCollectedArtifacts,
@@ -682,6 +684,70 @@ test("remote no-mistakes handoff allows an absent sealed fix patch", (t) => {
     join(local, ".agent-output/model-usage.json"),
     join(local, ".agent-output/result.json"),
   ]);
+});
+
+test("delegated inputs cross Crabbox sync through a bounded nonignored handoff", (t) => {
+  const lanes = new Map([
+    ["implementRemote", ["implement-prompt.md", "implementation-intent.json"]],
+    ["reviewRemote", ["review-prompt.md", "review.schema.json"]],
+    ["noMistakesRemote", ["no-mistakes-intent"]]
+  ]);
+  for (const [lane, names] of lanes) {
+    const root = mkdtempSync(join(tmpdir(), `vet-agent-${lane}-input-`));
+    const realRoot = realpathSync(root);
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    mkdirSync(join(root, ".agent"));
+    mkdirSync(join(root, ".agent-output"));
+    for (const name of names) {
+      writeFileSync(join(root, ".agent-output", name), `${lane}:${name}\n`);
+    }
+
+    const staged = stageDelegatedInput(lane, root);
+    assert.deepEqual(
+      staged,
+      names.map((name) => join(realRoot, ".agent", "remote-input", lane, name))
+    );
+    rmSync(join(root, ".agent-output"), { recursive: true });
+
+    const restored = restoreDelegatedInput(lane, root);
+    assert.deepEqual(
+      restored,
+      names.map((name) => join(realRoot, ".agent-output", name))
+    );
+    for (const name of names) {
+      assert.equal(
+        readFileSync(join(root, ".agent-output", name), "utf8"),
+        `${lane}:${name}\n`
+      );
+    }
+    assert.equal(existsSync(join(root, ".agent", "remote-input", lane)), false);
+  }
+});
+
+test("delegated input staging rejects symlinks and unexpected files", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "vet-agent-input-reject-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, ".agent"));
+  mkdirSync(join(root, ".agent-output"));
+  writeFileSync(join(root, "prompt.md"), "prompt\n");
+  symlinkSync(join(root, "prompt.md"), join(root, ".agent-output", "implement-prompt.md"));
+  writeFileSync(join(root, ".agent-output", "implementation-intent.json"), "{}\n");
+  assert.throws(
+    () => stageDelegatedInput("implementRemote", root),
+    /not a valid regular file/
+  );
+
+  rmSync(join(root, ".agent-output", "implement-prompt.md"));
+  writeFileSync(join(root, ".agent-output", "implement-prompt.md"), "prompt\n");
+  stageDelegatedInput("implementRemote", root);
+  writeFileSync(
+    join(root, ".agent", "remote-input", "implementRemote", "unexpected"),
+    "unexpected\n"
+  );
+  assert.throws(
+    () => restoreDelegatedInput("implementRemote", root),
+    /invalid shape/
+  );
 });
 
 test("delegated implementation output restores only the three bounded trusted files", (t) => {

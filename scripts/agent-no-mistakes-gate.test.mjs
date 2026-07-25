@@ -101,6 +101,12 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
 
   assert.match(workflow, /--validate-backend --lane no-mistakes --json/);
   assert.match(workflow, /--lane noMistakesRemote/);
+  assert.match(workflow, /--stage-input-lane noMistakesRemote/);
+  assert.match(workflow, /--restore-input-lane noMistakesRemote/);
+  assert.ok(
+    workflow.indexOf("--restore-input-lane noMistakesRemote") <
+      workflow.indexOf("cd target;")
+  );
   assert.match(workflow, /uses: \.\/trusted\/\.github\/actions\/setup-crabbox/);
   assert.match(workflow, /node trusted\/scripts\/agent-crabbox-run\.mjs/);
   assert.match(workflow, /export AGENT_TARGET_ROOT="\$PWD"/);

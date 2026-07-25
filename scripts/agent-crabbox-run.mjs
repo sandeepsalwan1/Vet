@@ -6,8 +6,10 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   readSync,
   realpathSync,
+  rmSync,
   writeFileSync
 } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
@@ -55,7 +57,13 @@ const DELEGATED_OUTPUTS = new Map([
     },
   ],
 ]);
+const DELEGATED_INPUTS = new Map([
+  ["implementRemote", ["implement-prompt.md", "implementation-intent.json"]],
+  ["reviewRemote", ["review-prompt.md", "review.schema.json"]],
+  ["noMistakesRemote", ["no-mistakes-intent"]]
+]);
 const MAX_DELEGATED_OUTPUT_BYTES = 2_500_000;
+const MAX_DELEGATED_INPUT_BYTES = 2_500_000;
 
 function redactSecrets(text, config, env = process.env) {
   let redacted = String(text ?? "");
@@ -472,6 +480,107 @@ export function emitDelegatedOutput(lane, workdir = repoRoot()) {
     files[name] = readFileSync(path).toString("base64");
   }
   return `${delegated.marker}${JSON.stringify({ version: 1, lane, files })}`;
+}
+
+function delegatedInputFiles(lane) {
+  const files = DELEGATED_INPUTS.get(lane);
+  if (!files) throw new AgentError(`unsupported delegated input lane: ${lane}`, 2);
+  return files;
+}
+
+function delegatedInputDirectory(workdir, lane) {
+  return join(workdir, ".agent", "remote-input", lane);
+}
+
+function requireRealDirectory(path, label) {
+  const info = lstatSync(path);
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new AgentError(`Crabbox ${label} must be a real directory`, 1);
+  }
+  return path;
+}
+
+function readDelegatedInputFiles(lane, directory, { exact = true } = {}) {
+  const names = delegatedInputFiles(lane);
+  if (exact) {
+    const entries = readdirSync(directory).sort();
+    if (
+      entries.length !== names.length ||
+      names.some((name) => !entries.includes(name))
+    ) {
+      throw new AgentError(`Crabbox ${lane} input handoff has an invalid shape`, 1);
+    }
+  }
+  let totalBytes = 0;
+  return names.map((name) => {
+    const path = join(directory, name);
+    let info;
+    try {
+      info = lstatSync(path);
+    } catch {
+      throw new AgentError(`Crabbox ${lane} input is missing: ${path}`, 1);
+    }
+    if (!info.isFile() || info.isSymbolicLink() || info.size <= 0) {
+      throw new AgentError(`Crabbox ${lane} input is not a valid regular file: ${path}`, 1);
+    }
+    totalBytes += info.size;
+    if (totalBytes > MAX_DELEGATED_INPUT_BYTES) {
+      throw new AgentError(`Crabbox ${lane} input exceeds the handoff limit`, 1);
+    }
+    return [name, readFileSync(path)];
+  });
+}
+
+export function stageDelegatedInput(lane, workdir = repoRoot()) {
+  const root = resolveCrabboxWorkdir(workdir);
+  const agentDir = requireRealDirectory(join(root, ".agent"), "agent directory");
+  const stagingRoot = join(agentDir, "remote-input");
+  const stagingDir = delegatedInputDirectory(root, lane);
+  if (existsSync(stagingDir)) {
+    throw new AgentError(`Crabbox ${lane} input staging directory already exists`, 1);
+  }
+  const sourceDir = join(root, ".agent-output");
+  const files = readDelegatedInputFiles(lane, sourceDir, { exact: false });
+  if (existsSync(stagingRoot)) {
+    requireRealDirectory(stagingRoot, "input staging root");
+  } else {
+    mkdirSync(stagingRoot, { mode: 0o700 });
+  }
+  mkdirSync(stagingDir, { mode: 0o700 });
+  for (const [name, contents] of files) {
+    writeFileSync(join(stagingDir, name), contents, { mode: 0o600 });
+  }
+  readDelegatedInputFiles(lane, stagingDir);
+  return files.map(([name]) => join(stagingDir, name));
+}
+
+export function restoreDelegatedInput(lane, workdir = repoRoot()) {
+  const root = resolveCrabboxWorkdir(workdir);
+  const agentDir = requireRealDirectory(join(root, ".agent"), "agent directory");
+  requireRealDirectory(join(agentDir, "remote-input"), "input staging root");
+  const stagingDir = delegatedInputDirectory(root, lane);
+  requireRealDirectory(stagingDir, `${lane} input staging path`);
+  const files = readDelegatedInputFiles(lane, stagingDir);
+  const outputDir = join(root, ".agent-output");
+  if (existsSync(outputDir)) {
+    requireRealDirectory(outputDir, "input output directory");
+  } else {
+    mkdirSync(outputDir, { mode: 0o700 });
+  }
+  const restored = [];
+  for (const [name, contents] of files) {
+    const path = join(outputDir, name);
+    if (existsSync(path)) {
+      const info = lstatSync(path);
+      if (!info.isFile() || info.isSymbolicLink()) {
+        throw new AgentError(`Crabbox delegated input target is not a regular file: ${path}`, 1);
+      }
+    }
+    writeFileSync(path, contents, { mode: 0o600 });
+    restored.push(path);
+  }
+  rmSync(stagingDir, { recursive: true });
+  return restored;
 }
 
 export function restoreDelegatedOutput(lane, output, workdir = repoRoot()) {
@@ -1291,6 +1400,26 @@ export function runCrabboxLane(options) {
 
 export async function main() {
   const args = parseArgs();
+  if (args["stage-input-lane"]) {
+    const lane = String(args["stage-input-lane"]);
+    const workdir = resolveCrabboxWorkdir(args["input-workdir"] ?? repoRoot());
+    const files = stageDelegatedInput(lane, workdir);
+    finish(
+      { ok: true, message: `staged ${lane} input`, lane, files },
+      Boolean(args.json)
+    );
+    return;
+  }
+  if (args["restore-input-lane"]) {
+    const lane = String(args["restore-input-lane"]);
+    const workdir = resolveCrabboxWorkdir(args["input-workdir"] ?? repoRoot());
+    const files = restoreDelegatedInput(lane, workdir);
+    finish(
+      { ok: true, message: `restored ${lane} input`, lane, files },
+      Boolean(args.json)
+    );
+    return;
+  }
   if (args["emit-implementation-output"]) {
     process.stdout.write(`${emitImplementationOutput()}\n`);
     return;

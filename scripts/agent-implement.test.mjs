@@ -583,6 +583,13 @@ test("implementation workflow isolates candidate checks from credentials, artifa
   );
   assert.match(remote, /git init --quiet/);
   assert.match(remote, /git commit --quiet --no-verify/);
+  assert.match(remote, /--stage-input-lane implementRemote/);
+  assert.match(remote, /--restore-input-lane implementRemote/);
+  assert.match(remote, /REMOTE_COMMAND: >-\n\s+set -e;/);
+  assert.ok(
+    remote.indexOf("--restore-input-lane implementRemote") <
+      remote.indexOf("git init --quiet")
+  );
   assert.match(remote, /codex debug prompt-input 'skill discovery probe'/);
   assert.match(remote, /node scripts\/agent-skill-discovery\.mjs/);
   assert.match(remote, /--input \/tmp\/vet-worker-prompt-input\.json --json/);
