@@ -32,6 +32,7 @@ Rules:
 - Return a bounded `proofPlan` in the intent addendum.
   For browser proof, map sealed `AC1`, `AC2`, and later clause IDs to user actions plus deterministic visible assertions.
   Use stable accessible or `data-agent-proof` selectors, local routes, non-secret test values, and the fewest steps that exercise the real behavior.
+  Every route and navigation path must be pathname-only, begin with exactly one `/`, and contain no host, protocol, query, or fragment.
   For GIF proof, include an observable intermediate assertion and a final assertion.
   For non-browser work, return an empty task list.
 - The addendum may clarify implementation.

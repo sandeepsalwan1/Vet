@@ -279,6 +279,18 @@ test("proof plan rejects unsafe routes and unbounded waits", () => {
   };
 
   assert.deepEqual(validateProofPlan(base), base);
+  assert.deepEqual(
+    validateProofPlan({
+      ...base,
+      tasks: [
+        {
+          ...base.tasks[0],
+          actions: [{ type: "navigate", path: "//localhost/staff/tasks" }]
+        }
+      ]
+    }).tasks[0].actions,
+    [{ type: "navigate", path: "/staff/tasks" }]
+  );
   assert.throws(
     () =>
       validateProofPlan({
@@ -286,6 +298,19 @@ test("proof plan rejects unsafe routes and unbounded waits", () => {
         tasks: [{ ...base.tasks[0], route: "https://example.com" }]
       }),
     /proof route is invalid/
+  );
+  assert.throws(
+    () =>
+      validateProofPlan({
+        ...base,
+        tasks: [
+          {
+            ...base.tasks[0],
+            actions: [{ type: "navigate", path: "//example.com/staff/tasks" }]
+          }
+        ]
+      }),
+    /proof action path is invalid/
   );
   assert.throws(
     () =>

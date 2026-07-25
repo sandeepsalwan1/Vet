@@ -75,6 +75,12 @@ function safeProofRoute(value, label = "proof route") {
   return route.length > 1 ? route.replace(/\/+$/, "") : route;
 }
 
+function safeProofActionPath(value) {
+  const path = normalizedText(value);
+  const localPath = path.match(/^\/\/(?:localhost|127\.0\.0\.1)(\/[A-Za-z0-9/_-]*)$/i)?.[1];
+  return safeProofRoute(localPath ?? path, "implementation proof action path");
+}
+
 function boundedStringArray(value, label) {
   if (
     !Array.isArray(value) ||
@@ -112,7 +118,9 @@ function validateProofAction(action) {
   ) {
     throw new AgentError("implementation proof action is invalid", 1);
   }
-  if (action.type === "navigate") return { type: action.type, path: safeProofRoute(action.path) };
+  if (action.type === "navigate") {
+    return { type: action.type, path: safeProofActionPath(action.path) };
+  }
   if (action.type === "wait") {
     if (!Number.isInteger(action.milliseconds) || action.milliseconds < 0 || action.milliseconds > 10_000) {
       throw new AgentError("implementation proof wait is invalid", 1);
