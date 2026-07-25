@@ -269,6 +269,14 @@ export function lightweightTriageDecision(config, issue) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+  const compactOutcome = outcome
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  const compactAcceptance = acceptance
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
   const explicitHigh = labels.includes(config.labels.priorityHigh);
   const explicitLow =
     labels.includes(config.labels.priorityLow) ||
@@ -319,12 +327,23 @@ export function lightweightTriageDecision(config, issue) {
     /\b(?:disable|bypass|remove)\b[\s\S]{0,60}\b(?:branch protection|security gate|required checks|authentication)\b/i.test(
       requestText
     );
+  const vagueOutcome = /^(?:fix broken ui|delete dead code)$/i.test(
+    compactOutcome
+  );
+  const genericAcceptance =
+    !compactAcceptance ||
+    compactAcceptance === compactOutcome ||
+    /^(?:the )?(?:ui|it|this|thing|stuff|bug) (?:works?|works correctly|is fixed)$/i.test(
+      compactAcceptance
+    ) ||
+    /^(?:the )?dead code (?:is )?(?:deleted|removed)$/i.test(
+      compactAcceptance
+    );
   const vaguePhrase =
     /^(?:fix|improve|update|change|delete|remove|add|make)\s+(?:it|this|thing|stuff|bug|broken ui|dead code)$/i.test(
       compactRequest
     ) ||
-    (/^(?:fix broken ui|delete dead code)$/i.test(outcome) &&
-      (!acceptance || compactRequest === `${outcome} ${outcome}`.toLowerCase()));
+    (vagueOutcome && genericAcceptance);
   const missingAcceptance = !acceptance && !/\b(?:must|should|when|then|shows?|returns?|passes?)\b/i.test(outcome);
   const blockedForAmbiguity = !disallowed && (vaguePhrase || missingAcceptance);
   const implementationScope = disallowed

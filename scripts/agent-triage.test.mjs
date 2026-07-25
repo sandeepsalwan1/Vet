@@ -241,17 +241,21 @@ test("lightweight triage spends no model judgment on routine ambiguity", () => {
 });
 
 test("lightweight triage blocks vague work once before model spend", () => {
-  for (const request of ["fix broken ui", "delete dead code"]) {
+  for (const [request, acceptance] of [
+    ["fix broken ui", "fix broken ui"],
+    ["delete dead code", "delete dead code"],
+    ["fix broken ui", "The UI works correctly."]
+  ]) {
     const result = lightweightTriageDecision(config, {
       number: 35,
-      title: request,
+      title: `Policy canary: ${request}`,
       body: `### Outcome
 
 ${request}
 
 ### Acceptance criteria
 
-${request}`,
+${acceptance}`,
       labels: []
     });
 
@@ -259,6 +263,22 @@ ${request}`,
     assert.equal(result.automationDecision, "blocked");
     assert.match(result.humanQuestion, /affected route, component, package, or files/);
   }
+
+  const detailed = lightweightTriageDecision(config, {
+    number: 36,
+    title: "Fix broken UI",
+    body: `### Outcome
+
+Fix broken UI.
+
+### Acceptance criteria
+
+- On /request, the submit button stays disabled until every required field is valid.`,
+    labels: []
+  });
+
+  assert.equal(detailed.alignment, "yes");
+  assert.equal(detailed.automationDecision, "implement");
 });
 
 test("lightweight triage keeps risk, priority, and service proof independent", () => {
