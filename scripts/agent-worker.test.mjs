@@ -7,6 +7,8 @@ import { loadConfig } from "./agent-lib.mjs";
 import {
   createWorkerInvocation,
   parseCodexUsage,
+  preflightCodexModel,
+  resolveCodexRunSettings,
   resolveCodexSettings,
   resolveWorkerBackend
 } from "./agent-worker.mjs";
@@ -75,6 +77,23 @@ test("Codex lanes select configured overrides and otherwise inherit implementati
   ]);
   assert.throws(() => resolveCodexSettings(laneConfig, "unknown"), /unsupported Codex lane: unknown/);
   assert.throws(() => resolveCodexSettings(laneConfig, "triage"), /unsupported Codex lane: triage/);
+});
+
+test("Codex run settings resolve command overrides once for invocation and accounting", () => {
+  assert.deepEqual(
+    resolveCodexRunSettings(config(), {
+      lane: "review",
+      model: "gpt-override",
+      effort: "high",
+      sandbox: "read-only"
+    }),
+    {
+      lane: "review",
+      model: "gpt-override",
+      effort: "high",
+      sandbox: "read-only"
+    }
+  );
 });
 
 test("worker rejects defaults and overrides outside the backend allowlist", () => {
@@ -223,4 +242,51 @@ test("worker dry-run reports auth presence without exposing its value", () => {
 
   assert.doesNotMatch(output, /must-not-appear/);
   assert.equal(JSON.parse(output).backend, "codex");
+});
+
+test("Codex preflight verifies model metadata without making an inference request", async () => {
+  const requests = [];
+  const result = await preflightCodexModel({
+    key: "secret",
+    model: "gpt-test/revision",
+    signal: undefined,
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ id: "gpt-test/revision", object: "model" })
+      };
+    }
+  });
+
+  assert.deepEqual(result, { model: "gpt-test/revision" });
+  assert.equal(requests.length, 1);
+  assert.equal(
+    requests[0].url,
+    "https://api.openai.com/v1/models/gpt-test%2Frevision"
+  );
+  assert.deepEqual(requests[0].options.headers, {
+    Authorization: "Bearer secret"
+  });
+});
+
+test("Codex preflight reports only safe HTTP failure metadata", async () => {
+  const error = await assert.rejects(
+    preflightCodexModel({
+      key: "must-not-appear",
+      model: "gpt-test",
+      signal: undefined,
+      fetchImpl: async () => ({
+        ok: false,
+        status: 401,
+        json: async () => ({
+          error: { message: "must-not-appear in diagnostics" }
+        })
+      })
+    }),
+    /Codex model preflight failed: HTTP 401/
+  );
+
+  assert.doesNotMatch(String(error), /must-not-appear/);
 });

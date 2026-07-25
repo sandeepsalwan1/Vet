@@ -45,25 +45,39 @@ export function resolveCodexSettings(config, requestedLane) {
   };
 }
 
+export function resolveCodexRunSettings(config, args = {}) {
+  const settings = resolveCodexSettings(config, args.lane);
+  const sandbox = args.sandbox ?? settings.sandbox;
+  if (!CODEX_SANDBOXES.has(sandbox)) throw new AgentError(`unsupported Codex sandbox: ${sandbox}`, 2);
+  const model = args.model ?? settings.model;
+  if (model) {
+    nonemptyString(model, "Codex model");
+    if (!CODEX_MODEL.test(model)) throw new AgentError(`unsupported Codex model: ${model}`, 2);
+  }
+  const effort = args.effort ?? settings.effort;
+  if (effort) {
+    nonemptyString(effort, "Codex effort");
+    if (!CODEX_EFFORTS.has(effort)) throw new AgentError(`unsupported Codex effort: ${effort}`, 2);
+  }
+  return {
+    ...settings,
+    model,
+    effort,
+    sandbox
+  };
+}
+
 function codexArgs(args, config) {
   const promptFile = args["prompt-file"];
   if (!promptFile) throw new AgentError("missing --prompt-file", 2);
   const outputFile = args["output-file"];
-  const settings = resolveCodexSettings(config, args.lane);
-  const sandbox = args.sandbox ?? settings.sandbox;
-  if (!CODEX_SANDBOXES.has(sandbox)) throw new AgentError(`unsupported Codex sandbox: ${sandbox}`, 2);
-  const command = ["exec", "--json", "--sandbox", sandbox];
-  const model = args.model ?? settings.model;
-  const effort = args.effort ?? settings.effort;
-  if (model) {
-    const value = nonemptyString(model, "Codex model");
-    if (!CODEX_MODEL.test(value)) throw new AgentError(`unsupported Codex model: ${value}`, 2);
-    command.push("--model", value);
+  const settings = resolveCodexRunSettings(config, args);
+  const command = ["exec", "--json", "--sandbox", settings.sandbox];
+  if (settings.model) {
+    command.push("--model", settings.model);
   }
-  if (effort) {
-    const value = nonemptyString(effort, "Codex effort");
-    if (!CODEX_EFFORTS.has(value)) throw new AgentError(`unsupported Codex effort: ${value}`, 2);
-    command.push("--config", `model_reasoning_effort=${JSON.stringify(value)}`);
+  if (settings.effort) {
+    command.push("--config", `model_reasoning_effort=${JSON.stringify(settings.effort)}`);
   }
   command.push(
     "--config",
@@ -160,6 +174,43 @@ function codexEnvironment(config, source) {
   if (configured !== "CODEX_API_KEY") delete env[configured];
   if (key) env.CODEX_API_KEY = key;
   return env;
+}
+
+export async function preflightCodexModel({
+  key,
+  model,
+  fetchImpl = fetch,
+  signal = AbortSignal.timeout(10_000)
+}) {
+  const apiKey = nonemptyString(key, "Codex API key");
+  const modelId = nonemptyString(model, "Codex model");
+  let response;
+  try {
+    response = await fetchImpl(
+      `https://api.openai.com/v1/models/${encodeURIComponent(modelId)}`,
+      {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal
+      }
+    );
+  } catch (error) {
+    const reason = error?.name === "TimeoutError" ? "timeout" : "network error";
+    throw new AgentError(`Codex model preflight failed: ${reason}`, 1);
+  }
+  if (!response?.ok) {
+    const status = Number.isInteger(response?.status) ? response.status : 0;
+    throw new AgentError(`Codex model preflight failed: HTTP ${status || "unknown"}`, 1);
+  }
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new AgentError("Codex model preflight returned invalid JSON", 1);
+  }
+  if (payload?.id !== modelId || payload?.object !== "model") {
+    throw new AgentError("Codex model preflight returned unexpected metadata", 1);
+  }
+  return { model: modelId };
 }
 
 export const WORKER_BACKEND_ADAPTERS = Object.freeze({
@@ -261,6 +312,14 @@ export async function main(argv = process.argv.slice(2)) {
     );
     return;
   }
+  const settings = resolveCodexRunSettings(config, args);
+  await preflightCodexModel({
+    key: invocation.env.CODEX_API_KEY,
+    model: settings.model
+  });
+  process.stderr.write(
+    `Codex model preflight passed: lane=${settings.lane} model=${settings.model}\n`
+  );
   const result = runCommand(invocation.executable, invocation.args, {
     env: invocation.env,
     input: readText(args["prompt-file"]),
@@ -270,7 +329,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (args["usage-file"]) {
     const usage = parseCodexUsage(
       result.stdout,
-      resolveCodexSettings(config, args.lane)
+      settings
     );
     writeUsage(args["usage-file"], usage);
     if (result.status === 0 && !usage.complete) {

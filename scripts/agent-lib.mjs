@@ -92,7 +92,8 @@ export function fail(error, json = false) {
   };
   if (error?.details !== undefined) result.details = error.details;
   printResult(result, json);
-  process.exit(code);
+  // Let Node flush piped diagnostics before exiting remote runners.
+  process.exitCode = code;
 }
 
 export function requireValue(value, name) {
