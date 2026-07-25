@@ -4,7 +4,8 @@
   "workspaces": {
     ".": {
       "entry": ["scripts/*.mjs", "eslint.config.mjs"],
-      "project": ["scripts/*.mjs"]
+      "project": ["scripts/*.mjs"],
+      "ignoreDependencies": ["brace-expansion"]
     },
     "apps/internal": {
       "entry": [

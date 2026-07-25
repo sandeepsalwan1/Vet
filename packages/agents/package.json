@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@central-vet/db": "*",
-    "@google/adk": "^1.1.0",
+    "@google/adk": "~1.3.0",
     "@google/genai": "^1.52.0",
     "zod": "^4.4.3"
   },

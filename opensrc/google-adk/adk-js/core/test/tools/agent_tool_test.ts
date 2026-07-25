@@ -15,6 +15,7 @@ import {
   LlmAgent,
   PluginManager,
   Runner,
+  State,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 
@@ -162,6 +163,57 @@ describe('AgentTool', () => {
     );
   });
 
+  it('strips thought parts from the merged result', async () => {
+    const mockAgent = {
+      name: 'sub-agent',
+    } as unknown as LlmAgent;
+
+    const tool = new AgentTool({agent: mockAgent});
+
+    const session = createSession({
+      id: 'parent-session',
+      appName: 'sub-agent',
+      userId: 'parent-user',
+    });
+
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: mockAgent,
+      session,
+      pluginManager: new PluginManager([]),
+    });
+
+    const toolContext = new Context({invocationContext});
+
+    const mockRunAsync = async function* () {
+      yield createEvent({
+        author: 'sub-agent',
+        content: {
+          role: 'model',
+          parts: [
+            {text: 'reasoning about the user request', thought: true},
+            {text: 'final answer'},
+          ],
+        },
+      });
+    };
+
+    vi.mocked(Runner).mockImplementation((config) => {
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: mockRunAsync,
+      } as unknown as Runner;
+    });
+
+    const result = await tool.runAsync({
+      args: {request: 'hello'},
+      toolContext,
+    });
+
+    expect(result).toBe('final answer');
+  });
+
   it('handles abort signal before execution', async () => {
     const mockAgent = {
       name: 'sub-agent',
@@ -196,6 +248,53 @@ describe('AgentTool', () => {
     });
 
     expect(result).toBe('');
+  });
+
+  it('does not set skipSummarization on toolContext actions when skipSummarization is true', async () => {
+    const mockAgent = {
+      name: 'sub-agent',
+    } as unknown as LlmAgent;
+
+    const tool = new AgentTool({agent: mockAgent, skipSummarization: true});
+
+    const session = createSession({
+      id: 'parent-session',
+      appName: 'sub-agent',
+      userId: 'parent-user',
+    });
+
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: mockAgent,
+      session,
+      pluginManager: new PluginManager([]),
+    });
+
+    const toolContext = new Context({
+      invocationContext,
+    });
+
+    const mockRunAsync = async function* () {
+      yield createEvent({
+        author: 'sub-agent',
+        content: {role: 'model', parts: [{text: 'result'}]},
+      });
+    };
+
+    vi.mocked(Runner).mockImplementation((config) => {
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: mockRunAsync,
+      } as unknown as Runner;
+    });
+
+    await tool.runAsync({args: {request: 'hello'}, toolContext});
+
+    // skipSummarization must NOT be set on the parent's EventActions.
+    // Setting it would cause isFinalResponse() to treat the tool-response
+    // event as terminal, prematurely breaking the parent agent's run loop.
+    expect(toolContext.actions.skipSummarization).toBeFalsy();
   });
 
   it('handles abort signal during execution', async () => {
@@ -253,5 +352,165 @@ describe('AgentTool', () => {
 
     // The method should return undefined (void) when aborted during loop
     expect(result).toBeUndefined();
+  });
+
+  it('does not propagate temp: keys from sub-agent state delta to parent', async () => {
+    const mockAgent = {name: 'sub-agent'} as unknown as LlmAgent;
+    const tool = new AgentTool({agent: mockAgent});
+
+    const mockSessionService = new InMemorySessionService();
+    const updateMock = vi.fn();
+
+    const toolContext = {
+      invocationContext: {
+        userId: 'parent-user',
+        session: {id: 'parent-session'},
+        sessionService: mockSessionService,
+      },
+      state: {
+        toRecord: () => ({}),
+        update: updateMock,
+      },
+    } as unknown as Context;
+
+    const mockRunAsync = async function* () {
+      yield createEvent({
+        author: 'sub-agent',
+        content: {role: 'model', parts: [{text: 'done'}]},
+        actions: createEventActions({
+          stateDelta: {
+            normalKey: 'persistMe',
+            [`${State.TEMP_PREFIX}ephemeral`]: 'dropMe',
+          },
+        }),
+      });
+    };
+
+    vi.mocked(Runner).mockImplementation(
+      (config) =>
+        ({
+          appName: config?.appName,
+          sessionService: config?.sessionService,
+          runAsync: mockRunAsync,
+        }) as unknown as Runner,
+    );
+
+    await tool.runAsync({args: {request: 'go'}, toolContext});
+
+    // Only the non-temp key must reach the parent state
+    expect(updateMock).toHaveBeenCalledWith({normalKey: 'persistMe'});
+    expect(updateMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({[`${State.TEMP_PREFIX}ephemeral`]: 'dropMe'}),
+    );
+  });
+
+  it('skips state.update entirely when all delta keys are temp:', async () => {
+    const mockAgent = {name: 'sub-agent'} as unknown as LlmAgent;
+    const tool = new AgentTool({agent: mockAgent});
+
+    const mockSessionService = new InMemorySessionService();
+    const updateMock = vi.fn();
+
+    const toolContext = {
+      invocationContext: {
+        userId: 'parent-user',
+        session: {id: 'parent-session'},
+        sessionService: mockSessionService,
+      },
+      state: {
+        toRecord: () => ({}),
+        update: updateMock,
+      },
+    } as unknown as Context;
+
+    const mockRunAsync = async function* () {
+      yield createEvent({
+        author: 'sub-agent',
+        content: {role: 'model', parts: [{text: 'done'}]},
+        actions: createEventActions({
+          stateDelta: {
+            [`${State.TEMP_PREFIX}only`]: 'dropMe',
+          },
+        }),
+      });
+    };
+
+    vi.mocked(Runner).mockImplementation(
+      (config) =>
+        ({
+          appName: config?.appName,
+          sessionService: config?.sessionService,
+          runAsync: mockRunAsync,
+        }) as unknown as Runner,
+    );
+
+    await tool.runAsync({args: {request: 'go'}, toolContext});
+
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it('does not propagate temp: keys from parent state when creating sub-agent session', async () => {
+    const mockAgent = {
+      name: 'sub-agent',
+    } as unknown as LlmAgent;
+
+    const tool = new AgentTool({agent: mockAgent});
+
+    const mockSessionService = new InMemorySessionService();
+
+    const session = createSession({
+      id: 'parent-session',
+      appName: 'sub-agent',
+      userId: 'parent-user',
+      state: {
+        normalKey: 'parentValue',
+        [`${State.TEMP_PREFIX}tempKey`]: 'tempValue',
+      },
+    });
+
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: mockAgent,
+      session,
+      pluginManager: new PluginManager([]),
+      sessionService: mockSessionService,
+    });
+
+    const toolContext = new Context({
+      invocationContext,
+    });
+
+    const mockRunAsync = async function* () {
+      yield createEvent({
+        author: 'sub-agent',
+        content: {role: 'model', parts: [{text: 'hello'}]},
+      });
+    };
+
+    vi.mocked(Runner).mockImplementation((config) => {
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: mockRunAsync,
+      } as unknown as Runner;
+    });
+
+    await tool.runAsync({
+      args: {request: 'hello'},
+      toolContext,
+    });
+
+    // Retrieve the created session from the service
+    const subAgentSession = await mockSessionService.getSession({
+      appName: 'sub-agent',
+      userId: 'parent-user',
+      sessionId: 'parent-session',
+    });
+
+    expect(subAgentSession).toBeDefined();
+    expect(subAgentSession?.state).toHaveProperty('normalKey', 'parentValue');
+    expect(subAgentSession?.state).not.toHaveProperty(
+      `${State.TEMP_PREFIX}tempKey`,
+    );
   });
 });

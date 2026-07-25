@@ -14,7 +14,7 @@ Local cache:
 /Users/sandeep/.opensrc/repos/github.com/mattpocock/sandcastle/main
 ```
 
-Current checked state, refreshed on 2026-07-20:
+Current checked state, refreshed on 2026-07-23:
 
 - latest release: `v0.12.0`
 - latest release time: `2026-06-29T20:16:27Z`
@@ -22,7 +22,7 @@ Current checked state, refreshed on 2026-07-20:
 - checked commit: `e99f832f26dc9d245c019a9ddd19fa5dee792427`
 - language: TypeScript
 - license: MIT
-- stars at check time: 6858
+- stars at check time: 6989
 
 Use in this repo:
 

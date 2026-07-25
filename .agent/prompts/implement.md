@@ -6,7 +6,6 @@ Read:
 
 - root `AGENTS.md`
 - every applicable nested `AGENTS.md` for files you inspect or change
-- `VISION.md`
 - `README.md`
 - `CONTEXT.md`
 - `docs/architecture.md`

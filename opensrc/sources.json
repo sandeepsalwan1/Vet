@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "opensrcVersion": "0.7.3",
+  "maxCacheAgeHours": 30,
+  "sources": [
+    {
+      "spec": "@google/adk",
+      "kind": "npm",
+      "cacheName": "@google/adk",
+      "lockfilePath": "node_modules/@google/adk",
+      "snapshotManifest": "opensrc/google-adk/adk-js/.release-please-manifest.json",
+      "snapshotVersionKey": "."
+    },
+    {
+      "spec": "https://github.com/google/adk-js",
+      "kind": "github",
+      "cacheName": "github.com/google/adk-js"
+    },
+    {
+      "spec": "https://github.com/a2aproject/A2A",
+      "kind": "github",
+      "cacheName": "github.com/a2aproject/A2A"
+    },
+    {
+      "spec": "https://github.com/openclaw/crabbox",
+      "kind": "github",
+      "cacheName": "github.com/openclaw/crabbox"
+    },
+    {
+      "spec": "https://github.com/kunchenguid/no-mistakes",
+      "kind": "github",
+      "cacheName": "github.com/kunchenguid/no-mistakes"
+    },
+    {
+      "spec": "https://github.com/k1LoW/octocov",
+      "kind": "github",
+      "cacheName": "github.com/k1LoW/octocov"
+    },
+    {
+      "spec": "https://github.com/openclaw/openclaw",
+      "kind": "github",
+      "cacheName": "github.com/openclaw/openclaw"
+    },
+    {
+      "spec": "https://github.com/mattpocock/sandcastle",
+      "kind": "github",
+      "cacheName": "github.com/mattpocock/sandcastle"
+    }
+  ]
+}

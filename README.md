@@ -29,6 +29,7 @@ Local commands:
 - `npm run db:migrate`
 - `npm run dev`
 - `npm run lint`, `npm run typecheck`, `npm run lint:dead`, and `npm run lint:duplicates` for source health checks. Duplication ignores append-only DB migrations.
+- `npm run opensrc:sync` to refresh every source in `opensrc/sources.json`; `npm run opensrc:install-schedule` installs the daily macOS refresh.
 - `npm run test:client-journey` for welcome, appointment, consent, checkout, and follow-up messaging policy.
 - `npm run smoke:local` while the dev server is running to warm local pages/routes, then verify core agent route response-time budgets.
 - `npm run smoke:agent-email -- --base-url http://localhost:3000` while the app is running to verify monthly email idempotency through `/api/agent/email` without sending live email.
@@ -57,7 +58,7 @@ Agent runtime:
 
 Dependency holds:
 
-- Keep `@google/genai` on v1 while `@google/adk` depends on v1.
+- Keep `@google/adk` on v1.3 and `@google/genai` on v1 until the runtime is migrated to the ADK v1.4 GenAI v2 dependency line.
 - Keep ESLint on v9 until the Next/react lint stack supports v10.
 - Keep `@types/node` on the repo's supported Node engine line.
 
@@ -73,7 +74,7 @@ Main routes:
 
 - `/arrival`, `/booking`, `/pickup`, `/records`, `/followup`, `/call`, `/request`
 - `/staff`, `/staff/agent`, `/staff/approvals`
-- `/api/mock/clinic`, `/api/agent/*`, `/api/approvals`, `/api/reports/*`
+- `/api/mock/clinic`, `/api/agent/*`, `/api/analytics`, `/api/approvals`, `/api/reports/*`
 - `/api/client-account-claim`, `/api/client-journey`, `/api/client-journey/staff`, `/api/notifications/client-journey`
 
 hi this works

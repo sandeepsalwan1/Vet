@@ -15,12 +15,14 @@ import {
   setGitHubOutput
 } from "./agent-lib.mjs";
 
-const CONTEXT_VERSION = 1;
+const CONTEXT_VERSION = 2;
 const MAX_WORKFLOWS = 12;
 const MAX_CHECKS = 32;
 const MAX_CODE_HEALTH_SIGNALS = 20;
+const MAX_RECENT_ISSUE_TITLES = 20;
 const MAX_CONTEXT_BYTES = 32 * 1024;
 const MAX_NAME_LENGTH = 120;
+const MAX_ISSUE_TITLE_LENGTH = 256;
 const STATE_ORDER = new Map([
   ["failing", 0],
   ["pending", 1],
@@ -32,6 +34,8 @@ const WORKFLOW_FIELDS =
   "{workflow_runs: [.workflow_runs[] | {id, workflow_id, name, event, head_sha, status, conclusion, updated_at}]}";
 const CHECK_FIELDS =
   "{check_runs: [.check_runs[] | {id, name, app: {slug: .app.slug}, status, conclusion, completed_at, started_at, details_url}]}";
+const ISSUE_SEARCH_FIELDS =
+  "{incomplete: .incomplete_results, issues: [.items[] | {number, title, state, created_at}]}";
 
 const CREDENTIALS_EXCLUDED_FROM_GITHUB_READS = [
   "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
@@ -130,7 +134,7 @@ function newestFirst(left, right) {
   const rightTime =
     Date.parse(right.updated_at ?? right.completed_at ?? right.started_at ?? right.created_at ?? "") || 0;
   if (leftTime !== rightTime) return rightTime - leftTime;
-  return (safeInteger(right.id) ?? 0) - (safeInteger(left.id) ?? 0);
+  return (safeInteger(right.id ?? right.number) ?? 0) - (safeInteger(left.id ?? left.number) ?? 0);
 }
 
 function summarizeStates(items) {
@@ -197,6 +201,22 @@ function normalizeCheckRuns(payload, repository) {
         compareText(left.app, right.app)
     )
     .slice(0, MAX_CHECKS);
+}
+
+function normalizeRecentIssueTitles(payload) {
+  const issues = Array.isArray(payload) ? payload : [];
+  return [...issues]
+    .filter((issue) => !issue?.pull_request)
+    .sort(newestFirst)
+    .map((issue) => {
+      const number = safeInteger(issue?.number);
+      const title = boundedText(issue?.title, MAX_ISSUE_TITLE_LENGTH);
+      const state = String(issue?.state ?? "").toLowerCase();
+      if (!number || !title || !["open", "closed"].includes(state)) return null;
+      return { number, title, state };
+    })
+    .filter(Boolean)
+    .slice(0, MAX_RECENT_ISSUE_TITLES);
 }
 
 function codeHealthCategory(name, requiredChecks) {
@@ -268,6 +288,7 @@ export function buildProposerContext(config, payloads) {
   if (!branch || !headSha) throw new AgentError("public main head response is invalid", 1);
   const workflows = normalizeWorkflowRuns(payloads?.workflows, repository, headSha);
   const checks = normalizeCheckRuns(payloads?.checks, repository);
+  const recentIssueTitles = normalizeRecentIssueTitles(payloads?.issues);
   const requiredCheckNames = [...new Set(config?.automerge?.requiredChecks ?? [])]
     .filter((name) => typeof name === "string" && name.length > 0)
     .map((name) => boundedText(name))
@@ -284,8 +305,10 @@ export function buildProposerContext(config, payloads) {
     limits: {
       workflowRuns: MAX_WORKFLOWS,
       checkRuns: MAX_CHECKS,
-      codeHealthSignals: MAX_CODE_HEALTH_SIGNALS
+      codeHealthSignals: MAX_CODE_HEALTH_SIGNALS,
+      recentIssueTitles: MAX_RECENT_ISSUE_TITLES
     },
+    recentIssueTitles,
     workflowHealth: {
       latestByWorkflow: workflows,
       summary: summarizeStates(workflows)
@@ -317,7 +340,18 @@ export function collectProposerContext(config, dependencies = {}) {
     `repos/${repository}/commits/${headSha}/check-runs?per_page=100`,
     CHECK_FIELDS
   );
-  return buildProposerContext(config, { commit, workflows, checks });
+  const issueQuery = encodeURIComponent(`repo:${repository} is:issue`);
+  const issueSearch = api(
+    `search/issues?q=${issueQuery}&sort=created&order=desc&per_page=${MAX_RECENT_ISSUE_TITLES}`,
+    ISSUE_SEARCH_FIELDS
+  );
+  if (issueSearch?.incomplete) throw new AgentError("recent issue search is incomplete", 1);
+  return buildProposerContext(config, {
+    commit,
+    workflows,
+    checks,
+    issues: issueSearch?.issues
+  });
 }
 
 export function writeProposerContext(path, context) {
@@ -341,6 +375,7 @@ async function main() {
       workflowRuns: context.workflowHealth.latestByWorkflow.length,
       checkRuns: context.checkHealth.currentHead.length,
       codeHealthSignals: context.codeHealth.signals.length,
+      recentIssueTitles: context.recentIssueTitles.length,
       ...(dryRun ? {} : { output })
     },
     Boolean(args.json)

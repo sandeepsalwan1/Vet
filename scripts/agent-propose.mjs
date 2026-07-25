@@ -45,7 +45,6 @@ export function validateProposalOutput(data) {
     Array.isArray(data) ||
     JSON.stringify(Object.keys(data).sort()) !== JSON.stringify(["issues"]) ||
     !Array.isArray(issues) ||
-    issues.length === 0 ||
     issues.length > 3
   ) {
     throw new AgentError("proposal output is invalid", 1);

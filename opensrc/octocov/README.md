@@ -14,12 +14,12 @@ Local cache:
 /Users/sandeep/.opensrc/repos/github.com/k1LoW/octocov/main
 ```
 
-Current checked state on 2026-07-13:
+Current checked state on 2026-07-23:
 
-- latest release: `v0.75.9`
-- latest release time: `2026-07-08T06:36:29Z`
-- upstream last pushed: `2026-07-08T06:13:21Z`
-- public stars at check time: 489
+- latest release: `v0.75.10`
+- latest release time: `2026-07-20T04:19:54Z`
+- upstream last pushed: `2026-07-20T03:55:59Z`
+- public stars at check time: 493
 - license: MIT
 
 Use in this repo:

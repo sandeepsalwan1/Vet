@@ -9,7 +9,6 @@ Read:
 - triage comment
 - root `AGENTS.md`
 - every applicable nested `AGENTS.md` for reviewed files
-- `VISION.md`
 - `README.md`
 - `CONTEXT.md`
 - `docs/architecture.md`

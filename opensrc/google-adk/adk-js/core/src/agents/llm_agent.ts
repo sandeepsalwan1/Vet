@@ -6,6 +6,7 @@
 
 import {GenerateContentConfig, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
+import {FunctionTool} from '../tools/function_tool.js';
 
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
@@ -17,6 +18,7 @@ import {
   createNewEventId,
   Event,
   getFunctionCalls,
+  getFunctionResponses,
   isFinalResponse,
 } from '../events/event.js';
 
@@ -53,6 +55,7 @@ import {
   populateClientFunctionCallId,
 } from './functions.js';
 
+import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
 import {InvocationContext} from './invocation_context.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
@@ -392,6 +395,7 @@ export class LlmAgent extends BaseAgent {
     // Orders matter, don't change. Append new processors to the end
     this.requestProcessors = config.requestProcessors ?? [
       BASIC_LLM_REQUEST_PROCESSOR,
+      AUTH_PREPROCESSOR,
       IDENTITY_LLM_REQUEST_PROCESSOR,
       INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
       REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
@@ -667,17 +671,36 @@ export class LlmAgent extends BaseAgent {
   ): AsyncGenerator<Event, void, void> {
     while (true) {
       let lastEvent: Event | undefined = undefined;
+      let stepHadToolCalls = false;
       for await (const event of this.runOneStepAsync(context)) {
         if (context.abortSignal?.aborted) {
           return;
         }
 
         lastEvent = event;
+        if (
+          getFunctionCalls(event).length > 0 ||
+          getFunctionResponses(event).length > 0
+        ) {
+          stepHadToolCalls = true;
+        }
         this.maybeSaveOutputToState(event);
         yield event;
       }
 
-      if (!lastEvent || isFinalResponse(lastEvent)) {
+      if (!lastEvent) {
+        break;
+      }
+
+      const isEmptyMetadataEvent =
+        lastEvent.author === this.name &&
+        !lastEvent.partial &&
+        (!lastEvent.content?.parts || lastEvent.content.parts.length === 0);
+
+      if (
+        isFinalResponse(lastEvent) &&
+        !(isEmptyMetadataEvent && stepHadToolCalls)
+      ) {
         break;
       }
 
@@ -707,6 +730,20 @@ export class LlmAgent extends BaseAgent {
   // --------------------------------------------------------------------------
   // #START LlmFlow Logic
   // --------------------------------------------------------------------------
+  /**
+   * Runs the bidirectional (live) flow for this agent.
+   *
+   * Establishes a live connection to the model, drains the invocation's
+   * `liveRequestQueue` into the connection on a parallel task, and yields
+   * events derived from server messages until the queue closes, the model
+   * finishes, or an agent transfer occurs.
+   *
+   * If the live connection drops (network failure, server `goAway`) and a
+   * session resumption handle has been observed, the flow transparently
+   * reconnects using that handle up to {@link MAX_LIVE_RECONNECT_ATTEMPTS}
+   * times. Subsequent reconnects skip `sendHistory` because the server
+   * already holds the conversation state associated with the handle.
+   */
   // eslint-disable-next-line require-yield
   private async *runLiveFlow(
     _invocationContext: InvocationContext,
@@ -743,7 +780,23 @@ export class LlmAgent extends BaseAgent {
     }
     // TODO - b/425992518: check if tool preprocessors can be simplified.
     // Run pre-processors for tools.
-    for (const toolUnion of this.tools) {
+    const allTools = [...this.tools];
+    if (this.outputSchema && allTools.length > 0) {
+      const setModelResponseTool = new FunctionTool({
+        name: 'set_model_response',
+        description:
+          'Call this tool to submit your final response conforming to the output schema. Use this tool only when you have collected all the information and are ready to return the final answer.',
+        parameters: this.outputSchema,
+        execute: async (args, toolContext) => {
+          if (toolContext) {
+            toolContext.actions.skipSummarization = true;
+          }
+          return JSON.stringify(args);
+        },
+      });
+      allTools.push(setModelResponseTool);
+    }
+    for (const toolUnion of allTools) {
       const toolContext = new Context({invocationContext});
 
       // process all tools from this tool union
@@ -758,7 +811,8 @@ export class LlmAgent extends BaseAgent {
         // The allowedTools set is populated by request processors.
         return (
           !llmRequest.allowedTools ||
-          llmRequest.allowedTools.includes(tool.name)
+          llmRequest.allowedTools.includes(tool.name) ||
+          tool.name === 'set_model_response'
         );
       });
 
@@ -880,8 +934,14 @@ export class LlmAgent extends BaseAgent {
 
     if (mergedEvent.content) {
       const functionCalls = getFunctionCalls(mergedEvent);
-      if (functionCalls?.length) {
-        // TODO - b/425992518: rename topopulate if missing.
+      const setModelResponseCall = functionCalls.find(
+        (call) => call.name === 'set_model_response',
+      );
+      if (setModelResponseCall) {
+        const args = setModelResponseCall.args;
+        mergedEvent.content.parts = [{text: JSON.stringify(args)}];
+        mergedEvent.actions.skipSummarization = true;
+      } else if (functionCalls && functionCalls.length) {
         populateClientFunctionCallId(mergedEvent);
         // TODO - b/425992518: hacky, transaction log, simplify.
         // Long running is a property of tool in registry.

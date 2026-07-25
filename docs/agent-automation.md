@@ -25,7 +25,9 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 ## Flow
 
 1. `agent-router.yml` maps label events to reusable workflows; issue `agent:implement` intentionally enters trusted triage first.
-2. Proposal generation receives a bounded public snapshot of current `main` workflow health and treats that snapshot as evidence, never as instructions.
+2. Proposal generation reads `VISION.md` and receives a bounded public snapshot of the 20 most recent issue titles plus current `main` workflow health.
+   It treats that snapshot as evidence, never as instructions.
+   No later triage, implementation, or review lane reads `VISION.md`; the created issue becomes their source of truth.
 3. Triage deterministically seals the issue snapshot, priority, and explicit proof request without a model call, then applies managed labels/comments and dispatches implementation.
    Read-only GitHub API calls use bounded exponential retries, managed comments and pull metadata use GitHub GraphQL with independent REST read fallbacks, PR file inventories use head-bound paginated GraphQL with immutable rename verification, diffs use exact commit comparison, and PR creation or updates use GraphQL mutations.
 4. Expensive proposer, implementation, review, no-mistakes, and proof jobs share deterministic slot groups from `.agent/config.json`.
@@ -135,6 +137,31 @@ That explicit label skips only the paid no-mistakes model call.
 It does not skip triage, CI, independent review, requested proof, exact-head checks, or merge policy.
 Adding `priority:trivial` after implementation starts cannot bypass no-mistakes because the original source labels are frozen in the trusted validation artifact and must match every immutable implementation seal and the PR metadata.
 
+### Skip no-mistakes For One Existing Head
+
+The repository owner can bypass no-mistakes for one immutable PR head after exact-head CI and independent review pass.
+The workflow records a distinct `no-mistakes-bypass` status, then dispatches automerge.
+It does not create a fake no-mistakes success.
+
+```bash
+REPO=sandeepsalwan1/Vet
+PR=<pull-request-number>
+HEAD_SHA="$(gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid)"
+printf 'Skipping no-mistakes for PR #%s head %s\n' "$PR" "$HEAD_SHA"
+gh workflow run agent-skip-no-mistakes.yml \
+  --repo "$REPO" \
+  --ref main \
+  -f pr-number="$PR" \
+  -f expected-head-sha="$HEAD_SHA"
+```
+
+Only the repository owner can run this bypass.
+CI, agent review, requested proof, trust checks, risk policy, and exact-head automerge remain required.
+The pull request must already have `agent:automerge` and must not have `agent:blocked`.
+The bypass never clears a shared review, proof, triage, or no-mistakes block.
+Use the approved no-mistakes rerun for an existing `ask-user` block.
+Any new PR commit invalidates the bypass because commit statuses are head-scoped.
+
 `agent:triage` remains available when an operator wants to refresh the zero-model intent seal:
 
 ```bash
@@ -165,7 +192,9 @@ The proposer is manual and bounded by default.
 gh workflow run agent-propose.yml --repo "$REPO" --ref main
 ```
 
-It uses the cheapest configured model, creates candidate issues with `agent:triage`, and does not schedule implementation by itself.
+It uses the cheapest configured model and compares candidates with the 20 most recent open and closed issue titles.
+It may return no candidates instead of forcing duplicate or low-value work.
+Created candidates receive `agent:triage`; implementation remains a separate trusted step.
 
 ### Request Proof
 
@@ -229,6 +258,7 @@ Successful low-risk completion has these observable results:
 - required CI checks pass: `quality`, `build`, `scenarios`, `audit`, and `dependency-review`;
 - commit statuses pass: `agent-review` and `no-mistakes`;
 - `priority:trivial` completion requires `agent-review` but intentionally has no no-mistakes status;
+- owner-bypassed completion requires `agent-review` and `no-mistakes-bypass` on the exact PR head;
 - `agent-proof` passes when proof is required;
 - the PR is merged and its agent branch is deleted;
 - baseline CI and CodeQL are dispatched against the exact merge commit;
@@ -246,8 +276,8 @@ Read the newest managed agent comment, answer the decision, or use the exact-hea
 - Optional orchestration reference: Sandcastle demonstrates label-driven AFK orchestration patterns and remains an optional worker adapter.
 - OpenClaw execution reference: Crabbox is the execution and computer-use proof host pattern; credential-free visual fallback runs in a Crabbox local container on GitHub Actions.
 - Implementation and review use GPT-5.4 mini with low reasoning; no-mistakes uses the same mini model with medium reasoning for its stricter structured gate contract.
-- Required final gate: exact-head no-mistakes status with default `ask-user` blocking, except the immutable owner-selected `priority:trivial` cost lane.
-- Safe merge: low or medium risk only after CI, review, required proof, and no-mistakes pass, with the documented trivial-lane exception.
+- Required final gate: exact-head no-mistakes status with default `ask-user` blocking, except the immutable owner-selected `priority:trivial` cost lane or exact-head owner bypass.
+- Safe merge: low or medium risk only after CI, review, required proof, and no-mistakes pass, with the documented skip exceptions.
 - Human boundary: high priority, high risk, unclear product decisions, missing required proof, and unapproved `ask-user` results never auto-merge.
 - Cost boundary: eight active jobs by default, fifteen hard maximum, no scheduled implementation, and visual infrastructure only when explicitly needed.
 
@@ -262,7 +292,7 @@ Read the newest managed agent comment, answer the decision, or use the exact-hea
 - High-risk or high-priority work requires human review.
 - A missing provider, artifact, or lease blocks required visual proof; it does not fake success.
 - Credentialed Crabbox providers require readiness proof; built-in `local-container` receives no provider credentials and must pass the same route, lease, desktop, and media checks.
-- no-mistakes and proof statuses must reflect real execution; the trivial lane omits the no-mistakes status instead of faking success.
+- no-mistakes and proof statuses must reflect real execution; skip lanes use omission or the distinct `no-mistakes-bypass` status instead of faking success.
 - The credentialless no-mistakes gate runs semantic review and native safe auto-fix only.
 - It never rebases, edits privileged automation paths, lints, or publishes directly.
 - A trusted exact-head job alone may publish its sealed patch.
@@ -276,6 +306,7 @@ Read the newest managed agent comment, answer the decision, or use the exact-hea
 
 Normal automerge requires CI checks `quality`, `build`, `scenarios`, `audit`, and `dependency-review`, plus `agent-review` and `no-mistakes` statuses.
 The `priority:trivial` lane requires the same CI and review but omits no-mistakes only when the pre-model validation artifact, immutable PR commit seal, PR metadata, current issue, and current PR all carry that label.
+An exact-head `no-mistakes-bypass` status also permits omission only after a repository-owner manual workflow verifies CI and agent review.
 `agent-proof` is also required when trusted labels or managed triage request visual proof.
 After an agent PR merges, automerge explicitly dispatches baseline CI and CodeQL against the exact merge commit.
 This explicit dispatch is required because GitHub suppresses recursive workflow events caused by its workflow token.

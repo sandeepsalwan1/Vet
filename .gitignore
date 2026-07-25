@@ -55,6 +55,7 @@ dist
 .claude/scheduled_tasks.lock
 
 # Local planning and agent working state
+/.agent-output/
 /.agent/work/
 /.agent/active
 /.agent/PLANS.md
@@ -65,6 +66,7 @@ dist
 # Vendor outreach material (policy: outreach history stays out of repo)
 /pims-outreach.md
 /pims-outreach-drafts.md
+/pims-outreach-drafts-wave3.md
 /whoop-drafts.md
 /idexx-form-answers.txt
 

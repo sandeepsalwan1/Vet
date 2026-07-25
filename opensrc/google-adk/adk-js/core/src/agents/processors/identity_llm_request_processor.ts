@@ -9,7 +9,18 @@ import {LlmRequest, appendInstructions} from '../../models/llm_request.js';
 import {InvocationContext} from '../invocation_context.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
+/**
+ * Appends identity instructions to the {@link LlmRequest} system prompt,
+ * informing the model of the agent's name and description.
+ */
 export class IdentityLlmRequestProcessor extends BaseLlmRequestProcessor {
+  /**
+   * Appends agent name and description as identity instructions to the system
+   * prompt of the request.
+   *
+   * @param invocationContext - The current invocation context.
+   * @param llmRequest - The request object to append instructions to.
+   */
   // eslint-disable-next-line require-yield
   override async *runAsync(
     invocationContext: InvocationContext,

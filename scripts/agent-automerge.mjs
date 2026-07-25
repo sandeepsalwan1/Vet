@@ -623,11 +623,18 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
     gateBlockers.push("agent PR has no effective changes");
   }
 
-  const skipNoMistakes = skipsNoMistakesForCost(config, {
+  const skipNoMistakesForCostLane = skipsNoMistakesForCost(config, {
     metadata,
     pullLabels: prLabels,
     sourceLabels
   });
+  const skipNoMistakesForOwner =
+    statusState(
+      combined?.statuses ?? [],
+      config.automerge.noMistakesBypassStatus,
+      config
+    ) === "success";
+  const skipNoMistakes = skipNoMistakesForCostLane || skipNoMistakesForOwner;
   if (combined?.sha !== pull.head?.sha) gateBlockers.push("commit statuses are not for the current PR head");
   for (const context of config.automerge.requiredStatuses.filter(
     (name) => !(skipNoMistakes && name === "no-mistakes")
@@ -659,6 +666,11 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
     metadata,
     triage,
     skipNoMistakes,
+    noMistakesSkipReason: skipNoMistakesForCostLane
+      ? "priority:trivial"
+      : skipNoMistakesForOwner
+        ? config.automerge.noMistakesBypassStatus
+        : null,
     proofRequested,
     prLabels,
     sourceLabels
