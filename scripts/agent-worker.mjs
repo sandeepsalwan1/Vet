@@ -21,6 +21,8 @@ import {
 const CODEX_SANDBOXES = new Set(["read-only", "workspace-write", "danger-full-access"]);
 const CODEX_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);
 const CODEX_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
+const CODEX_PREFLIGHT_RETRY_DELAYS_MS = Object.freeze([1000, 2000, 4000, 8000, 16000]);
+const CODEX_PREFLIGHT_RETRY_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 const CODEX_LANES = Object.freeze({
   implement: Object.freeze({ model: "model", effort: "effort" }),
   "no-mistakes": Object.freeze({ model: "noMistakesModel", effort: "noMistakesEffort" }),
@@ -181,37 +183,59 @@ export async function preflightCodexModel({
   key,
   model,
   fetchImpl = fetch,
-  signal = AbortSignal.timeout(10_000)
+  signal,
+  retryDelaysMs = CODEX_PREFLIGHT_RETRY_DELAYS_MS,
+  sleepImpl = (delayMs) => new Promise((resolveSleep) => setTimeout(resolveSleep, delayMs)),
+  onRetry = () => {}
 }) {
   const apiKey = nonemptyString(key, "Codex API key");
   const modelId = nonemptyString(model, "Codex model");
-  let response;
-  try {
-    response = await fetchImpl(
-      `https://api.openai.com/v1/models/${encodeURIComponent(modelId)}`,
-      {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        signal
+  for (let attempt = 0; ; attempt += 1) {
+    let response;
+    let failure = "";
+    let retryable = false;
+    try {
+      response = await fetchImpl(
+        `https://api.openai.com/v1/models/${encodeURIComponent(modelId)}`,
+        {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: signal ?? AbortSignal.timeout(10_000)
+        }
+      );
+    } catch (error) {
+      failure = error?.name === "TimeoutError" ? "timeout" : "network error";
+      retryable = signal?.aborted !== true;
+    }
+    if (response && !response.ok) {
+      const status = Number.isInteger(response.status) ? response.status : 0;
+      failure = `HTTP ${status || "unknown"}`;
+      retryable = CODEX_PREFLIGHT_RETRY_STATUSES.has(status);
+    }
+    if (failure) {
+      const delayMs = retryDelaysMs[attempt];
+      if (!retryable || !Number.isSafeInteger(delayMs) || delayMs < 0) {
+        throw new AgentError(`Codex model preflight failed: ${failure}`, 1);
       }
-    );
-  } catch (error) {
-    const reason = error?.name === "TimeoutError" ? "timeout" : "network error";
-    throw new AgentError(`Codex model preflight failed: ${reason}`, 1);
+      onRetry({
+        attempt: attempt + 1,
+        delayMs,
+        failure,
+        maxAttempts: retryDelaysMs.length + 1
+      });
+      await sleepImpl(delayMs);
+      continue;
+    }
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new AgentError("Codex model preflight returned invalid JSON", 1);
+    }
+    if (payload?.id !== modelId || payload?.object !== "model") {
+      throw new AgentError("Codex model preflight returned unexpected metadata", 1);
+    }
+    return { model: modelId };
   }
-  if (!response?.ok) {
-    const status = Number.isInteger(response?.status) ? response.status : 0;
-    throw new AgentError(`Codex model preflight failed: HTTP ${status || "unknown"}`, 1);
-  }
-  let payload;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new AgentError("Codex model preflight returned invalid JSON", 1);
-  }
-  if (payload?.id !== modelId || payload?.object !== "model") {
-    throw new AgentError("Codex model preflight returned unexpected metadata", 1);
-  }
-  return { model: modelId };
 }
 
 export function validateCodexOutputSchema(schema) {
@@ -402,7 +426,12 @@ export async function main(argv = process.argv.slice(2)) {
   const settings = resolveCodexRunSettings(config, args);
   await preflightCodexModel({
     key: invocation.env.CODEX_API_KEY,
-    model: settings.model
+    model: settings.model,
+    onRetry: ({ attempt, delayMs, failure, maxAttempts }) => {
+      process.stderr.write(
+        `Codex model preflight unavailable: ${failure}; retry ${attempt}/${maxAttempts - 1} in ${delayMs}ms\n`
+      );
+    }
   });
   process.stderr.write(
     `Codex model preflight passed: lane=${settings.lane} model=${settings.model}\n`

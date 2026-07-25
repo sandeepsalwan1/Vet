@@ -296,6 +296,69 @@ test("Codex preflight reports only safe HTTP failure metadata", async () => {
   assert.doesNotMatch(String(error), /must-not-appear/);
 });
 
+test("Codex preflight retries transient zero-model failures before succeeding", async () => {
+  const statuses = [503, 429, 200];
+  const retries = [];
+  const sleeps = [];
+
+  const result = await preflightCodexModel({
+    key: "secret",
+    model: "gpt-test",
+    retryDelaysMs: [10, 20],
+    sleepImpl: async (delayMs) => sleeps.push(delayMs),
+    onRetry: (retry) => retries.push(retry),
+    fetchImpl: async () => {
+      const status = statuses.shift();
+      return {
+        ok: status === 200,
+        status,
+        json: async () => ({ id: "gpt-test", object: "model" })
+      };
+    }
+  });
+
+  assert.deepEqual(result, { model: "gpt-test" });
+  assert.deepEqual(sleeps, [10, 20]);
+  assert.deepEqual(
+    retries.map(({ attempt, delayMs, failure, maxAttempts }) => ({
+      attempt,
+      delayMs,
+      failure,
+      maxAttempts
+    })),
+    [
+      { attempt: 1, delayMs: 10, failure: "HTTP 503", maxAttempts: 3 },
+      { attempt: 2, delayMs: 20, failure: "HTTP 429", maxAttempts: 3 }
+    ]
+  );
+});
+
+test("Codex preflight does not retry permanent authorization failures", async () => {
+  let requests = 0;
+  const sleeps = [];
+
+  await assert.rejects(
+    preflightCodexModel({
+      key: "secret",
+      model: "gpt-test",
+      retryDelaysMs: [10],
+      sleepImpl: async (delayMs) => sleeps.push(delayMs),
+      fetchImpl: async () => {
+        requests += 1;
+        return {
+          ok: false,
+          status: 401,
+          json: async () => ({})
+        };
+      }
+    }),
+    /Codex model preflight failed: HTTP 401/
+  );
+
+  assert.equal(requests, 1);
+  assert.deepEqual(sleeps, []);
+});
+
 test("repository Codex output schemas use the supported strict subset", () => {
   const schemaDir = fileURLToPath(new URL("../.agent/schemas", import.meta.url));
   for (const name of readdirSync(schemaDir).filter((entry) => entry.endsWith(".json"))) {
