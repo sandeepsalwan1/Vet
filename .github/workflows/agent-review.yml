@@ -194,6 +194,10 @@ jobs:
         with:
           name: agent-review-context-${{ inputs.pr-number }}
           path: target/.agent-output
+      - name: Capture exact review tree
+        id: candidate-tree
+        working-directory: target
+        run: printf 'tree=%s\n' "$(git rev-parse HEAD^{tree})" >> "$GITHUB_OUTPUT"
       - name: Stage trusted remote input
         run: >-
           node trusted/scripts/agent-crabbox-run.mjs
@@ -230,11 +234,10 @@ jobs:
             cd candidate &&
             export AGENT_TARGET_ROOT="$PWD";
             agent_key="$CODEX_API_KEY"; unset CODEX_API_KEY OPENAI_API_KEY;
-            git init --quiet &&
-            git config user.name "Agent Reviewer" &&
-            git config user.email "agent-review@example.invalid" &&
-            git add --all &&
-            git commit --quiet --no-verify -m "chore: seed exact review head" &&
+            node ../trusted/scripts/agent-crabbox-run.mjs
+            --seed-exact-repository
+            --input-workdir "$PWD"
+            --expected-tree "${{ steps.candidate-tree.outputs.tree }}" --json &&
             npm ci --ignore-scripts --no-audit --no-fund &&
             npm install --global --ignore-scripts --no-audit --no-fund @openai/codex@0.144.1 &&
             codex debug prompt-input 'skill discovery probe'

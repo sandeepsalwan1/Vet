@@ -27,6 +27,7 @@ import {
   restoreDelegatedInput,
   restoreDelegatedOutput,
   restoreImplementationOutput,
+  seedExactRemoteRepository,
   selectCrabboxProvider,
   selectCrabboxProviders,
   stageDelegatedInput,
@@ -696,13 +697,17 @@ test("delegated workspace seals trusted and target files into one syncable git t
 
   mkdirSync(join(target, ".agent"));
   mkdirSync(join(target, ".agent-output"));
+  writeFileSync(join(target, ".gitignore"), "ignored-tracked.txt\n.agent-output/\n");
   writeFileSync(join(target, ".agent/config.json"), "{}\n");
   writeFileSync(join(target, "candidate.txt"), "candidate\n");
+  writeFileSync(join(target, "ignored-tracked.txt"), "preserve tracked ignore\n");
   writeFileSync(join(target, "untracked-secret.txt"), "must not copy\n");
   writeFileSync(join(target, ".agent-output/review-prompt.md"), "review\n");
   writeFileSync(join(target, ".agent-output/review.schema.json"), "{}\n");
-  git(target, "add", ".agent/config.json", "candidate.txt");
+  git(target, "add", ".agent/config.json", ".gitignore", "candidate.txt");
+  git(target, "add", "--force", "ignored-tracked.txt");
   git(target, "commit", "--quiet", "-m", "target");
+  const targetTree = git(target, "rev-parse", "HEAD^{tree}");
   stageDelegatedInput("reviewRemote", target);
 
   const prepared = prepareDelegatedWorkspace({
@@ -722,6 +727,10 @@ test("delegated workspace seals trusted and target files into one syncable git t
     ),
     "review\n"
   );
+  assert.equal(
+    readFileSync(join(bundle, "candidate/ignored-tracked.txt"), "utf8"),
+    "preserve tracked ignore\n"
+  );
   assert.equal(existsSync(join(bundle, "candidate/untracked-secret.txt")), false);
   assert.equal(existsSync(join(bundle, "trusted/.git")), false);
   assert.equal(existsSync(join(bundle, "candidate/.git")), false);
@@ -735,7 +744,26 @@ test("delegated workspace seals trusted and target files into one syncable git t
     git(bundle, "ls-files"),
     /candidate\/\.agent\/remote-input\/reviewRemote\/review-prompt\.md/
   );
+  assert.match(
+    git(bundle, "ls-files"),
+    /candidate\/ignored-tracked\.txt/
+  );
   assert.equal(git(bundle, "status", "--porcelain"), "");
+  restoreDelegatedInput("reviewRemote", join(bundle, "candidate"));
+  const seeded = seedExactRemoteRepository(join(bundle, "candidate"), {
+    expectedTree: targetTree,
+    branch: "agent/test"
+  });
+  assert.equal(seeded.tree, targetTree);
+  assert.equal(seeded.branch, "agent/test");
+  assert.equal(
+    git(join(bundle, "candidate"), "ls-files", ".agent-output"),
+    ""
+  );
+  assert.equal(
+    git(join(bundle, "candidate"), "ls-files", ".agent/remote-input"),
+    ""
+  );
   assert.throws(
     () =>
       prepareDelegatedWorkspace({

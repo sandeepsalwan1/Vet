@@ -683,6 +683,12 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
     /--prepare-delegated-workspace "\$RUNNER_TEMP\/agent-review-workspace"/
   );
   assert.match(generate, /--restore-input-lane reviewRemote/);
+  assert.match(generate, /name: Capture exact review tree/);
+  assert.match(generate, /--seed-exact-repository/);
+  assert.match(
+    generate,
+    /--expected-tree "\$\{\{ steps\.candidate-tree\.outputs\.tree \}\}"/
+  );
   assert.match(generate, /REMOTE_COMMAND: >-\n\s+set -e;/);
   assert.ok(
     generate.indexOf("--restore-input-lane reviewRemote") <

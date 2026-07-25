@@ -581,6 +581,69 @@ function copyTrackedTree(sourceRoot, destinationRoot, label) {
   return paths.length;
 }
 
+export function seedExactRemoteRepository(
+  workdir,
+  { expectedTree = "", branch = "" } = {}
+) {
+  const root = resolveCrabboxWorkdir(workdir);
+  if (expectedTree && !/^[0-9a-f]{40}$/.test(expectedTree)) {
+    throw new AgentError("Crabbox expected tree must be a full Git tree SHA", 2);
+  }
+  runCommand("git", ["init", "--quiet"], { cwd: root });
+  runCommand("git", ["config", "user.name", "Agent Remote Workspace"], {
+    cwd: root
+  });
+  runCommand(
+    "git",
+    ["config", "user.email", "agent-workspace@example.invalid"],
+    { cwd: root }
+  );
+  // A fresh index treats tracked-but-ignored source files as ignored.
+  // Force the controlled tree while excluding the private handoff state.
+  runCommand(
+    "git",
+    [
+      "add",
+      "--force",
+      "--all",
+      "--",
+      ".",
+      ":(exclude).agent-output",
+      ":(exclude).agent/remote-input"
+    ],
+    { cwd: root }
+  );
+  runCommand(
+    "git",
+    [
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "--no-verify",
+      "-m",
+      "chore: seed exact remote workspace"
+    ],
+    { cwd: root }
+  );
+  const tree = runCommand("git", ["rev-parse", "HEAD^{tree}"], {
+    cwd: root
+  }).stdout.trim();
+  if (expectedTree && tree !== expectedTree) {
+    throw new AgentError("candidate checkout does not match prepared PR tree", 1);
+  }
+  if (branch) {
+    runCommand("git", ["switch", "-C", branch, "HEAD"], { cwd: root });
+  }
+  return {
+    workdir: realpathSync(root),
+    head: runCommand("git", ["rev-parse", "HEAD"], { cwd: root }).stdout.trim(),
+    tree,
+    branch: runCommand("git", ["branch", "--show-current"], {
+      cwd: root
+    }).stdout.trim()
+  };
+}
+
 export function prepareDelegatedWorkspace({
   lane,
   trustedWorkdir,
@@ -631,7 +694,9 @@ export function prepareDelegatedWorkspace({
     ["config", "user.email", "agent-workspace@example.invalid"],
     { cwd: bundleRoot }
   );
-  runCommand("git", ["add", "--all"], { cwd: bundleRoot });
+  // Only copied tracked files and the bounded handoff exist here.
+  // Force-add preserves source files that remain tracked despite local ignore rules.
+  runCommand("git", ["add", "--force", "--all"], { cwd: bundleRoot });
   runCommand(
     "git",
     ["commit", "--quiet", "--no-verify", "-m", "chore: seal delegated workspace"],
@@ -1516,6 +1581,20 @@ export function runCrabboxLane(options) {
 
 export async function main() {
   const args = parseArgs();
+  if (args["seed-exact-repository"]) {
+    const result = seedExactRemoteRepository(
+      args["input-workdir"] ?? repoRoot(),
+      {
+        expectedTree: String(args["expected-tree"] ?? ""),
+        branch: String(args.branch ?? "")
+      }
+    );
+    finish(
+      { ok: true, message: "seeded exact remote Git repository", ...result },
+      Boolean(args.json)
+    );
+    return;
+  }
   if (args["prepare-delegated-workspace"]) {
     if (
       !args["input-lane"] ||

@@ -130,11 +130,16 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
     /--record-file "\$RUNNER_TEMP\/agent-no-mistakes-workspace\/candidate\/\.agent-output\/no-mistakes-remote\.json"/
   );
   assert.match(workflow, /head_tree: \$\{\{ steps\.prepare\.outputs\.head_tree \}\}/);
-  assert.match(workflow, /test "\$\(git rev-parse HEAD\^\{tree\}\)" = "\$expected_tree"/);
+  assert.match(
+    workflow,
+    /--seed-exact-repository[\s\S]*?--expected-tree "\$expected_tree"[\s\S]*?--branch "\$head_ref"/,
+  );
   assert.match(workflow, /--expected-source-tree "\$expected_tree"/);
   assert.match(workflow, /--intent-file \.agent-output\/no-mistakes-intent/);
   assert.match(workflow, /trap preserve_setup_failure EXIT/);
   assert.match(workflow, /--write-setup-failure/);
+  assert.doesNotMatch(workflow, /\n\s+--write-setup-failure/);
+  assert.doesNotMatch(workflow, /\n\s+--emit-output-lane noMistakesRemote/);
   assert.match(
     workflow,
     /if node \.\.\/trusted\/scripts\/agent-no-mistakes-gate\.mjs[\s\S]*?--write-setup-failure[\s\S]*?--emit-output-lane noMistakesRemote; then[\s\S]*?exit 0;/,

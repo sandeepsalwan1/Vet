@@ -255,16 +255,8 @@ jobs:
                 [ ! -s "$result_file" ] ||
                 [ ! -s .agent-output/model-usage.json ]; then
                 unset agent_key CODEX_API_KEY OPENAI_API_KEY;
-                if node ../trusted/scripts/agent-no-mistakes-gate.mjs
-                  --write-setup-failure
-                  --expected-head "$external_head"
-                  --result-file "$result_file"
-                  --usage-file .agent-output/model-usage.json
-                  --model "${{ needs.prepare.outputs.backend_model }}"
-                  --effort "${{ needs.prepare.outputs.backend_effort }}"
-                  --json >/dev/null 2>&1 &&
-                  node ../trusted/scripts/agent-crabbox-run.mjs
-                  --emit-output-lane noMistakesRemote; then
+                if node ../trusted/scripts/agent-no-mistakes-gate.mjs --write-setup-failure --expected-head "$external_head" --result-file "$result_file" --usage-file .agent-output/model-usage.json --model "${{ needs.prepare.outputs.backend_model }}" --effort "${{ needs.prepare.outputs.backend_effort }}" --json >/dev/null 2>&1 &&
+                  node ../trusted/scripts/agent-crabbox-run.mjs --emit-output-lane noMistakesRemote; then
                   exit 0;
                 fi;
                 if [ "$exit_code" -eq 0 ]; then exit_code=1; fi;
@@ -272,14 +264,11 @@ jobs:
               exit "$exit_code";
             };
             trap preserve_setup_failure EXIT;
-            git init --quiet &&
-            git config user.name "no-mistakes Gate" &&
-            git config user.email "no-mistakes@example.invalid" &&
-            git add --all &&
-            git commit --quiet --allow-empty --no-verify -m "chore: seed exact gate head" &&
-            source_head="$(git rev-parse HEAD)" &&
-            test "$(git rev-parse HEAD^{tree})" = "$expected_tree" &&
-            git switch -C "$head_ref" "$source_head" &&
+            node ../trusted/scripts/agent-crabbox-run.mjs
+            --seed-exact-repository
+            --input-workdir "$PWD"
+            --expected-tree "$expected_tree"
+            --branch "$head_ref" --json &&
             npm ci --ignore-scripts --no-audit --no-fund &&
             npm run typecheck &&
             npm run build &&

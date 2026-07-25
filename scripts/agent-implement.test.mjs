@@ -580,14 +580,18 @@ test("implementation workflow isolates candidate checks from credentials, artifa
     remote,
     /generated: \$\{\{ steps\.generate\.outcome == 'success' && steps\.implementation-artifact\.outcome == 'success' \}\}/
   );
-  assert.match(remote, /git init --quiet/);
-  assert.match(remote, /git commit --quiet --no-verify/);
+  assert.match(remote, /name: Capture exact implementation tree/);
+  assert.match(remote, /--seed-exact-repository/);
+  assert.match(
+    remote,
+    /--expected-tree "\$\{\{ steps\.source-tree\.outputs\.tree \}\}"/
+  );
   assert.match(remote, /--stage-input-lane implementRemote/);
   assert.match(remote, /--restore-input-lane implementRemote/);
   assert.match(remote, /REMOTE_COMMAND: >-\n\s+set -e;/);
   assert.ok(
     remote.indexOf("--restore-input-lane implementRemote") <
-      remote.indexOf("git init --quiet")
+      remote.indexOf("--seed-exact-repository")
   );
   assert.match(remote, /codex debug prompt-input 'skill discovery probe'/);
   assert.match(remote, /node scripts\/agent-skill-discovery\.mjs/);
