@@ -4,7 +4,7 @@
   "additionalProperties": false,
   "required": ["version", "summary", "changes", "checks", "intentAddendum"],
   "properties": {
-    "version": { "const": 1 },
+    "version": { "type": "integer", "const": 1 },
     "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
     "changes": {
       "type": "array",
@@ -53,7 +53,7 @@
           "additionalProperties": false,
           "required": ["version", "tasks"],
           "properties": {
-            "version": { "const": 1 },
+            "version": { "type": "integer", "const": 1 },
             "tasks": {
               "type": "array",
               "maxItems": 20,
@@ -72,7 +72,6 @@
                     "type": "array",
                     "minItems": 1,
                     "maxItems": 50,
-                    "uniqueItems": true,
                     "items": { "type": "string", "pattern": "^AC[1-9][0-9]*$" }
                   },
                   "route": {
@@ -110,13 +109,13 @@
   },
   "$defs": {
     "action": {
-      "oneOf": [
+      "anyOf": [
         {
           "type": "object",
           "additionalProperties": false,
           "required": ["type", "path"],
           "properties": {
-            "type": { "const": "navigate" },
+            "type": { "type": "string", "const": "navigate" },
             "path": { "type": "string", "pattern": "^/[A-Za-z0-9/_-]*$", "maxLength": 1000 }
           }
         },
@@ -125,7 +124,7 @@
           "additionalProperties": false,
           "required": ["type", "selector"],
           "properties": {
-            "type": { "const": "click" },
+            "type": { "type": "string", "const": "click" },
             "selector": { "type": "string", "minLength": 1, "maxLength": 1000 }
           }
         },
@@ -134,7 +133,7 @@
           "additionalProperties": false,
           "required": ["type", "selector", "value"],
           "properties": {
-            "type": { "const": "fill" },
+            "type": { "type": "string", "const": "fill" },
             "selector": { "type": "string", "minLength": 1, "maxLength": 1000 },
             "value": { "type": "string", "maxLength": 1000 }
           }
@@ -144,7 +143,7 @@
           "additionalProperties": false,
           "required": ["type", "key"],
           "properties": {
-            "type": { "const": "press" },
+            "type": { "type": "string", "const": "press" },
             "key": { "type": "string", "minLength": 1, "maxLength": 1000 }
           }
         },
@@ -153,20 +152,20 @@
           "additionalProperties": false,
           "required": ["type", "milliseconds"],
           "properties": {
-            "type": { "const": "wait" },
+            "type": { "type": "string", "const": "wait" },
             "milliseconds": { "type": "integer", "minimum": 0, "maximum": 10000 }
           }
         }
       ]
     },
     "assertion": {
-      "oneOf": [
+      "anyOf": [
         {
           "type": "object",
           "additionalProperties": false,
           "required": ["type", "selector"],
           "properties": {
-            "type": { "enum": ["visible", "hidden"] },
+            "type": { "type": "string", "enum": ["visible", "hidden"] },
             "selector": { "type": "string", "minLength": 1, "maxLength": 1000 }
           }
         },
@@ -175,7 +174,7 @@
           "additionalProperties": false,
           "required": ["type", "selector", "value"],
           "properties": {
-            "type": { "const": "text" },
+            "type": { "type": "string", "const": "text" },
             "selector": { "type": "string", "minLength": 1, "maxLength": 1000 },
             "value": { "type": "string", "maxLength": 1000 }
           }
@@ -185,7 +184,7 @@
           "additionalProperties": false,
           "required": ["type", "path"],
           "properties": {
-            "type": { "const": "url" },
+            "type": { "type": "string", "const": "url" },
             "path": { "type": "string", "pattern": "^/[A-Za-z0-9/_-]*$", "maxLength": 1000 }
           }
         },
@@ -194,7 +193,7 @@
           "additionalProperties": false,
           "required": ["type", "selector", "name", "value"],
           "properties": {
-            "type": { "const": "attribute" },
+            "type": { "type": "string", "const": "attribute" },
             "selector": { "type": "string", "minLength": 1, "maxLength": 1000 },
             "name": { "type": "string", "minLength": 1, "maxLength": 1000 },
             "value": { "type": "string", "maxLength": 1000 }

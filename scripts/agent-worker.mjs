@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
-import { resolve } from "node:path";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -72,7 +72,7 @@ function codexArgs(args, config) {
   if (!promptFile) throw new AgentError("missing --prompt-file", 2);
   const outputFile = args["output-file"];
   const settings = resolveCodexRunSettings(config, args);
-  const command = ["exec", "--json", "--sandbox", settings.sandbox];
+  const command = ["exec", "--ephemeral", "--json", "--sandbox", settings.sandbox];
   if (settings.model) {
     command.push("--model", settings.model);
   }
@@ -85,6 +85,7 @@ function codexArgs(args, config) {
       ...new Set([
         config.secrets?.agentAuth,
         "CODEX_API_KEY",
+        "CODEX_HOME",
         "OPENAI_API_KEY",
         "GITHUB_TOKEN",
         "GH_TOKEN",
@@ -213,6 +214,83 @@ export async function preflightCodexModel({
   return { model: modelId };
 }
 
+export function validateCodexOutputSchema(schema) {
+  if (!schema || Array.isArray(schema) || schema.type !== "object" || Object.hasOwn(schema, "anyOf")) {
+    throw new AgentError("Codex output schema root must be one object", 2);
+  }
+  const supportedKeywords = new Set([
+    "$defs",
+    "$ref",
+    "$schema",
+    "additionalProperties",
+    "anyOf",
+    "const",
+    "description",
+    "enum",
+    "exclusiveMaximum",
+    "exclusiveMinimum",
+    "format",
+    "items",
+    "maximum",
+    "maxItems",
+    "maxLength",
+    "minimum",
+    "minItems",
+    "minLength",
+    "multipleOf",
+    "pattern",
+    "properties",
+    "required",
+    "title",
+    "type"
+  ]);
+  const visit = (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new AgentError("Codex output schema contains an invalid schema node", 2);
+    }
+    const unsupported = Object.keys(value).find((key) => !supportedKeywords.has(key));
+    if (unsupported) {
+      throw new AgentError(`Codex output schema uses unsupported ${unsupported}`, 2);
+    }
+    if (
+      (Object.hasOwn(value, "const") || Object.hasOwn(value, "enum")) &&
+      typeof value.type !== "string"
+    ) {
+      throw new AgentError("Codex output schema constants and enums require a type", 2);
+    }
+    if (value.type === "object") {
+      const properties = Object.keys(value.properties ?? {}).sort();
+      const required = Array.isArray(value.required) ? [...value.required].sort() : [];
+      if (
+        value.additionalProperties !== false ||
+        JSON.stringify(properties) !== JSON.stringify(required)
+      ) {
+        throw new AgentError(
+          "Codex output schema objects require all fields and additionalProperties false",
+          2
+        );
+      }
+    }
+    for (const mapName of ["$defs", "properties"]) {
+      const map = value[mapName];
+      if (!map) continue;
+      if (typeof map !== "object" || Array.isArray(map)) {
+        throw new AgentError(`Codex output schema has invalid ${mapName}`, 2);
+      }
+      for (const child of Object.values(map)) visit(child);
+    }
+    if (value.items) visit(value.items);
+    if (value.anyOf) {
+      if (!Array.isArray(value.anyOf) || value.anyOf.length === 0) {
+        throw new AgentError("Codex output schema has invalid anyOf", 2);
+      }
+      for (const child of value.anyOf) visit(child);
+    }
+  };
+  visit(schema);
+  return schema;
+}
+
 export const WORKER_BACKEND_ADAPTERS = Object.freeze({
   codex: Object.freeze({
     executable: "codex",
@@ -312,6 +390,15 @@ export async function main(argv = process.argv.slice(2)) {
     );
     return;
   }
+  if (args.schema) {
+    let schema;
+    try {
+      schema = JSON.parse(readText(args.schema));
+    } catch {
+      throw new AgentError("Codex output schema is not valid JSON", 2);
+    }
+    validateCodexOutputSchema(schema);
+  }
   const settings = resolveCodexRunSettings(config, args);
   await preflightCodexModel({
     key: invocation.env.CODEX_API_KEY,
@@ -320,6 +407,8 @@ export async function main(argv = process.argv.slice(2)) {
   process.stderr.write(
     `Codex model preflight passed: lane=${settings.lane} model=${settings.model}\n`
   );
+  const workerStateDir = mkdtempSync(join(tmpdir(), "vet-codex-home-"));
+  invocation.env.CODEX_HOME = workerStateDir;
   const result = runCommand(invocation.executable, invocation.args, {
     env: invocation.env,
     input: readText(args["prompt-file"]),

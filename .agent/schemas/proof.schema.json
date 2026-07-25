@@ -14,8 +14,8 @@
     "blocker"
   ],
   "properties": {
-    "proofKind": { "enum": ["none", "CI", "UI", "GIF"] },
-    "status": { "enum": ["passed", "skipped", "blocked", "failed"] },
+    "proofKind": { "type": "string", "enum": ["none", "CI", "UI", "GIF"] },
+    "status": { "type": "string", "enum": ["passed", "skipped", "blocked", "failed"] },
     "commands": {
       "type": "array",
       "items": { "type": "string" }

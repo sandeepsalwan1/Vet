@@ -25,9 +25,10 @@
       "type": "array",
       "items": { "type": "string" }
     },
-    "remainingRisk": { "enum": ["low", "medium", "high"] },
-    "proofNeeded": { "enum": ["none", "CI", "UI", "GIF", "service"] },
+    "remainingRisk": { "type": "string", "enum": ["low", "medium", "high"] },
+    "proofNeeded": { "type": "string", "enum": ["none", "CI", "UI", "GIF", "service"] },
     "mergeRecommendation": {
+      "type": "string",
       "enum": ["ready", "ready-human-review", "blocked"]
     },
     "humanQuestion": { "type": "string" },

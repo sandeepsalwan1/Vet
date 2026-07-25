@@ -13,13 +13,14 @@
     "humanQuestion"
   ],
   "properties": {
-    "value": { "enum": ["low", "medium", "high"] },
-    "priority": { "enum": ["low", "medium", "high"] },
-    "risk": { "enum": ["low", "medium", "high"] },
-    "alignment": { "enum": ["yes", "no", "unclear"] },
+    "value": { "type": "string", "enum": ["low", "medium", "high"] },
+    "priority": { "type": "string", "enum": ["low", "medium", "high"] },
+    "risk": { "type": "string", "enum": ["low", "medium", "high"] },
+    "alignment": { "type": "string", "enum": ["yes", "no", "unclear"] },
     "implementationScope": { "type": "string" },
-    "proofNeeded": { "enum": ["none", "CI", "UI", "GIF", "service"] },
+    "proofNeeded": { "type": "string", "enum": ["none", "CI", "UI", "GIF", "service"] },
     "automationDecision": {
+      "type": "string",
       "enum": ["implement", "manual-review", "blocked", "reject"]
     },
     "humanQuestion": { "type": "string" }

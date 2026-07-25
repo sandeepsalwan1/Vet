@@ -5,6 +5,7 @@
   "required": ["status", "findings", "checksRun", "blocker"],
   "properties": {
     "status": {
+      "type": "string",
       "enum": ["passed", "blocked", "failed", "skipped"]
     },
     "findings": {

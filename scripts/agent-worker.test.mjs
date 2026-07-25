@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -10,7 +12,8 @@ import {
   preflightCodexModel,
   resolveCodexRunSettings,
   resolveCodexSettings,
-  resolveWorkerBackend
+  resolveWorkerBackend,
+  validateCodexOutputSchema
 } from "./agent-worker.mjs";
 
 function config(overrides = {}) {
@@ -65,8 +68,9 @@ test("Codex lanes select configured overrides and otherwise inherit implementati
     effort: "medium",
     sandbox: "workspace-write"
   });
-  assert.deepEqual(invocation.args.slice(0, 8), [
+  assert.deepEqual(invocation.args.slice(0, 9), [
     "exec",
+    "--ephemeral",
     "--json",
     "--sandbox",
     "workspace-write",
@@ -132,6 +136,7 @@ test("Codex adapter applies config defaults and scopes its auth name", () => {
   assert.equal(invocation.executable, "codex");
   assert.deepEqual(invocation.args, [
     "exec",
+    "--ephemeral",
     "--json",
     "--sandbox",
     "workspace-write",
@@ -140,7 +145,7 @@ test("Codex adapter applies config defaults and scopes its auth name", () => {
     "--config",
     'model_reasoning_effort="medium"',
     "--config",
-    'shell_environment_policy.exclude=["OPENAI_API_KEY","CODEX_API_KEY","GITHUB_TOKEN","GH_TOKEN","AGENT_PAT","CRABBOX_COORDINATOR_TOKEN"]',
+    'shell_environment_policy.exclude=["OPENAI_API_KEY","CODEX_API_KEY","CODEX_HOME","GITHUB_TOKEN","GH_TOKEN","AGENT_PAT","CRABBOX_COORDINATOR_TOKEN"]',
     "--output-schema",
     "schema.json",
     "--output-last-message",
@@ -289,4 +294,75 @@ test("Codex preflight reports only safe HTTP failure metadata", async () => {
   );
 
   assert.doesNotMatch(String(error), /must-not-appear/);
+});
+
+test("repository Codex output schemas use the supported strict subset", () => {
+  const schemaDir = fileURLToPath(new URL("../.agent/schemas", import.meta.url));
+  for (const name of readdirSync(schemaDir).filter((entry) => entry.endsWith(".json"))) {
+    validateCodexOutputSchema(
+      JSON.parse(readFileSync(join(schemaDir, name), "utf8"))
+    );
+  }
+});
+
+test("Codex output schema validation rejects unsupported or optional objects", () => {
+  assert.doesNotThrow(() =>
+    validateCodexOutputSchema({
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        not: { type: "string" }
+      },
+      required: ["not"]
+    })
+  );
+  assert.throws(
+    () =>
+      validateCodexOutputSchema({
+        type: "object",
+        additionalProperties: false,
+        properties: {},
+        required: [],
+        oneOf: []
+      }),
+    /unsupported oneOf/
+  );
+  assert.throws(
+    () =>
+      validateCodexOutputSchema({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          values: {
+            type: "array",
+            uniqueItems: true,
+            items: { type: "string" }
+          }
+        },
+        required: ["values"]
+      }),
+    /unsupported uniqueItems/
+  );
+  assert.throws(
+    () =>
+      validateCodexOutputSchema({
+        type: "object",
+        additionalProperties: false,
+        properties: { value: { type: "string" } },
+        required: []
+      }),
+    /require all fields/
+  );
+  assert.throws(
+    () =>
+      validateCodexOutputSchema({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          status: { enum: ["passed"] }
+        },
+        required: ["status"]
+      }),
+    /constants and enums require a type/
+  );
 });

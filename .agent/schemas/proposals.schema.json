@@ -14,10 +14,10 @@
         "properties": {
           "title": { "type": "string", "minLength": 8, "maxLength": 120 },
           "body": { "type": "string", "minLength": 20 },
-          "value": { "enum": ["low", "medium", "high"] },
-          "priority": { "enum": ["low", "medium", "high"] },
-          "risk": { "enum": ["low", "medium", "high"] },
-          "proof": { "enum": ["none", "CI", "UI", "GIF"] }
+          "value": { "type": "string", "enum": ["low", "medium", "high"] },
+          "priority": { "type": "string", "enum": ["low", "medium", "high"] },
+          "risk": { "type": "string", "enum": ["low", "medium", "high"] },
+          "proof": { "type": "string", "enum": ["none", "CI", "UI", "GIF"] }
         }
       }
     }
