@@ -14,7 +14,7 @@ They are separate tenants with separate branding, settings, and data.
 - `packages/client-request`: shared public request guard, validation, dedupe, and task creation.
 - `opensrc`: upstream mirror/provenance notes for dependencies that need source inspection.
 - `.agent` and `.github/workflows/agent-*`: issue-label automation config, prompts, and workflows.
-- `skills` and `.claude/skills`: project-local agent launch/scraping skills.
+- `.agents/skills` and `.claude/skills`: project-local agent launch/scraping skills.
 
 Docs:
 
