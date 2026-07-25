@@ -168,6 +168,16 @@ test("existing open PR and orphan branch names survive issue title changes", () 
   assert.equal(chooseAgentBranch(preferred, null, ["agent/issue-42-orphan"]), "agent/issue-42-orphan");
 });
 
+test("preferred branch truncation preserves a valid final slug segment", () => {
+  assert.equal(
+    preferredBranchName(
+      56,
+      "Proofless acceptance: correct the README project skill path",
+    ),
+    "agent/issue-56-proofless-acceptance-correct-the-readme-project",
+  );
+});
+
 test("pull discovery uses paginated GraphQL and normalizes REST-shaped fields", () => {
   let graphqlArgs;
   const pulls = listPulls(config, {
