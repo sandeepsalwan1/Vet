@@ -418,6 +418,7 @@ jobs:
           ARTIFACT_URL: ${{ needs.remote.outputs.artifact_url || needs.service.outputs.artifact_url }}
           STATUS_SHA: ${{ needs.prepare.outputs.sha }}
           TERMINAL_MARKER: ${{ runner.temp }}/agent-proof-terminal.json
+          COST_OUTCOME_FILE: ${{ runner.temp }}/agent-proof-cost-outcome.json
         run: |
           args=(
             --finalize
@@ -428,6 +429,7 @@ jobs:
             --service-config-job-result "$SERVICE_CONFIG_JOB_RESULT"
             --status-sha "$STATUS_SHA"
             --terminal-marker "$TERMINAL_MARKER"
+            --cost-outcome-file "$COST_OUTCOME_FILE"
             --json
           )
           if [ -n "$ARTIFACT_URL" ]; then
@@ -452,13 +454,19 @@ jobs:
           TERMINAL_MARKER: ${{ runner.temp }}/agent-proof-terminal.json
         run: |
           state=failure
+          proof_status=""
           description="agent proof workflow failed before terminal result"
           if [ -s "$TERMINAL_MARKER" ] && \
             [ "$(jq -r '.sha // ""' "$TERMINAL_MARKER")" = "$STATUS_SHA" ]; then
             marker_state="$(jq -r '.state // ""' "$TERMINAL_MARKER")"
+            marker_status="$(jq -r '.status // ""' "$TERMINAL_MARKER")"
             marker_description="$(jq -r '.description // ""' "$TERMINAL_MARKER")"
             if [ "$marker_state" = success ] || [ "$marker_state" = failure ]; then
               state="$marker_state"
+            fi
+            if [ "$marker_status" = passed ] || [ "$marker_status" = failed ] || \
+              [ "$marker_status" = blocked ] || [ "$marker_status" = skipped ]; then
+              proof_status="$marker_status"
             fi
             if [ -n "$marker_description" ]; then
               description="${marker_description:0:140}"
@@ -470,20 +478,19 @@ jobs:
             -f description="$description" \
             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           echo "state=$state" >> "$GITHUB_OUTPUT"
+          echo "proof_status=$proof_status" >> "$GITHUB_OUTPUT"
       - name: Record proof provider cost
-        if: inputs.target-kind == 'pr' && steps.terminal.outputs.state == 'success'
+        if: inputs.target-kind == 'pr' && steps.terminal.outputs.proof_status == 'passed'
         env:
           GH_TOKEN: ${{ github.token }}
           STATUS_SHA: ${{ needs.prepare.outputs.sha }}
-          REMOTE_OUTCOME_B64: ${{ needs.remote.outputs.outcome_b64 }}
-          LOCAL_OUTCOME_B64: ${{ needs.local.outputs.outcome_b64 || needs.service.outputs.outcome_b64 }}
+          COST_OUTCOME_FILE: ${{ runner.temp }}/agent-proof-cost-outcome.json
         run: >-
           node trusted/scripts/agent-cost.mjs
           --pr-number "${{ inputs.target-number }}"
           --head-sha "$STATUS_SHA"
           --lane proof
-          --proof-remote-outcome-base64 "$REMOTE_OUTCOME_B64"
-          --proof-local-outcome-base64 "$LOCAL_OUTCOME_B64"
+          --proof-outcome-file "$COST_OUTCOME_FILE"
           --retry-reason initial
           --effect proof
           --json
