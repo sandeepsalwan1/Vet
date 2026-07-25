@@ -128,7 +128,7 @@ function AppRootContent({ audience }: { audience: Audience }) {
       <main className="entryShell">
         <section className="entryPanel bootPanel">
           <ClinicWordmark name={clinic.name} />
-          <p className="bootLine">{view.kind === "redirecting" ? "Taking you there…" : "Opening…"}</p>
+          <p className="bootLine">{view.kind === "redirecting" ? "Taking you there…" : "Opening your clinic…"}</p>
         </section>
       </main>
     );
