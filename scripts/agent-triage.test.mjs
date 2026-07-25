@@ -243,8 +243,9 @@ test("lightweight triage spends no model judgment on routine ambiguity", () => {
 test("lightweight triage blocks vague work once before model spend", () => {
   for (const [request, acceptance] of [
     ["fix broken ui", "fix broken ui"],
+    ["fix the broken ui", "The UI works correctly."],
     ["delete dead code", "delete dead code"],
-    ["fix broken ui", "The UI works correctly."]
+    ["delete the dead code", "The dead code is removed."]
   ]) {
     const result = lightweightTriageDecision(config, {
       number: 35,

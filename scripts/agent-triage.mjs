@@ -327,7 +327,7 @@ export function lightweightTriageDecision(config, issue) {
     /\b(?:disable|bypass|remove)\b[\s\S]{0,60}\b(?:branch protection|security gate|required checks|authentication)\b/i.test(
       requestText
     );
-  const vagueOutcome = /^(?:fix broken ui|delete dead code)$/i.test(
+  const vagueOutcome = /^(?:fix (?:the )?broken ui|delete (?:the )?dead code)$/i.test(
     compactOutcome
   );
   const genericAcceptance =
