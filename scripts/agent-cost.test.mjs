@@ -9,6 +9,7 @@ import {
   parseCostLedger,
   priceModelUsage,
   priceProviderUsage,
+  proofOutcomeRecord,
   proofRemoteRecord,
   recordCost,
   validateModelUsage
@@ -152,27 +153,27 @@ test("Hetzner estimate uses the pinned beast-class ceiling and hourly rounding",
 });
 
 test("proof cost accepts only a passing terminal outcome and actual provider provenance", () => {
-  const encoded = Buffer.from(
-    JSON.stringify({
-      terminal: true,
-      result: {
-        proofKind: "GIF",
-        status: "passed",
-        provider: "local-container",
-        leaseId: "local_123"
-      },
-      timing: {
-        provider: "local-container",
-        leaseId: "local_123",
-        totalMs: 12_000,
-        exitCode: 0
-      }
-    })
-  ).toString("base64");
+  const outcome = {
+    terminal: true,
+    result: {
+      proofKind: "GIF",
+      status: "passed",
+      provider: "local-container",
+      leaseId: "local_123"
+    },
+    timing: {
+      provider: "local-container",
+      leaseId: "local_123",
+      totalMs: 12_000,
+      exitCode: 0
+    }
+  };
+  const encoded = Buffer.from(JSON.stringify(outcome)).toString("base64");
   const value = proofRemoteRecord(encoded, "");
 
   assert.equal(value.lane, "gifProof");
   assert.equal(value.record.provider, "local-container");
+  assert.deepEqual(proofOutcomeRecord(outcome), value);
   assert.throws(
     () =>
       proofRemoteRecord(

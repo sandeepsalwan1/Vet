@@ -254,17 +254,7 @@ export function priceProviderUsage(config, remote) {
   };
 }
 
-export function proofRemoteRecord(encodedRemote, encodedLocal) {
-  const decode = (value) => {
-    if (!value) return null;
-    try {
-      return JSON.parse(Buffer.from(String(value), "base64").toString("utf8"));
-    } catch {
-      throw new AgentError("proof outcome cost input is invalid", 1);
-    }
-  };
-  const remote = decode(encodedRemote);
-  const local = decode(encodedLocal);
+export function proofOutcomeRecord(remote, local = null) {
   const outcome =
     remote?.terminal === true && remote?.result?.status === "passed"
       ? remote
@@ -291,6 +281,18 @@ export function proofRemoteRecord(encodedRemote, encodedLocal) {
       timing: outcome.timing
     }
   };
+}
+
+export function proofRemoteRecord(encodedRemote, encodedLocal) {
+  const decode = (value) => {
+    if (!value) return null;
+    try {
+      return JSON.parse(Buffer.from(String(value), "base64").toString("utf8"));
+    } catch {
+      throw new AgentError("proof outcome cost input is invalid", 1);
+    }
+  };
+  return proofOutcomeRecord(decode(encodedRemote), decode(encodedLocal));
 }
 
 function newestDate(items, fields) {
@@ -582,7 +584,9 @@ export async function main() {
   const modelUsage = args["usage-file"] ? readJson(args["usage-file"]) : null;
   const proofRemote =
     lane === "proof"
-      ? proofRemoteRecord(args["proof-remote-outcome-base64"], args["proof-local-outcome-base64"])
+      ? args["proof-outcome-file"]
+        ? proofOutcomeRecord(readJson(args["proof-outcome-file"]))
+        : proofRemoteRecord(args["proof-remote-outcome-base64"], args["proof-local-outcome-base64"])
       : null;
   const remoteRecord = args["remote-record"]
     ? readJson(args["remote-record"])

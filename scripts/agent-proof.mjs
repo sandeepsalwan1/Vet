@@ -1251,21 +1251,38 @@ async function finalizeMain(args, config) {
   const localOutcome = args["local-outcome-base64"]
     ? decodeJson(args["local-outcome-base64"], "local outcome")
     : null;
+  const serviceOutcome = args["service-outcome-base64"]
+    ? decodeJson(args["service-outcome-base64"], "service outcome")
+    : null;
+  const remoteJobResult = String(args["remote-job-result"] ?? "skipped");
+  const localJobResult = String(args["local-job-result"] ?? "skipped");
+  const serviceJobResult = String(args["service-job-result"] ?? "skipped");
+  const serviceConfigJobResult = String(
+    args["service-config-job-result"] ?? "skipped"
+  );
   let result = resolveTerminalResult({
     request,
     remoteOutcome,
-    remoteJobResult: String(args["remote-job-result"] ?? "skipped"),
+    remoteJobResult,
     localOutcome,
-    localJobResult: String(args["local-job-result"] ?? "skipped"),
-    serviceOutcome: args["service-outcome-base64"]
-      ? decodeJson(args["service-outcome-base64"], "service outcome")
-      : null,
-    serviceJobResult: String(args["service-job-result"] ?? "skipped"),
-    serviceConfigJobResult: String(
-      args["service-config-job-result"] ?? "skipped"
-    )
+    localJobResult,
+    serviceOutcome,
+    serviceJobResult,
+    serviceConfigJobResult
   });
-  let timingRecord = remoteOutcome?.timing ?? null;
+  const selectedOutcome =
+    request.proofKind === "service" &&
+    serviceJobResult === "success" &&
+    serviceConfigJobResult === "success"
+      ? serviceOutcome
+      : remoteJobResult === "success" && remoteOutcome?.terminal === true
+        ? remoteOutcome
+        : request.proofKind === "CI" &&
+            localJobResult === "success" &&
+            localOutcome?.terminal === true
+          ? localOutcome
+          : null;
+  let timingRecord = selectedOutcome?.timing ?? null;
   let mayMutateTarget = true;
   const artifactUrl = validateArtifactUrl(args["artifact-url"], config);
   result.artifactUrl = artifactUrl;
@@ -1301,6 +1318,9 @@ async function finalizeMain(args, config) {
   }
 
   writeTerminalMarker(args["terminal-marker"], result, request.sha || args["status-sha"] || "");
+  if (args["cost-outcome-file"]) {
+    writeJsonFile(args["cost-outcome-file"], terminalOutcome(result, timingRecord));
+  }
   const ok = result.status === "passed" || result.status === "skipped";
   finish(
     {

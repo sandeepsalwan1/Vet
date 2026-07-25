@@ -503,4 +503,8 @@ test("proof workflow dispatches automerge only after terminal success is publish
   assert.match(workflow, /steps\.terminal\.outputs\.state == 'success'/);
   assert.match(workflow, /artifact_url: \$\{\{ steps\.artifact\.outputs\.artifact-url \}\}/);
   assert.match(workflow, /--artifact-url "\$ARTIFACT_URL"/);
+  assert.match(finalizeJob, /--cost-outcome-file "\$COST_OUTCOME_FILE"/);
+  assert.match(finalizeJob, /--proof-outcome-file "\$COST_OUTCOME_FILE"/);
+  assert.match(finalizeJob, /steps\.terminal\.outputs\.proof_status == 'passed'/);
+  assert.doesNotMatch(finalizeJob, /--proof-(remote|local)-outcome-base64/);
 });
