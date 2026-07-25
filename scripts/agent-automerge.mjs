@@ -243,7 +243,15 @@ export function postMergeDispatchArgs(
       `candidate-sha=${mergeSha}`,
       "-f",
       `candidate-ref=refs/heads/${config.repo.defaultBranch}`
-    ]
+    ],
+    [
+      "workflow",
+      "run",
+      "agent-readiness.yml",
+      ...common,
+      "-f",
+      `expected-head-sha=${mergeSha}`
+    ],
   ];
   if (Number.isInteger(prNumber) && prNumber > 0 && Number.isInteger(sourceIssue) && sourceIssue > 0) {
     dispatches.push([
@@ -268,6 +276,9 @@ export function postMergeRunName(workflow, mergeSha) {
   }
   if (workflow === "ci.yml") return `CI ${mergeSha}`;
   if (workflow === "codeql.yml") return `CodeQL ${mergeSha}`;
+  if (workflow === "agent-readiness.yml") {
+    return `Agent Readiness ${mergeSha}`;
+  }
   if (workflow === "agent-post-merge.yml") return `Agent Post-Merge ${mergeSha}`;
   throw new AgentError(`unsupported post-merge workflow ${workflow}`, 1);
 }

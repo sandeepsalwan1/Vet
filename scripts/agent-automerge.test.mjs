@@ -386,9 +386,15 @@ test("post-merge checks are dispatched against the exact merge commit", () => {
     mergeSha,
     postMergeTarget
   );
-  assert.equal(withService.length, 3);
-  assert.ok(withService[2].includes("agent-post-merge.yml"));
-  assert.ok(withService[2].includes(`merge-sha=${mergeSha}`));
+  assert.equal(withService.length, 4);
+  assert.ok(withService[2].includes("agent-readiness.yml"));
+  assert.ok(withService[2].includes(`expected-head-sha=${mergeSha}`));
+  assert.ok(withService[3].includes("agent-post-merge.yml"));
+  assert.ok(withService[3].includes(`merge-sha=${mergeSha}`));
+  assert.equal(
+    postMergeRunName("agent-readiness.yml", mergeSha),
+    `Agent Readiness ${mergeSha}`
+  );
   assert.equal(
     postMergeRunName("agent-post-merge.yml", mergeSha),
     `Agent Post-Merge ${mergeSha}`
@@ -411,7 +417,12 @@ test("merged pull recovery dispatches only missing exact-SHA checks", () => {
 
   assert.equal(result.ok, true);
   assert.deepEqual(result.existing, ["ci.yml"]);
-  assert.deepEqual(commands, [["gh", postMergeDispatchArgs(config, mergeSha)[1]]]);
+  assert.deepEqual(
+    commands,
+    postMergeDispatchArgs(config, mergeSha)
+      .slice(1)
+      .map((args) => ["gh", args])
+  );
 });
 
 test("merged pull reconciliation validates identity and backfills checks before cleanup", () => {
@@ -713,6 +724,7 @@ test("trusted workflows reject mutable dispatch targets and publish exact-head C
   const noMistakes = readFileSync(new URL("../.github/workflows/agent-no-mistakes.yml", import.meta.url), "utf8");
   const skipNoMistakes = readFileSync(new URL("../.github/workflows/agent-skip-no-mistakes.yml", import.meta.url), "utf8");
   const automerge = readFileSync(new URL("../.github/workflows/agent-automerge.yml", import.meta.url), "utf8");
+  const readiness = readFileSync(new URL("../.github/workflows/agent-readiness.yml", import.meta.url), "utf8");
 
   assert.match(ci, /expected-head-sha:\n\s+description: Exact current pull request head SHA/);
   assert.match(ci, /gh pr view "\$REQUESTED_PR"/);
@@ -727,6 +739,18 @@ test("trusted workflows reject mutable dispatch targets and publish exact-head C
   assert.match(proof, /test "\$sha" = "\$REQUESTED_HEAD_SHA"/);
   assert.match(noMistakes, /"\$head_sha" != "\$REQUESTED_HEAD_SHA"/);
   assert.match(automerge, /--expected-head "\$EXPECTED_HEAD_SHA"/);
+  assert.match(
+    readiness,
+    /run-name: Agent Readiness \$\{\{ inputs\.expected-head-sha \|\| github\.sha \}\}/
+  );
+  assert.match(
+    readiness,
+    /ref: \$\{\{ inputs\.expected-head-sha \|\| github\.sha \}\}/
+  );
+  assert.match(
+    readiness,
+    /READINESS_EXPECTED_HEAD: \$\{\{ inputs\.expected-head-sha \|\| github\.sha \}\}/
+  );
   assert.match(skipNoMistakes, /test "\$\{APPROVAL_ACTOR,,\}" = "\$\{REPOSITORY_OWNER,,\}"/);
   assert.match(skipNoMistakes, /test "\$head_sha" = "\$REQUESTED_HEAD_SHA"/);
   assert.match(skipNoMistakes, /context no-mistakes-bypass/);

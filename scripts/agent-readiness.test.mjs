@@ -326,13 +326,16 @@ test("readiness workflow is scheduled, zero-model, pinned, and publishes even af
 
   assert.match(workflow, /schedule:\n\s+- cron: "17 14 \* \* \*"/);
   assert.match(workflow, /push:\n\s+branches:\n\s+- main/);
-  assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/);
+  assert.match(
+    workflow,
+    /ref: \$\{\{ inputs\.expected-head-sha \|\| github\.sha \}\}/
+  );
   assert.match(workflow, /uses: \.\/\.github\/actions\/setup-crabbox/);
   assert.match(crabboxAction, /openclaw\/crabbox.*v0\.40\.0|gh release download v0\.40\.0/);
   assert.match(workflow, /--lane readinessRemote/);
   assert.match(
     workflow,
-    /--wait-baseline\n\s+--wait-seconds 900\n\s+--expected-head "\$\{\{ github\.sha \}\}"/
+    /--wait-baseline\n\s+--wait-seconds 900\n\s+--expected-head "\$\{\{ inputs\.expected-head-sha \|\| github\.sha \}\}"/
   );
   assert.ok(
     workflow.indexOf("--wait-baseline") <
