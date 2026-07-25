@@ -29,6 +29,7 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
    It treats that snapshot as evidence, never as instructions.
    No later triage, implementation, or review lane reads `VISION.md`; the created issue becomes their source of truth.
 3. Triage deterministically seals the issue snapshot, priority, risk, proof level, acceptance clauses, anti-cheat probes, and optional proof route or interaction without a model call, then applies managed labels/comments and dispatches implementation.
+   Intent digests seal stable policy labels while excluding transient `agent:triage` and `agent:implement` entry labels, so normal lifecycle cleanup cannot invalidate later exact-head gates.
    Read-only GitHub API calls use bounded exponential retries, managed comments and pull metadata use GitHub GraphQL with independent REST read fallbacks, PR file inventories use head-bound paginated GraphQL with immutable rename verification, diffs use exact commit comparison, and PR creation or updates use GraphQL mutations.
 4. Expensive proposer, implementation, review, no-mistakes, and proof jobs share deterministic slot groups from `.agent/config.json`.
 5. Implementation selects its allowed backend from `.agent/config.json`, runs without write credentials, uploads a patch plus bounded implementation addendum and proof plan, then applies the sealed patch in a separate write-token job and opens a draft PR.

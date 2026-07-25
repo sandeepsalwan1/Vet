@@ -461,7 +461,6 @@ test("isolated validation binds patch, output, base, and result tree", (t) => {
   assert.deepEqual(manifest.changedPaths, ["file.txt"]);
   assert.deepEqual(manifest.sourceLabels, [
     "agent:automerge",
-    "agent:implement",
     "priority:trivial"
   ]);
   assert.deepEqual(verified, manifest);

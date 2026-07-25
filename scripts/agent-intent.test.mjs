@@ -106,7 +106,7 @@ test("intent capsule binds issue, requirements, clarifications, transcript, and 
   assert.deepEqual(capsule.explicitExclusions, ["Do not expose private findings."]);
   assert.equal(capsule.transcriptContext.sourceDigest, "a".repeat(64));
   assert.equal(capsule.ownerClarifications[0].commentId, 55);
-  assert.equal(capsule.version, 2);
+  assert.equal(capsule.version, 3);
   assert.deepEqual(capsule.behaviorContract.routes, ["/staff/tasks"]);
   assert.deepEqual(
     capsule.behaviorContract.checks.map((check) => check.id),

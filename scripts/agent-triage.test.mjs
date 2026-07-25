@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -75,7 +76,7 @@ test("safe retriage clears a stale triage block and restarts implementation", ()
   assert.ok(changes.remove.includes(config.labels.blocked));
 });
 
-test("managed intent seals the projected post-triage policy labels", () => {
+test("managed intent survives implementation trigger label cleanup", () => {
   const source = {
     number: 42,
     title: "Document the operator guide",
@@ -104,12 +105,17 @@ Operators can find the guide.
 
   assert.deepEqual(capsule.sourceLabels, [
     config.labels.automerge,
-    config.labels.implement,
     config.labels.priorityLow
   ]);
+  const afterImplementation = {
+    ...projected,
+    labels: issueLabels(projected).filter(
+      (label) => label !== config.labels.implement
+    )
+  };
   assert.equal(
     intentCapsuleForManagedTriage({
-      issue: projected,
+      issue: afterImplementation,
       comments: [],
       triageComment,
       marker: "<!-- agent-triage:v1 -->",
@@ -117,6 +123,56 @@ Operators can find the guide.
     }).capsule.intentDigest,
     capsule.intentDigest
   );
+});
+
+test("managed intent reconstructs a legacy v2 capsule after trigger cleanup", () => {
+  const value = decision({ priority: "low", risk: "low" });
+  const issue = {
+    number: 42,
+    title: "Document the operator guide",
+    body: `### Outcome
+
+Operators can find the guide.
+
+### Acceptance criteria
+
+- [ ] README links the guide.`,
+    labels: [config.labels.automerge, config.labels.priorityLow]
+  };
+  const current = createIntentCapsule({ issue, decision: value });
+  const { intentDigest: _currentDigest, ...currentPayload } = current;
+  const legacyPayload = {
+    ...currentPayload,
+    version: 2,
+    sourceLabels: [
+      config.labels.automerge,
+      config.labels.implement,
+      config.labels.priorityLow
+    ]
+  };
+  const legacyDigest = createHash("sha256")
+    .update(JSON.stringify(legacyPayload))
+    .digest("hex");
+  const managed = {
+    ...value,
+    issueSnapshotSha256: current.issueSnapshotSha256,
+    ownerClarifications: [],
+    intentDigest: legacyDigest
+  };
+  const triageComment = {
+    body: `<!-- agent-triage:v1 -->\n\`\`\`json\n${JSON.stringify(managed)}\n\`\`\``
+  };
+
+  const reconstructed = intentCapsuleForManagedTriage({
+    issue,
+    comments: [],
+    triageComment,
+    marker: "<!-- agent-triage:v1 -->",
+    repoOwner: "owner"
+  }).capsule;
+
+  assert.equal(reconstructed.version, 2);
+  assert.equal(reconstructed.intentDigest, legacyDigest);
 });
 
 test("high-priority work still implements but cannot automerge", () => {

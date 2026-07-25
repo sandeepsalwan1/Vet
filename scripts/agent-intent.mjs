@@ -9,11 +9,13 @@ import {
   issueSnapshotSha256
 } from "./agent-lib.mjs";
 
-export const INTENT_CAPSULE_VERSION = 2;
+export const INTENT_CAPSULE_VERSION = 3;
 export const IMPLEMENTATION_RESULT_VERSION = 1;
 export const IMPLEMENTATION_ADDENDUM_MARKER =
   "<!-- agent-intent-addendum:v1 -->";
 export const PROOF_KINDS = Object.freeze(["none", "CI", "UI", "GIF", "service"]);
+const TRANSIENT_INTENT_LABELS = new Set(["agent:implement", "agent:triage"]);
+const BEHAVIOR_CONTRACT_VERSION = 2;
 export const BASE_TRIAGE_FIELDS = Object.freeze([
   "value",
   "priority",
@@ -330,6 +332,29 @@ function capsulePayload(capsule) {
   return payload;
 }
 
+function stableIntentLabels(issue) {
+  return [...new Set(issueLabels(issue))]
+    .filter((label) => !TRANSIENT_INTENT_LABELS.has(label))
+    .sort();
+}
+
+function legacyIntentIssues(issue, decision) {
+  const currentLabels = [...new Set(issueLabels(issue))].sort();
+  const labelSets = [currentLabels];
+  if (decision.automationDecision === "implement") {
+    const activeLabels = new Set(currentLabels);
+    activeLabels.add("agent:implement");
+    activeLabels.delete("agent:blocked");
+    labelSets.push([...activeLabels].sort());
+  }
+  return labelSets
+    .filter(
+      (labels, index, values) =>
+        values.findIndex((other) => JSON.stringify(other) === JSON.stringify(labels)) === index
+    )
+    .map((labels) => ({ ...issue, labels }));
+}
+
 function proofRoutes(sections) {
   const value = cleanSectionValue(sections["proof route"]);
   if (!value) return [];
@@ -472,7 +497,10 @@ function createIntentCapsuleVersion({
     version,
     sourceIssue: issueNumber,
     issueSnapshotSha256: issueSnapshotSha256(issue),
-    sourceLabels: [...new Set(issueLabels(issue))].sort(),
+    sourceLabels:
+      version >= INTENT_CAPSULE_VERSION
+        ? stableIntentLabels(issue)
+        : [...new Set(issueLabels(issue))].sort(),
     title,
     body,
     outcome,
@@ -484,7 +512,7 @@ function createIntentCapsuleVersion({
     transcriptContext: transcriptContext(sections),
     decision: decisionCapsuleFields(decision)
   };
-  if (version === INTENT_CAPSULE_VERSION) {
+  if (version >= BEHAVIOR_CONTRACT_VERSION) {
     capsule.behaviorContract = behaviorContract({
       outcome,
       acceptanceCriteria: criteria,
@@ -522,14 +550,16 @@ export function validateIntentCapsule(capsule) {
     "version"
   ];
   const expectedKeys =
-    capsule?.version === INTENT_CAPSULE_VERSION
+    capsule?.version >= BEHAVIOR_CONTRACT_VERSION
       ? [...legacyKeys, "behaviorContract"].sort()
       : legacyKeys;
   if (
     !capsule ||
     Array.isArray(capsule) ||
     JSON.stringify(Object.keys(capsule).sort()) !== JSON.stringify(expectedKeys) ||
-    ![1, INTENT_CAPSULE_VERSION].includes(capsule.version) ||
+    ![1, BEHAVIOR_CONTRACT_VERSION, INTENT_CAPSULE_VERSION].includes(
+      capsule.version
+    ) ||
     !Number.isSafeInteger(capsule.sourceIssue) ||
     capsule.sourceIssue <= 0 ||
     !/^[a-f0-9]{64}$/.test(capsule.issueSnapshotSha256 ?? "") ||
@@ -554,7 +584,7 @@ export function validateIntentCapsule(capsule) {
     throw new AgentError("intent capsule is invalid", 1);
   }
   normalizedClarifications(capsule.ownerClarifications);
-  if (capsule.version === INTENT_CAPSULE_VERSION) {
+  if (capsule.version >= BEHAVIOR_CONTRACT_VERSION) {
     validateBehaviorContract(
       capsule.behaviorContract,
       capsule.acceptanceCriteria,
@@ -762,21 +792,31 @@ export function intentCapsuleForManagedTriage({
   if (issueSnapshotSha256(issue) !== decision.issueSnapshotSha256) {
     throw new AgentError(`source issue #${issue?.number} changed after trusted triage`, 1);
   }
-  let capsule = createIntentCapsule({
+  const ownerClarifications = resolveOwnerClarifications(
+    comments,
+    decision,
+    repoOwner
+  );
+  const capsule = createIntentCapsule({
     issue,
     decision,
-    ownerClarifications: resolveOwnerClarifications(comments, decision, repoOwner)
+    ownerClarifications
   });
-  if (capsule.intentDigest !== decision.intentDigest) {
-    capsule = createIntentCapsuleVersion({
-      issue,
-      decision,
-      ownerClarifications: resolveOwnerClarifications(comments, decision, repoOwner),
-      version: 1
-    });
-    if (capsule.intentDigest !== decision.intentDigest) {
-      throw new AgentError("managed triage intent digest does not match its sealed capsule", 1);
+  if (capsule.intentDigest === decision.intentDigest) {
+    return { decision, capsule };
+  }
+  for (const legacyIssue of legacyIntentIssues(issue, decision)) {
+    for (const version of [BEHAVIOR_CONTRACT_VERSION, 1]) {
+      const legacyCapsule = createIntentCapsuleVersion({
+        issue: legacyIssue,
+        decision,
+        ownerClarifications,
+        version
+      });
+      if (legacyCapsule.intentDigest === decision.intentDigest) {
+        return { decision, capsule: legacyCapsule };
+      }
     }
   }
-  return { decision, capsule };
+  throw new AgentError("managed triage intent digest does not match its sealed capsule", 1);
 }
