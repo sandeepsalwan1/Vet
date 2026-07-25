@@ -5179,6 +5179,11 @@ textarea:not([data-slot]):focus {
   margin: 0 auto;
 }
 
+.adminNotificationsMain {
+  width: 100%;
+  max-width: 1200px;
+}
+
 .adminGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
