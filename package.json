@@ -38,7 +38,7 @@
   },
   "dependencies": {
     "@next/env": "^16.0.0",
-    "brace-expansion-v5": "npm:brace-expansion@5.0.8",
+    "brace-expansion": "file:vendor/brace-expansion-compat",
     "e2b": "^2.27.0",
     "postgres": "^3.4.7"
   },

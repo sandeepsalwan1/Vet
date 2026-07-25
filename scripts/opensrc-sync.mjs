@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,8 @@ import { spawnSync } from "node:child_process";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const manifestPath = join(repoRoot, "opensrc", "sources.json");
 const lockfilePath = join(repoRoot, "package-lock.json");
+const mirrorManifestNames = new Set(["package.json", "package-lock.json"]);
+const upstreamSuffix = ".upstream";
 
 export function parseArgs(argv) {
   const flags = new Set(argv);
@@ -117,6 +119,51 @@ export function validateCache({ cache, expected, cacheRoot, maxAgeHours, now = D
   return records;
 }
 
+function findMirrorManifests(root, upstream) {
+  const matches = [];
+  const names = upstream
+    ? new Set([...mirrorManifestNames].map((name) => `${name}${upstreamSuffix}`))
+    : mirrorManifestNames;
+
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) {
+      matches.push(...findMirrorManifests(path, upstream));
+    } else if (entry.isFile() && names.has(entry.name)) {
+      matches.push(path);
+    }
+  }
+  return matches.sort();
+}
+
+function renameMirrorManifests(paths, destinationFor) {
+  const moves = paths.map((source) => ({ source, destination: destinationFor(source) }));
+  const collision = moves.find(({ destination }) => existsSync(destination));
+  if (collision) {
+    throw new Error(`mirror manifest collision at ${collision.destination}`);
+  }
+  for (const { source, destination } of moves) renameSync(source, destination);
+  return moves.length;
+}
+
+export function restoreMirrorManifests(root) {
+  return renameMirrorManifests(
+    findMirrorManifests(root, true),
+    (path) => path.slice(0, -upstreamSuffix.length)
+  );
+}
+
+export function neutralizeMirrorManifests(root) {
+  return renameMirrorManifests(findMirrorManifests(root, false), (path) => `${path}${upstreamSuffix}`);
+}
+
+export function validateNeutralizedMirrorManifests(root) {
+  const active = findMirrorManifests(root, false);
+  if (active.length > 0) {
+    throw new Error(`active mirror dependency manifest ${active[0]}`);
+  }
+}
+
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
@@ -194,7 +241,15 @@ function main() {
     return;
   }
 
-  if (!options.check) fetchSources(manifest, options.json);
+  if (!options.check) {
+    restoreMirrorManifests(join(repoRoot, "opensrc"));
+    try {
+      fetchSources(manifest, options.json);
+    } finally {
+      neutralizeMirrorManifests(join(repoRoot, "opensrc"));
+    }
+  }
+  validateNeutralizedMirrorManifests(join(repoRoot, "opensrc"));
 
   const cacheRoot = process.env.OPENSRC_HOME || join(homedir(), ".opensrc");
   const summary = syncSummary({

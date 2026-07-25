@@ -9,6 +9,8 @@ Run `npm run opensrc:sync` to fetch every source and verify cache freshness.
 Run `npm run opensrc:install-schedule` once to install the daily macOS user sync.
 GitHub Actions also runs the same refresh daily.
 
-Mirrors preserve upstream bytes and dependency manifests.
+Mirrors preserve upstream bytes.
+Dependency manifest filenames use the `.upstream` suffix between refreshes so GitHub does not treat reference-source dependencies as application dependencies.
+The sync command restores the original names while fetching, then makes them inert again.
 Repository whitespace checks therefore exclude `opensrc`.
-Dependency review records an explicit exception for an upstream mirror-only advisory while the required root `npm audit --omit=dev` gate continues to validate every executable workspace dependency.
+Dependency review and the required root `npm audit --omit=dev` gate validate the executable workspace dependency graph without advisory exceptions.

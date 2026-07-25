@@ -1,14 +1,24 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import {
   expectedSources,
+  neutralizeMirrorManifests,
   parseArgs,
+  restoreMirrorManifests,
   syncSummary,
   validateManifest,
+  validateNeutralizedMirrorManifests,
   validateSnapshots
 } from "./opensrc-sync.mjs";
 
@@ -158,12 +168,31 @@ test("requires every configured cache entry to be fresh and present", () => {
   );
 });
 
+test("keeps upstream dependency manifests inert between source refreshes", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "vet-opensrc-manifests-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const nested = join(root, "upstream", "package");
+  mkdirSync(nested, { recursive: true });
+  const manifestPath = join(nested, "package.json");
+  const lockfilePath = join(nested, "package-lock.json");
+  writeFileSync(manifestPath, '{"name":"upstream"}\n');
+  writeFileSync(lockfilePath, '{"lockfileVersion":3}\n');
+
+  assert.equal(neutralizeMirrorManifests(root), 2);
+  validateNeutralizedMirrorManifests(root);
+  assert.equal(existsSync(manifestPath), false);
+  assert.equal(readFileSync(`${manifestPath}.upstream`, "utf8"), '{"name":"upstream"}\n');
+
+  assert.equal(restoreMirrorManifests(root), 2);
+  assert.equal(existsSync(manifestPath), true);
+  assert.throws(() => validateNeutralizedMirrorManifests(root), /active mirror dependency manifest/);
+});
+
 test("CI isolates byte-faithful mirrors without weakening application audit", () => {
   const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
 
   assert.match(workflow, /git diff --check .* -- \. ':\(exclude\)opensrc\/\*\*'/);
   assert.match(workflow, /actions\/dependency-review-action@v5/);
-  assert.match(workflow, /allow-ghsas: GHSA-xcpc-8h2w-3j85/);
-  assert.match(workflow, /::notice::GHSA-xcpc-8h2w-3j85/);
+  assert.doesNotMatch(workflow, /allow-ghsas/);
   assert.match(workflow, /npm audit --omit=dev/);
 });
