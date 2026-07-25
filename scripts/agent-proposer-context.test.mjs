@@ -42,6 +42,16 @@ function check(id, name, overrides = {}) {
   };
 }
 
+function issue(number, title, overrides = {}) {
+  return {
+    number,
+    title,
+    state: "open",
+    created_at: `2026-07-${String(number).padStart(2, "0")}T10:00:00Z`,
+    ...overrides
+  };
+}
+
 test("context keeps only bounded public health fields and derives code health", () => {
   const context = buildProposerContext(config, {
     commit: { sha: headSha, secret: "must-not-appear" },
@@ -61,11 +71,24 @@ test("context keeps only bounded public health fields and derives code health", 
         check(14, "dependency-review", { conclusion: "failure", output: { text: "secret" } }),
         check(15, "irrelevant external check")
       ]
-    }
+    },
+    issues: [
+      issue(9, "Simplify client check-in"),
+      issue(8, `Clarify\nstaff handoff ${"x".repeat(300)}`, { state: "closed", secret: "must-not-appear" }),
+      issue(7, "Ignore pull request", { pull_request: { url: "https://example.test" } })
+    ]
   });
 
-  assert.equal(context.version, 1);
+  assert.equal(context.version, 2);
   assert.equal(context.repository.headSha, headSha);
+  assert.deepEqual(context.recentIssueTitles, [
+    { number: 9, title: "Simplify client check-in", state: "open" },
+    {
+      number: 8,
+      title: `Clarify staff handoff ${"x".repeat(234)}`,
+      state: "closed"
+    }
+  ]);
   assert.equal(context.workflowHealth.latestByWorkflow.filter((run) => run.name === "CI").length, 1);
   assert.equal(context.workflowHealth.latestByWorkflow.find((run) => run.name === "CI").state, "failing");
   assert.ok(context.workflowHealth.latestByWorkflow.every((run) => run.name.length <= 120));
@@ -84,16 +107,19 @@ test("context keeps only bounded public health fields and derives code health", 
   assert.ok(Buffer.byteLength(serialized) <= 32 * 1024);
 });
 
-test("context caps workflows, checks, and code-health signals", () => {
+test("context caps workflows, checks, code-health signals, and recent issue titles", () => {
   const context = buildProposerContext(config, {
     commit: { sha: headSha },
     workflows: { workflow_runs: Array.from({ length: 30 }, (_, index) => workflow(index + 1, `Workflow ${index}`)) },
-    checks: { check_runs: Array.from({ length: 60 }, (_, index) => check(index + 1, `test ${index}`)) }
+    checks: { check_runs: Array.from({ length: 60 }, (_, index) => check(index + 1, `test ${index}`)) },
+    issues: Array.from({ length: 30 }, (_, index) => issue(index + 1, `Issue ${index + 1}`, { created_at: null }))
   });
 
   assert.equal(context.workflowHealth.latestByWorkflow.length, 12);
   assert.equal(context.checkHealth.currentHead.length, 32);
   assert.equal(context.codeHealth.signals.length, 20);
+  assert.equal(context.recentIssueTitles.length, 20);
+  assert.equal(context.recentIssueTitles[0].number, 30);
 });
 
 test("bounded check context prioritizes failures over passing noise", () => {
@@ -123,6 +149,7 @@ test("collector reads only the configured public main endpoints", () => {
       if (endpoint.endsWith("/commits/main")) return { sha: headSha };
       if (endpoint.includes("/actions/runs?")) return { workflow_runs: [] };
       if (endpoint.includes("/check-runs?")) return { check_runs: [] };
+      if (endpoint.startsWith("search/issues?")) return { incomplete: false, issues: [] };
       assert.fail(`unexpected endpoint ${endpoint}`);
     }
   });
@@ -131,11 +158,32 @@ test("collector reads only the configured public main endpoints", () => {
   assert.deepEqual(requests.map(({ endpoint }) => endpoint), [
     "repos/sandeepsalwan1/Vet/commits/main",
     "repos/sandeepsalwan1/Vet/actions/runs?branch=main&per_page=100",
-    `repos/sandeepsalwan1/Vet/commits/${headSha}/check-runs?per_page=100`
+    `repos/sandeepsalwan1/Vet/commits/${headSha}/check-runs?per_page=100`,
+    "search/issues?q=repo%3Asandeepsalwan1%2FVet%20is%3Aissue&sort=created&order=desc&per_page=20"
   ]);
-  assert.ok(requests.every(({ fields }) => fields.startsWith("{")));
-  assert.ok(requests.every(({ fields }) => !/token|secret|output|text|summary|actor|logs/i.test(fields)));
-  assert.ok(requests.at(-1).fields.includes("details_url"));
+  assert.ok(requests.at(-1).fields.includes(".items[]"));
+  assert.ok(!requests.at(-1).fields.includes("pull_request"));
+  assert.ok(requests.every(({ fields }) => /^[{[]/.test(fields)));
+  assert.ok(requests.every(({ fields }) => !/token|secret|body|output|text|summary|actor|logs/i.test(fields)));
+  assert.ok(requests.find(({ endpoint }) => endpoint.includes("/check-runs?")).fields.includes("details_url"));
+});
+
+test("collector fails closed when the issues-only search is incomplete", () => {
+  assert.throws(
+    () =>
+      collectProposerContext(config, {
+        api(endpoint) {
+          if (endpoint.endsWith("/commits/main")) return { sha: headSha };
+          if (endpoint.includes("/actions/runs?")) return { workflow_runs: [] };
+          if (endpoint.includes("/check-runs?")) return { check_runs: [] };
+          if (endpoint.startsWith("search/issues?")) {
+            return { incomplete: true, issues: [issue(1, "Incomplete result")] };
+          }
+          assert.fail(`unexpected endpoint ${endpoint}`);
+        }
+      }),
+    /recent issue search is incomplete/
+  );
 });
 
 test("GitHub health reads receive no model, provider, or write credential", () => {

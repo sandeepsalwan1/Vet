@@ -8,8 +8,9 @@ import {LogLevel, setLogLevel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
-import {deployToCloudRun} from '../../src/cli/cli_deploy.js';
 import {runAgent} from '../../src/cli/cli_run.js';
+import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
+import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
@@ -24,7 +25,11 @@ vi.mock('../../src/cli/cli_create', () => ({
   createAgent: vi.fn(),
 }));
 
-vi.mock('../../src/cli/cli_deploy', () => ({
+vi.mock('../../src/cli/deploy/cli_deploy_agent_engine', () => ({
+  deployToAgentEngine: vi.fn(),
+}));
+
+vi.mock('../../src/cli/deploy/cli_deploy_cloud_run', () => ({
   deployToCloudRun: vi.fn(),
 }));
 
@@ -297,6 +302,69 @@ describe('CLI Entrypoint', () => {
       expect((deployToCloudRun as Mock).mock.calls[0][0]).toMatchObject({
         a2a: true,
       });
+    });
+  });
+
+  describe('command: deploy agent_engine', () => {
+    it('should call deployToAgentEngine with defaults', async () => {
+      await parse(['deploy', 'agent_engine']);
+
+      expect(deployToAgentEngine).toHaveBeenCalledWith(
+        expect.objectContaining({
+          port: 8080,
+          adkVersion: 'latest',
+          withUi: false,
+        }),
+      );
+    });
+
+    it('should pass args to deployToAgentEngine', async () => {
+      const args = [
+        'deploy',
+        'agent_engine',
+        './my-agent-path',
+        '--project=my-proj',
+        '--region=us-west1',
+        '--display_name=my-display-name',
+        '--description=my-description',
+        '--with_ui',
+        '--adk_version=1.0.0',
+      ];
+
+      await parse(args);
+
+      expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
+        agentPath: expect.stringContaining('my-agent-path'),
+        project: 'my-proj',
+        region: 'us-west1',
+        displayName: 'my-display-name',
+        description: 'my-description',
+        port: 8080,
+        withUi: true,
+        adkVersion: '1.0.0',
+      });
+    });
+
+    it('should pass a2a flag to deployToAgentEngine when --a2a is set', async () => {
+      await parse(['deploy', 'agent_engine', '--a2a']);
+
+      expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
+        a2a: true,
+      });
+    });
+  });
+
+  describe('command: deploy reasoning_engine', () => {
+    it('should call deployToAgentEngine for reasoning_engine', async () => {
+      await parse(['deploy', 'reasoning_engine']);
+
+      expect(deployToAgentEngine).toHaveBeenCalledWith(
+        expect.objectContaining({
+          port: 8080,
+          adkVersion: 'latest',
+          withUi: false,
+        }),
+      );
     });
   });
 });

@@ -17,10 +17,12 @@ import {
   InMemorySessionService,
   Logger,
   LogLevel,
+  RunConfig,
   Runner,
   StreamingMode,
   toA2a,
 } from '@google/adk';
+import {Content} from '@google/genai';
 import {trace, TracerProvider} from '@opentelemetry/api';
 import {SimpleSpanProcessor} from '@opentelemetry/sdk-trace-base';
 import cors from 'cors';
@@ -53,6 +55,7 @@ interface ServerOptions {
   logger?: Logger;
   logLevel?: LogLevel;
   a2a?: boolean;
+  reloadAgents?: boolean;
   registerProcessors?: (tracerProvider: TracerProvider) => void;
 }
 
@@ -99,7 +102,11 @@ export class AdkApiServer {
       options.artifactService ?? new InMemoryArtifactService();
     this.agentLoader =
       options.agentLoader ??
-      new AgentLoader(options.agentsDir, options.agentFileLoadOptions);
+      new AgentLoader(
+        options.agentsDir,
+        options.agentFileLoadOptions,
+        options.reloadAgents ?? false,
+      );
     this.serveDebugUI = options.serveDebugUI ?? false;
     this.allowOrigins = options.allowOrigins;
     this.otelToCloud = options.otelToCloud ?? false;
@@ -164,7 +171,7 @@ export class AdkApiServer {
       });
       app.use(
         '/dev-ui',
-        express.static(path.join(__dirname, '../browser'), {
+        express.static(path.join(__dirname, '../../browser'), {
           setHeaders: (res: Response, path: string) => {
             if (path.endsWith('.js')) {
               res.setHeader('Content-Type', 'text/javascript');
@@ -172,6 +179,13 @@ export class AdkApiServer {
           },
         }),
       );
+    } else {
+      app.get('/health', (req: Request, res: Response) => {
+        res.status(200).send('OK');
+      });
+      app.get('/', (req: Request, res: Response) => {
+        res.status(200).send('OK');
+      });
     }
 
     if (this.allowOrigins) {
@@ -182,7 +196,6 @@ export class AdkApiServer {
       );
     }
 
-    app.use(express.urlencoded({limit: '50mb', extended: true}));
     app.use(
       express.json({
         limit: '50mb',
@@ -718,27 +731,114 @@ export class AdkApiServer {
         return;
       }
 
-      try {
-        await using agentFile = await this.agentLoader.getAgentFile(appName);
-        const agent = await agentFile.load();
-        const runner = await this.getRunner(agent, appName);
-        const events: Event[] = [];
+      const abortController = new AbortController();
+      let responseCompleted = false;
 
-        for await (const e of runner.runAsync({
+      req.on('close', () => {
+        if (!responseCompleted) {
+          this.logger.info(
+            `HTTP connection closed. Aborting agent execution for session ${sessionId}`,
+          );
+          abortController.abort();
+        }
+      });
+
+      try {
+        const events: Event[] = [];
+        for await (const e of this.executeAgentRun({
+          appName,
           userId,
           sessionId,
           newMessage,
           stateDelta,
+          abortSignal: abortController.signal,
         })) {
           events.push(e);
         }
 
+        responseCompleted = true;
         res.json(events);
       } catch (e: unknown) {
         const error = `Failed to run agent: ${e}`;
 
         res.status(500).json({error});
         this.logger.error(error);
+      }
+    });
+
+    app.post('/api/reasoning_engine', async (req: Request, res: Response) => {
+      this.logger.info(
+        `Received Reasoning Engine query headers: ${JSON.stringify(req.headers)}`,
+      );
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const executeQuery = async (body: any) => {
+        const input = body.input || {};
+        const appName = input.appName || body.appName;
+        const userId = input.userId || body.userId || 'default-user';
+        const sessionId =
+          input.sessionId || body.sessionId || 'default-session';
+        const newMessage = input.newMessage || body.newMessage;
+        const stateDelta = input.stateDelta || body.stateDelta;
+        if (!appName) {
+          res.status(400).json({error: 'appName is required in input'});
+          return;
+        }
+        try {
+          await this.sessionService.getOrCreateSession({
+            appName,
+            userId,
+            sessionId,
+            state: {},
+          });
+          const events: Event[] = [];
+          const abortController = new AbortController();
+          req.on('close', () => {
+            abortController.abort();
+          });
+          for await (const e of this.executeAgentRun({
+            appName,
+            userId,
+            sessionId,
+            newMessage,
+            stateDelta,
+            abortSignal: abortController.signal,
+          })) {
+            events.push(e);
+          }
+          res.json({output: events});
+        } catch (e: unknown) {
+          const error = `Failed to run agent via Reasoning Engine API: ${e}`;
+          res.status(500).json({error});
+          this.logger.error(error);
+        }
+      };
+
+      const isParsed =
+        req.body && (Object.keys(req.body).length > 0 || !req.readable);
+      if (isParsed) {
+        this.logger.info(
+          `Using already parsed body: ${JSON.stringify(req.body)}`,
+        );
+        await executeQuery(req.body);
+      } else {
+        let rawBody = '';
+        req.on('data', (chunk) => {
+          rawBody += chunk;
+        });
+        req.on('end', async () => {
+          this.logger.info(`Received Reasoning Engine raw body: ${rawBody}`);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          let body: any = {};
+          if (rawBody) {
+            try {
+              body = JSON.parse(rawBody);
+            } catch (e) {
+              this.logger.error(`Failed to parse raw body as JSON: ${e}`);
+            }
+          }
+          await executeQuery(body);
+        });
       }
     });
 
@@ -760,36 +860,51 @@ export class AdkApiServer {
         return;
       }
 
-      try {
-        await using agentFile = await this.agentLoader.getAgentFile(appName);
-        const agent = await agentFile.load();
-        const runner = await this.getRunner(agent, appName);
+      const abortController = new AbortController();
+      let responseCompleted = false;
 
+      req.on('close', () => {
+        if (!responseCompleted) {
+          this.logger.info(
+            `HTTP connection closed. Aborting agent SSE execution for session ${sessionId}`,
+          );
+          abortController.abort();
+        }
+      });
+
+      try {
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Connection', 'keep-alive');
         res.flushHeaders();
 
-        for await (const event of runner.runAsync({
+        for await (const event of this.executeAgentRun({
+          appName,
           userId,
           sessionId,
           newMessage,
+          stateDelta,
           runConfig: {
             streamingMode: streaming ? StreamingMode.SSE : StreamingMode.NONE,
           },
-          stateDelta,
+          abortSignal: abortController.signal,
         })) {
           res.write(`data: ${JSON.stringify(event)}\n\n`);
         }
 
+        responseCompleted = true;
         res.end();
       } catch (e: unknown) {
         if (res.headersSent) {
-          const error = (e as Error).message;
-
-          res.end(`data: ${JSON.stringify({error})}\n\n`);
-          this.logger.error(error);
+          if (!responseCompleted) {
+            const error = (e as Error).message;
+            this.logger.error(error);
+            try {
+              res.end(`data: ${JSON.stringify({error})}\n\n`);
+            } catch {
+              // Ignore errors from res.end when the response has already been sent.
+            }
+          }
         } else {
           const error = `Failed to run agent: ${e}`;
 
@@ -804,7 +919,7 @@ export class AdkApiServer {
     await this.init();
 
     return new Promise((resolve, reject) => {
-      this.server = this.app.listen(this.port, async () => {
+      this.server = this.app.listen(this.port, this.host, async () => {
         try {
           if (this.a2a) {
             await this.initA2A();
@@ -869,5 +984,30 @@ export class AdkApiServer {
     }
 
     return this.runnerCache[appName];
+  }
+
+  private async *executeAgentRun(options: {
+    appName: string;
+    userId: string;
+    sessionId: string;
+    newMessage: Content;
+    stateDelta?: Record<string, unknown>;
+    runConfig?: RunConfig;
+    abortSignal: AbortSignal;
+  }): AsyncGenerator<Event> {
+    await using agentFile = await this.agentLoader.getAgentFile(
+      options.appName,
+    );
+    const agent = await agentFile.load();
+    const runner = await this.getRunner(agent, options.appName);
+
+    yield* runner.runAsync({
+      userId: options.userId,
+      sessionId: options.sessionId,
+      newMessage: options.newMessage,
+      runConfig: options.runConfig,
+      stateDelta: options.stateDelta,
+      abortSignal: options.abortSignal,
+    });
   }
 }

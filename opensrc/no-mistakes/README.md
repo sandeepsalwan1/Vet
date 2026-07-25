@@ -14,12 +14,12 @@ Local cache:
 /Users/sandeep/.opensrc/repos/github.com/kunchenguid/no-mistakes/main
 ```
 
-Current checked state, refreshed on 2026-07-20:
+Current checked state, refreshed on 2026-07-23:
 
-- latest stable release: `v1.40.0`
-- stable release commit: `87a54774a31edb273e35e4269eb0d70c43991060`
-- refreshed upstream `main`: `4ba40aee93e80f7e9ee82f510c12eb5d9e26f3ea`
-- CI archive checksum: `2445b65179d0e8e9bbf408322f57190f344f9946cfed3971c84fa16ce4122e91`
+- latest stable release: `v1.40.3`
+- stable release commit: `d873960a8924a9b2a09e9d9c210d4f13acd5e50a`
+- refreshed upstream `main`: `4a692bd336c37e9ac36761ee82e558865402abba`
+- Vet `v1.40.0` CI archive checksum: `2445b65179d0e8e9bbf408322f57190f344f9946cfed3971c84fa16ce4122e91`
 - Vet CI pin: `v1.40.0`
 - local binary: `/Users/sandeep/.local/bin/no-mistakes`
 - local version: `v1.37.0`

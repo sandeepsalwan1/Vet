@@ -42,7 +42,6 @@ function fetchIssue(config, issueNumber) {
 
 function buildPrompt(config, issue, comments) {
   const docs = [
-    ["VISION.md", readText(join(repoRoot(), "VISION.md"))],
     ["README.md", readText(join(repoRoot(), "README.md"))],
     ["CONTEXT.md", readText(join(repoRoot(), "CONTEXT.md")).slice(0, 16000)],
     ["docs/architecture.md", readText(join(repoRoot(), "docs/architecture.md"))],

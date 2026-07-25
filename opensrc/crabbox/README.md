@@ -32,10 +32,10 @@ Current planned provider policy:
 - Current Vercel token exists but is not authorized by `vercel whoami`; do not treat Vercel Sandbox as verified yet.
 - Current Hetzner-compatible token is missing; paid Hetzner proof remains unavailable, but required visual proof can use `local-container` without the user's laptop.
 
-Current checked state, public upstream refreshed on 2026-07-20:
+Current checked state, public upstream refreshed on 2026-07-23:
 
 - latest upstream release: `v0.40.0`
-- checked upstream `main`: `8b686531ece655d9096f6e0adb70f65f07c1db4d`
+- checked upstream `main`: `54a2ae3de0646c14ad0c47539d8573dff257bd76`
 - CI archive checksum: `3bcd7c48b9866e3ac05b35bb67afa3282e831d1b9f749c5998c102944c1a5cfe`
 - Vet implementation and proof workflow pin: `v0.40.0`
 - local binary: `/Users/sandeep/bin/crabbox`

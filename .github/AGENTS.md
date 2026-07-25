@@ -15,4 +15,5 @@ GitHub Actions workflows.
 - Keep write-token jobs separate from Codex/API-key jobs.
 - Do not fake no-mistakes success; normal automerge requires a real status.
 - `priority:trivial` may omit no-mistakes only when sealed before model execution, preserved in immutable PR commit ancestry, and still present on the source issue and PR; CI and review remain required.
+- One-head no-mistakes bypass requires a repository-owner manual dispatch, exact current PR head, passing CI and review, and a distinct `no-mistakes-bypass` status.
 - After a trusted agent merge, explicitly dispatch baseline CI and CodeQL against the immutable merge commit.

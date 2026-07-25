@@ -22,7 +22,7 @@ export interface TestApiServerParams {
   serveDebugUI?: boolean;
 }
 
-const DEFAULT_TIMEOUT = 10000;
+const DEFAULT_TIMEOUT = 60000;
 
 /**
  * ADK API server for testing via the CLI. This is useful for integration tests
@@ -32,7 +32,7 @@ export class AdkTsApiServer extends BaseTestServer {
   private params: TestApiServerParams;
 
   constructor(params: TestApiServerParams) {
-    super('localhost', params.port);
+    super('localhost', params.port || 0);
     this.params = params;
   }
 
@@ -47,7 +47,7 @@ export class AdkTsApiServer extends BaseTestServer {
         });
       },
       startMessage: 'ADK API Server started',
-      successLogMessage: `Test ADK API Server started on http://${this.host}:${this.port}`,
+      successLogMessage: `Test ADK API Server started`,
       serverName: 'CLI',
       timeoutMs: this.params.startFailureTimeout || DEFAULT_TIMEOUT,
     });

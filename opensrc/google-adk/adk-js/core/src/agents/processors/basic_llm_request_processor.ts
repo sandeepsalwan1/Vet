@@ -10,7 +10,19 @@ import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
+/**
+ * Populates the {@link LlmRequest} with model configuration derived from the
+ * agent, including the model name, generation config, output schema, and live
+ * connect settings.
+ */
 export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
+  /**
+   * Populates model name, generation config, output schema, and live connect
+   * settings on the request from the agent and run config.
+   *
+   * @param invocationContext - The current invocation context.
+   * @param llmRequest - The request object to populate in place.
+   */
   // eslint-disable-next-line require-yield
   override async *runAsync(
     invocationContext: InvocationContext,
@@ -25,7 +37,7 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
     llmRequest.model = agent.canonicalModel.model;
 
     llmRequest.config = {...(agent.generateContentConfig ?? {})};
-    if (agent.outputSchema) {
+    if (agent.outputSchema && (!agent.tools || agent.tools.length === 0)) {
       setOutputSchema(llmRequest, agent.outputSchema);
     }
 

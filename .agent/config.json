@@ -141,6 +141,7 @@
       "agent-review",
       "no-mistakes"
     ],
+    "noMistakesBypassStatus": "no-mistakes-bypass",
     "proofStatus": "agent-proof",
     "manualWhenPriority": [
       "high"

@@ -23,6 +23,7 @@ jobs:
       actions: read
       checks: read
       contents: read
+      issues: read
     steps:
       - uses: actions/checkout@v5
         with:

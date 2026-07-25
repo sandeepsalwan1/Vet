@@ -1,5 +1,61 @@
 # Changelog
 
+## [1.3.0](https://github.com/google/adk-js/compare/adk-v1.2.0...adk-v1.3.0) (2026-06-22)
+
+
+### Features
+
+* add --reload_agents flag to watch agent files for changes ([#304](https://github.com/google/adk-js/issues/304)) ([b420284](https://github.com/google/adk-js/commit/b420284079a3fd3e37f7e12ea74188a2c7b2bab4))
+* **core:** Support Gemini 2.5 and 3.x Live Models in ADK JS ([#409](https://github.com/google/adk-js/issues/409)) ([92ca9d2](https://github.com/google/adk-js/commit/92ca9d292bdaff9795db63b0a540b0cc41cfc843))
+* enable concurrent replacement with key deduplication ([#432](https://github.com/google/adk-js/issues/432)) ([98de23e](https://github.com/google/adk-js/commit/98de23eb377c7c54b4dee216383b46aa850d7b71))
+* introduce Skills Registry Core interface, Zip Extraction, and local Toolset caching fallbacks (PR 1) ([#422](https://github.com/google/adk-js/issues/422)) ([26ba26a](https://github.com/google/adk-js/commit/26ba26a12f893835b03eda55ea042b9261e40d3d))
+* **openapi:** implement rest api tool (part 3) ([#386](https://github.com/google/adk-js/issues/386)) ([02e84dc](https://github.com/google/adk-js/commit/02e84dc24cad6057f4958af86b5c386fee9e1953))
+* **openapi:** implement spec operation parser and auth handler (part 2) ([#385](https://github.com/google/adk-js/issues/385)) ([8adf05e](https://github.com/google/adk-js/commit/8adf05eedc31d6a9d32b9f5c8512258794cac551))
+* **skills:** Dynamic SearchSkillsTool for LLM Agents (Skills Registry Part 3) ([#424](https://github.com/google/adk-js/issues/424)) ([a41c62c](https://github.com/google/adk-js/commit/a41c62c97d40bba86237021be4a49ab453a26e8b))
+* **skills:** Remote GCP Skills Registry Integration & E2E Tests (Skills Registry Part 2) ([#423](https://github.com/google/adk-js/issues/423)) ([33401e8](https://github.com/google/adk-js/commit/33401e85077bd5dc9a816f0345948394ce67e14c))
+* Use AuthPreprocessor in LlmAgent ([#444](https://github.com/google/adk-js/issues/444)) ([2ccb8b0](https://github.com/google/adk-js/commit/2ccb8b07b43eeabfa7cb82edd0850a86650ee136))
+
+
+### Bug Fixes
+
+* Filter temporary state keys on session creation in TS ADK ([#406](https://github.com/google/adk-js/issues/406)) ([04968b7](https://github.com/google/adk-js/commit/04968b734e44600a847239f103864e4c404d97c3))
+* Fix state mutation bad practice in content_processor_utils.ts ([#430](https://github.com/google/adk-js/issues/430)) ([7f2037e](https://github.com/google/adk-js/commit/7f2037e72d1bfb913a43879f54b21d4fbc6e878c))
+* keep session event keys mysql index-safe ([#437](https://github.com/google/adk-js/issues/437)) ([7956766](https://github.com/google/adk-js/commit/7956766dcaa815977da5783f2e296a1d75164fd8))
+* replace any with proper AuthConfig type in EventActions ([#405](https://github.com/google/adk-js/issues/405)) ([4172398](https://github.com/google/adk-js/commit/417239854cbae63650f63e0e3ad02fa34f433401))
+* resolve infinite loop when combining outputSchema and tools also added unit tests ([#412](https://github.com/google/adk-js/issues/412)) ([deaeffe](https://github.com/google/adk-js/commit/deaeffe15619aac5e1a615c2730501a01e45f907))
+* **streaming:** prevent prototype pollution via model-controlled JSON path ([#410](https://github.com/google/adk-js/issues/410)) ([9008353](https://github.com/google/adk-js/commit/9008353e6d81e086dc778df67189ee193b440ab7))
+* **streaming:** suppress trailing empty STOP chunks with zero parts in SSE streaming ([#426](https://github.com/google/adk-js/issues/426)) ([c95cb9b](https://github.com/google/adk-js/commit/c95cb9b6534eb6ce606cd7a1d075ccd2a5adf391))
+
+## [1.2.0](https://github.com/google/adk-js/compare/adk-v1.1.0...adk-v1.2.0) (2026-06-02)
+
+
+### Features
+
+* abort agent execution on HTTP connection disconnected ([#382](https://github.com/google/adk-js/issues/382)) ([e7776cc](https://github.com/google/adk-js/commit/e7776ccbfbeb7657c0f0a3411173ae9bbf2ec0dd))
+* add pagination and sorting to listSessions ([#331](https://github.com/google/adk-js/issues/331)) ([ed9b72b](https://github.com/google/adk-js/commit/ed9b72bed42b2661e1f43be6aee70f65c1433520))
+* add VertexRagRetrievalTool for Vertex AI RAG Engine grounding ([#277](https://github.com/google/adk-js/issues/277)) ([14f5f17](https://github.com/google/adk-js/commit/14f5f17c1572c156574b4e0deafdae932d305d63))
+* Agent Engine Sandbox Code Executor ([#317](https://github.com/google/adk-js/issues/317)) ([1138e3c](https://github.com/google/adk-js/commit/1138e3cf8f9436801c82cf74e0cf928dae97ff3c))
+* Google maps tool ([#321](https://github.com/google/adk-js/issues/321)) ([d2b4e91](https://github.com/google/adk-js/commit/d2b4e91ac7720f90eb41f458587ef50d60bb532a))
+* Implement customMetadata support in runAsync and runEphemeral. ([#363](https://github.com/google/adk-js/issues/363)) ([faa458e](https://github.com/google/adk-js/commit/faa458e2487125d45882013ac6d4652a9f65438b))
+* Implement the Agent Registry in adk-js ([#358](https://github.com/google/adk-js/issues/358)) ([27e5a92](https://github.com/google/adk-js/commit/27e5a92e6dcd86260e30119c68934ff62c3dc377))
+* **memory:** implement Vertex AI Memory Bank service with tests ([#291](https://github.com/google/adk-js/issues/291)) ([3d82451](https://github.com/google/adk-js/commit/3d82451d68fdd35f2e3cc1938df06600ba5b6d95))
+* **openapi:** implement auth helpers and credential exchangers (part 1) ([#384](https://github.com/google/adk-js/issues/384)) ([86f794e](https://github.com/google/adk-js/commit/86f794e986310cad433ee59a0d6b754827362528))
+
+
+### Bug Fixes
+
+* apply toolFilter in MCPToolset.getTools() ([#312](https://github.com/google/adk-js/issues/312)) ([#313](https://github.com/google/adk-js/issues/313)) ([3cdc1fb](https://github.com/google/adk-js/commit/3cdc1fbd043a1eef6faf6b2f754eb18d4176ba7b))
+* **auth/oauth2:** block SSRF via IPv4-mapped IPv6 and fix dead 172.16/12 check ([#354](https://github.com/google/adk-js/issues/354)) ([57b0af7](https://github.com/google/adk-js/commit/57b0af76f8abefaaedd130a9c1c9ba3b4b625daf))
+* **core:** wrap array responses in function tools to comply with Gemini API ([#347](https://github.com/google/adk-js/issues/347)) ([af115b6](https://github.com/google/adk-js/commit/af115b61ddda67b89b7268b15ac50c778c200d75))
+* do not propagate skipSummarization to parent EventActions in AgentTool ([#301](https://github.com/google/adk-js/issues/301)) ([b3eb611](https://github.com/google/adk-js/commit/b3eb6112e96a0a7d55c9ff209db4769aef500c4a)), closes [#288](https://github.com/google/adk-js/issues/288)
+* filter temp: keys from sub-agent state delta in AgentTool ([#271](https://github.com/google/adk-js/issues/271)) ([db1128b](https://github.com/google/adk-js/commit/db1128bc64aadb8ebdc09a7803480df76256be11))
+* filter thought parts in stringifyContent and AgentTool merged text ([#323](https://github.com/google/adk-js/issues/323)) ([58dac0b](https://github.com/google/adk-js/commit/58dac0b3f2618e3fad49961464d90c7e850acf37))
+* handle undefined type in toGeminiSchema for enum/const-only schemas ([#370](https://github.com/google/adk-js/issues/370)) ([69f35b4](https://github.com/google/adk-js/commit/69f35b4731f44582d7fd5f95eb7d94cf3d7cfe71))
+* **mcp_toolset:** Implement close session method  ([#394](https://github.com/google/adk-js/issues/394)) ([4e3faa9](https://github.com/google/adk-js/commit/4e3faa98d77c9610caa7d12aec3a20e019b7d7f3))
+* **mcp:** close MCP client session after listTools/callTool to fix Windows libuv assertion and process leak ([#333](https://github.com/google/adk-js/issues/333)) ([dd5584a](https://github.com/google/adk-js/commit/dd5584a69724dc8aeb7c600d21a71c1f8207accd))
+* StreamingResponseAggregator.close() drops final event when last chunk has no candidates ([#289](https://github.com/google/adk-js/issues/289)) ([#311](https://github.com/google/adk-js/issues/311)) ([30ba5c8](https://github.com/google/adk-js/commit/30ba5c866229cca2fa69fb292f571e63c501e4c8))
+* **streaming:** suppress empty STOP chunks and preserve tool calls in SSE session history ([#395](https://github.com/google/adk-js/issues/395)) ([e9e0fe6](https://github.com/google/adk-js/commit/e9e0fe62c8c75cea312612be9a8ee42289b13a36))
+
 ## [1.1.0](https://github.com/google/adk-js/compare/adk-v1.0.0...adk-v1.1.0) (2026-04-28)
 
 

@@ -46,6 +46,7 @@ test("issueBody records both the managed marker and stable proposal identity", (
 
 test("trusted apply rejects malformed proposal output", () => {
   assert.deepEqual(validateProposalOutput({ issues: [proposal] }), [proposal]);
+  assert.deepEqual(validateProposalOutput({ issues: [] }), []);
   assert.throws(
     () => validateProposalOutput({ issues: [{ ...proposal, risk: "unknown" }] }),
     /proposal output is invalid/
@@ -70,7 +71,7 @@ test("proposer captures bounded health before model auth and pins that main head
   const prepare = workflow.match(/\n  allocate-concurrency:\n([\s\S]*?)\n  generate:/)?.[1] ?? "";
   const generate = workflow.match(/\n  generate:\n([\s\S]*?)\n  apply:/)?.[1] ?? "";
 
-  assert.match(prepare, /permissions:\n      actions: read\n      checks: read\n      contents: read/);
+  assert.match(prepare, /permissions:\n      actions: read\n      checks: read\n      contents: read\n      issues: read/);
   assert.match(prepare, /GH_TOKEN: \$\{\{ github\.token \}\}/);
   assert.match(prepare, /--validate-backend --lane proposer --json/);
   assert.match(prepare, /agent-proposer-context\.mjs/);

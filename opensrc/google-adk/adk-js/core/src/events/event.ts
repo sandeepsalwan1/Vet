@@ -89,7 +89,9 @@ export function createEvent(params: Partial<Event> = {}): Event {
 export function isFinalResponse(event: Event) {
   if (
     event.actions.skipSummarization ||
-    (event.longRunningToolIds && event.longRunningToolIds.length > 0)
+    (event.longRunningToolIds && event.longRunningToolIds.length > 0) ||
+    (event.actions.requestedAuthConfigs &&
+      Object.keys(event.actions.requestedAuthConfigs).length > 0)
   ) {
     return true;
   }
@@ -157,7 +159,11 @@ export function stringifyContent(event: Event): string {
     return '';
   }
 
-  return event.content.parts.map((part) => part.text ?? '').join('');
+  // Exclude thoughts from the context.
+  return event.content.parts
+    .filter((part) => !part.thought)
+    .map((part) => part.text ?? '')
+    .join('');
 }
 
 const ASCII_LETTERS_AND_NUMBERS =
@@ -193,6 +199,7 @@ const PRESERVE_KEYS_CAMEL_CASE = [
   'actions.requestedAuthConfigs',
   'actions.requestedToolConfirmations',
   'actions.customMetadata',
+  'customMetadata',
   'content.parts.functionCall.args',
   'content.parts.functionResponse.response',
 ];
@@ -211,6 +218,7 @@ const PRESERVE_KEYS_SNAKE_CASE = [
   'actions.requested_auth_configs',
   'actions.requested_tool_confirmations',
   'actions.custom_metadata',
+  'custom_metadata',
   'content.parts.function_call.args',
   'content.parts.function_response.response',
 ];

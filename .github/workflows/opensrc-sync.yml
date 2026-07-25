@@ -1,0 +1,27 @@
+name: Open source freshness
+
+on:
+  schedule:
+    - cron: "17 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: opensrc-sync
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    name: refresh source cache
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Fetch and verify every configured source
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/opensrc-sync.mjs --json

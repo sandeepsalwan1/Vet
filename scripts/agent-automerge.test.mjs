@@ -58,6 +58,7 @@ const config = {
     requiredLabels: ["agent:automerge"],
     blockedLabels: ["priority:high", "agent:blocked"],
     requiredStatuses: ["agent-review", "no-mistakes"],
+    noMistakesBypassStatus: "no-mistakes-bypass",
     requiredChecks: ["quality", "build", "scenarios", "audit", "dependency-review"],
     proofStatus: "agent-proof"
   }
@@ -256,7 +257,38 @@ test("trivial cost lane skips only the paid no-mistakes status", () => {
 
   assert.equal(result.allowed, true);
   assert.equal(result.skipNoMistakes, true);
+  assert.equal(result.noMistakesSkipReason, "priority:trivial");
   assert.equal(result.blockers.some((blocker) => blocker.startsWith("no-mistakes status")), false);
+});
+
+test("owner exact-head bypass skips only the no-mistakes status", () => {
+  const value = fixture();
+  value.combined.statuses = [
+    status("agent-review", "success", 1),
+    status("no-mistakes-bypass", "success", 2),
+  ];
+
+  const result = evaluate(value);
+
+  assert.equal(result.allowed, true);
+  assert.equal(result.skipNoMistakes, true);
+  assert.equal(result.noMistakesSkipReason, "no-mistakes-bypass");
+  assert.equal(result.blockers.some((blocker) => blocker.startsWith("no-mistakes status")), false);
+});
+
+test("failed owner bypass cannot skip no-mistakes", () => {
+  const value = fixture();
+  value.combined.statuses = [
+    status("agent-review", "success", 1),
+    status("no-mistakes-bypass", "failure", 2),
+  ];
+
+  const result = evaluate(value);
+
+  assert.equal(result.allowed, false);
+  assert.equal(result.skipNoMistakes, false);
+  assert.equal(result.noMistakesSkipReason, null);
+  assert.ok(result.blockers.includes("no-mistakes status missing"));
 });
 
 test("trivial label added after implementation cannot bypass no-mistakes", () => {
@@ -620,6 +652,7 @@ test("trusted workflows reject mutable dispatch targets and publish exact-head C
   const review = readFileSync(new URL("../.github/workflows/agent-review.yml", import.meta.url), "utf8");
   const proof = readFileSync(new URL("../.github/workflows/agent-proof.yml", import.meta.url), "utf8");
   const noMistakes = readFileSync(new URL("../.github/workflows/agent-no-mistakes.yml", import.meta.url), "utf8");
+  const skipNoMistakes = readFileSync(new URL("../.github/workflows/agent-skip-no-mistakes.yml", import.meta.url), "utf8");
   const automerge = readFileSync(new URL("../.github/workflows/agent-automerge.yml", import.meta.url), "utf8");
 
   assert.match(ci, /expected-head-sha:\n\s+description: Exact current pull request head SHA/);
@@ -635,6 +668,16 @@ test("trusted workflows reject mutable dispatch targets and publish exact-head C
   assert.match(proof, /test "\$sha" = "\$REQUESTED_HEAD_SHA"/);
   assert.match(noMistakes, /"\$head_sha" != "\$REQUESTED_HEAD_SHA"/);
   assert.match(automerge, /--expected-head "\$EXPECTED_HEAD_SHA"/);
+  assert.match(skipNoMistakes, /test "\$\{APPROVAL_ACTOR,,\}" = "\$\{REPOSITORY_OWNER,,\}"/);
+  assert.match(skipNoMistakes, /test "\$head_sha" = "\$REQUESTED_HEAD_SHA"/);
+  assert.match(skipNoMistakes, /context no-mistakes-bypass/);
+  assert.match(skipNoMistakes, /required_checks=\(quality build scenarios audit dependency-review\)/);
+  assert.match(skipNoMistakes, /context == "agent-review"/);
+  assert.match(skipNoMistakes, /\.labels\[\]\.name == "agent:blocked"/);
+  assert.match(skipNoMistakes, /\.labels\[\]\.name == "agent:automerge"/);
+  assert.doesNotMatch(skipNoMistakes, /--remove-label|--add-label/);
+  assert.match(skipNoMistakes, /gh workflow run agent-automerge\.yml/);
+  assert.doesNotMatch(skipNoMistakes, /OPENAI_API_KEY|CODEX_API_KEY/);
 });
 
 test("merged cleanup accepts only the original trusted agent identity and snapshot", () => {

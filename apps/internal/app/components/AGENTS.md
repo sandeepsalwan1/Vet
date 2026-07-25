@@ -19,7 +19,12 @@ Components render public flows, authentication, staff tasks, approvals, settings
 - Staff means front desk/cashier. Keep its default surface minimal: daily tasks, payments, arrivals, and on-demand room controls.
 - Veterinarian is a distinct clinical role with a staff-like task flow plus clinical ownership. Staff cannot delete or archive veterinarian-owned clinical tasks.
 - Admin means hospital owner/manager. Put clinic-wide settings, client outreach, notification automation, and reporting there rather than on staff or veterinarian screens.
-- UI must be terse and self-explanatory without a training video. Reveal dense controls only when needed; show only current actionable state.
+- Keep UI concise, clear, and visually calm.
+- Use plain language that veterinary clients and hospital teams understand immediately. Never expose internal system, agent, database, or workflow terminology.
+- Make each screen's purpose and next action obvious without training or a video.
+- Remove unnecessary copy before adding instructions, tooltips, or help content.
+- Reveal advanced detail only when needed; prefer a few strong choices over many configurable choices.
+- Show only current actionable state.
 - Before material UI work, disclose changed and unchanged screens with light mockups; plan approval never covers undisclosed surfaces.
 - Prefer automatic operational updates; do not make manual refresh the primary workflow.
 - Build real product surfaces behind PIMS-ready seams, not presentation-only demos. AVImark or Cornerstone approval should require an adapter, not a UI or workflow redesign.
