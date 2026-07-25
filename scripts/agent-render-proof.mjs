@@ -55,15 +55,74 @@ export function findRenderDeploy(document, expectedSha = "") {
 }
 
 export function parseRenderLogStream(output) {
-  const records = [];
-  for (const line of String(output ?? "").split(/\r?\n/)) {
-    if (!line.trim()) continue;
+  const text = String(output ?? "");
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith("[")) {
+    let values;
     try {
-      const record = JSON.parse(line);
-      if (record && typeof record === "object" && !Array.isArray(record)) records.push(record);
+      values = JSON.parse(trimmed);
     } catch {
       throw new AgentError("Render log stream is not valid JSON", 1);
     }
+    if (
+      !Array.isArray(values) ||
+      values.some((value) => !value || typeof value !== "object" || Array.isArray(value))
+    ) {
+      throw new AgentError("Render log stream is not valid JSON", 1);
+    }
+    return values;
+  }
+
+  const records = [];
+  let index = 0;
+  while (index < text.length) {
+    while (index < text.length && /\s/.test(text[index])) index += 1;
+    if (index >= text.length) break;
+    if (text[index] !== "{") {
+      throw new AgentError("Render log stream is not valid JSON", 1);
+    }
+    const start = index;
+    let depth = 0;
+    let escaped = false;
+    let inString = false;
+    for (; index < text.length; index += 1) {
+      const character = text[index];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (character === "\\") {
+          escaped = true;
+        } else if (character === "\"") {
+          inString = false;
+        }
+        continue;
+      }
+      if (character === "\"") {
+        inString = true;
+      } else if (character === "{") {
+        depth += 1;
+      } else if (character === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          index += 1;
+          break;
+        }
+      }
+    }
+    if (depth !== 0 || inString) {
+      throw new AgentError("Render log stream is not valid JSON", 1);
+    }
+    let record;
+    try {
+      record = JSON.parse(text.slice(start, index));
+    } catch {
+      throw new AgentError("Render log stream is not valid JSON", 1);
+    }
+    if (!record || typeof record !== "object" || Array.isArray(record)) {
+      throw new AgentError("Render log stream is not valid JSON", 1);
+    }
+    records.push(record);
   }
   return records;
 }

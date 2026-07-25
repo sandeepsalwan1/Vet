@@ -134,6 +134,21 @@ test("Render parsers handle CLI wrappers without retaining raw logs", () => {
   assert.equal(JSON.stringify(summarizeRenderLogs(records)).includes("private log body"), false);
 });
 
+test("Render log parser accepts the CLI's concatenated pretty JSON objects", () => {
+  const first = {
+    message: "brace text }{ stays inside the JSON string",
+    labels: [{ name: "level", value: "info" }]
+  };
+  const second = {
+    message: "second record",
+    labels: [{ name: "type", value: "request" }]
+  };
+  const output = `${JSON.stringify(first, null, 2)}${JSON.stringify(second, null, 2)}`;
+
+  assert.deepEqual(parseRenderLogStream(output), [first, second]);
+  assert.deepEqual(parseRenderLogStream(JSON.stringify([first, second])), [first, second]);
+});
+
 test("trusted Render proof binds exact commit, logs, and tenant health", async () => {
   const result = await verifyRenderDeployment(
     { config, expectedSha: sha },
