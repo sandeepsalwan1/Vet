@@ -123,7 +123,7 @@ jobs:
           path: .agent-output
       - name: Capture exact implementation tree
         id: source-tree
-        run: printf 'tree=%s\n' "$(git rev-parse HEAD^{tree})" >> "$GITHUB_OUTPUT"
+        run: printf 'tree=%s\n' "$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
       - name: Stage trusted remote input
         run: node scripts/agent-crabbox-run.mjs --stage-input-lane implementRemote --json
       - uses: ./.github/actions/setup-crabbox

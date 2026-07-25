@@ -197,7 +197,7 @@ jobs:
       - name: Capture exact review tree
         id: candidate-tree
         working-directory: target
-        run: printf 'tree=%s\n' "$(git rev-parse HEAD^{tree})" >> "$GITHUB_OUTPUT"
+        run: printf 'tree=%s\n' "$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
       - name: Stage trusted remote input
         run: >-
           node trusted/scripts/agent-crabbox-run.mjs
