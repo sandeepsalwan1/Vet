@@ -141,6 +141,7 @@ no-mistakes uses the full issue plus trusted triage as authoritative implementat
 Every native fix is published through the sealed exact-head handoff, then exact-head CI, independent review, and no-mistakes run again.
 Actionable findings left after native repair return to exact-head reviewer repair within the same three-revision ledger.
 Provider acquisition may move to the next configured Crabbox provider only when the remote command never started, which prevents duplicate model work.
+The final configured provider retries acquisition once when no lease timing or remote-command marker exists.
 Automerge waits for every configured gate, updates a stale branch from `main`, reruns head-bound gates, merges, dispatches baseline CI, CodeQL, and trusted Render verification for the exact merge commit, closes the source issue, and removes workflow labels.
 If GitHub reports a stale-branch merge conflict, trusted automation creates a merge commit that preserves `main` in conflicting hunks, then sends the linked issue back through implementation, CI, review, proof when required, and no-mistakes so the issue behavior must be restored and verified before merge.
 Implementation advances a conflict-recovered zero-diff branch to its validated base only when the branch tree exactly matches the common-base tree, then applies the validated patch without discarding divergent work.

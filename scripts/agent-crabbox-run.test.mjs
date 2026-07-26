@@ -290,6 +290,69 @@ process.stdout.write(JSON.stringify({
   );
 });
 
+test("the final provider retries acquisition once before readiness fails", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "vet-agent-provider-last-retry-"));
+  const bin = join(dir, "bin");
+  const workdir = join(dir, "work");
+  const calls = join(dir, "calls.jsonl");
+  mkdirSync(bin);
+  mkdirSync(workdir);
+  writeFileSync(
+    join(bin, "crabbox"),
+    `#!/usr/bin/env node
+import { appendFileSync, readFileSync } from "node:fs";
+const args = process.argv.slice(2);
+const provider = args[args.indexOf("--provider") + 1];
+let prior = "";
+try { prior = readFileSync(${JSON.stringify(calls)}, "utf8"); } catch {}
+appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ provider }) + "\\n");
+if (!prior) {
+  process.stderr.write("temporary provider acquisition timeout\\n");
+  process.exit(1);
+}
+process.stdout.write("AGENT_CRABBOX_REMOTE_COMMAND_STARTED_V1\\n");
+process.stdout.write(JSON.stringify({
+  provider,
+  leaseId: "cbx_retry",
+  totalMs: 12,
+  exitCode: 0
+}) + "\\n");
+`
+  );
+  chmodSync(join(bin, "crabbox"), 0o755);
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${bin}:${originalPath}`;
+  t.after(() => {
+    process.env.PATH = originalPath;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const result = runCrabboxLane({
+    config,
+    lane: "fallbackReadinessRemote",
+    command: "true",
+    env: {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME
+    },
+    workdir
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.provider, "local-container");
+  assert.deepEqual(
+    result.providerAttempts.map((attempt) => ({
+      provider: attempt.provider,
+      ok: attempt.ok,
+      remoteCommandStarted: attempt.remoteCommandStarted
+    })),
+    [
+      { provider: "local-container", ok: false, remoteCommandStarted: false },
+      { provider: "local-container", ok: true, remoteCommandStarted: true }
+    ]
+  );
+});
+
 test("Crabbox child receives only selected provider auth and readiness", () => {
   const source = {
     PATH: "/usr/bin",
