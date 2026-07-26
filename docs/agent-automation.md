@@ -243,7 +243,7 @@ This fallback spends GitHub Actions time only and does not require the user's la
 A missing Docker runtime, failed desktop bootstrap, or invalid artifact blocks required visual proof instead of silently replacing it with weaker evidence.
 
 Service proof runs on the exact pull request head with no production credential.
-It installs from the lockfile, applies every migration to disposable PostgreSQL 17, builds, and runs scenarios.
+It installs from the lockfile, applies every migration to disposable PostgreSQL 17, proves a real tenant-scoped write is visible only to its clinic, builds, and runs scenarios.
 A separate trusted job treats candidate `render.yaml` only as data and validates it with the pinned Render CLI.
 Known account-level payment blocks are recorded but do not masquerade as Blueprint syntax failures.
 Production credentials, exact deployed revision, bounded logs, and tenant health remain in the post-merge Render lane.
@@ -329,6 +329,8 @@ Rerunning automerge for a merged pull request dispatches only missing exact-SHA 
 Provider retries stop once a remote command starts.
 Review preparation reuses an active or successful exact-head CodeQL run instead of restarting it.
 If review infrastructure or model access fails, the pull request receives one actionable `agent:blocked` report; a successful rerun removes that label only when the review failure originally added it.
+The same failure publishes terminal `agent-review` and `agent-cost` statuses, records available model and provider usage, and never leaves the pull request looking active when no workflow is running.
+After the reported dependency is restored, rerun Agent Review on the unchanged head; the newer complete cost record supersedes the incomplete failure record for that head.
 This is the duplicate-model boundary for interruption recovery.
 
 ## Plan Acceptance Map
