@@ -96,6 +96,7 @@ jobs:
           render workspace set "$RENDER_WORKSPACE_ID" --confirm -o json >/dev/null
           node scripts/agent-render-proof.mjs \
             --expected-sha "$DEPLOY_SHA" \
+            --ensure-latest-deploy \
             --output-file "$RUNNER_TEMP/agent-render-proof.json" \
             --json
       - uses: actions/upload-artifact@v4
@@ -108,7 +109,7 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-          DEPLOY_SHA: ${{ steps.target.outputs.deploy-sha }}
+          TARGET_SHA: ${{ steps.target.outputs.deploy-sha }}
           VERIFY_CONCLUSION: ${{ steps.verify_render.outcome }}
         run: |
           args=(
@@ -119,7 +120,7 @@ jobs:
             --verification-conclusion "$VERIFY_CONCLUSION"
             --json
           )
-          if [ -n "$DEPLOY_SHA" ]; then
-            args+=(--deploy-sha "$DEPLOY_SHA")
+          if [ -n "$TARGET_SHA" ]; then
+            args+=(--target-sha "$TARGET_SHA")
           fi
           node scripts/agent-post-merge.mjs "${args[@]}"

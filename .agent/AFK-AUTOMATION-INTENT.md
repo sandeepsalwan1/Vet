@@ -44,7 +44,7 @@ This snapshot was refreshed on 2026-07-25 and must be reverified where state can
 - UI and GIF proof execute a bounded source-blind browser plan, assert intermediate and final rendered behavior, cover every browser-assigned sealed clause, hash artifacts, and fail closed on semantic mismatch.
   Trusted finalization combines that browser evidence with required deterministic or service evidence for the remaining clauses.
 - Trusted post-merge verification selects an exact deployed `main` revision that contains the merge, checks bounded logs and all configured public tenant hostnames, and reopens or recloses the source issue through one owned failure marker.
-  It observes Render auto-deploy without creating deployments, so recovery cannot roll production back.
+  When that revision is absent, it requests the latest configured `main` branch without pinning an old SHA, pins the returned deployment, and proves both merge ancestry and non-rollback ancestry before passing.
 - Daily zero-model readiness now checks exact-main baseline, repository policy, credential presence, deterministic tests, dependency audit, the preferred Vercel or configured Hetzner remote lifecycle, the credential-free fallback lifecycle, and Render health before model spend.
   It also verifies the trusted publisher's owner identity, intended repository access, and reported push authorization without exposing the token.
   Push readiness waits for baseline checks on its exact main SHA before publishing.
@@ -718,7 +718,12 @@ Trusted reconstruction retains compatibility with v1 through v3 capsules.
 
 Recorded correction on 2026-07-25:
 Replaying an older exact merge during post-merge recovery could roll Render back after newer merges.
-Recovery now verifies an exact auto-deployed `main` descendant that contains the merge and never creates a deployment.
+Recovery first observes the selected `main` revision and otherwise requests Render's latest configured branch without a commit pin.
+The returned deployment must contain the merge, remain on current `main`, and descend from the prior live revision.
+
+Recorded correction on 2026-07-25:
+Live evidence showed Render had not materialized the current automation-only `main` commits, so observation-only recovery could never finish.
+The latest-branch request preserves automatic recovery without replaying a stored older SHA.
 
 ### 8. Finish Automatically
 

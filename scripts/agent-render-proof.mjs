@@ -20,6 +20,10 @@ const FAILURE_STATUSES = new Set([
   "pre_deploy_failed",
   "update_failed"
 ]);
+const TERMINAL_NON_LIVE_STATUSES = new Set([
+  ...FAILURE_STATUSES,
+  "deactivated"
+]);
 
 function normalizedService(entry) {
   return entry?.service ?? entry;
@@ -201,6 +205,19 @@ async function renderJson(args, dependencies = {}) {
   }, dependencies);
 }
 
+function renderMutationJson(args, dependencies = {}) {
+  const execute = dependencies.runCommand ?? runCommand;
+  const result = execute("render", [...args, "-o", "json", "--confirm"], {
+    env: dependencies.env ?? process.env,
+    maxBuffer: 8 * 1024 * 1024
+  });
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    throw new AgentError("Render CLI returned invalid JSON", 1);
+  }
+}
+
 async function renderLogRecords(args, dependencies = {}) {
   const execute = dependencies.runCommand ?? runCommand;
   return withRenderReadRetry(() => {
@@ -254,6 +271,7 @@ export async function verifyRenderDeployment(
   {
     config,
     expectedSha = "",
+    ensureLatestDeploy = false,
     timeoutSeconds = config.render.deployTimeoutSeconds,
     pollSeconds = config.render.pollSeconds
   },
@@ -267,22 +285,70 @@ export async function verifyRenderDeployment(
   if (service.serviceDetails?.url !== config.render.serviceUrl) {
     throw new AgentError("Render service URL does not match trusted configuration", 1);
   }
+  if (
+    ensureLatestDeploy &&
+    service.branch !== config.repo.defaultBranch
+  ) {
+    throw new AgentError(
+      "Render service branch does not match the trusted default branch",
+      1
+    );
+  }
   const now = dependencies.now ?? (() => Date.now());
   const wait = dependencies.sleep ?? sleep;
   const deadline = now() + timeoutSeconds * 1000;
-  let deploy = findRenderDeploy(
-    await renderJson(["deploys", "list", service.id], dependencies),
-    expectedSha
+  const initialInventory = await renderJson(
+    ["deploys", "list", service.id],
+    dependencies
   );
+  let deploy = findRenderDeploy(initialInventory, expectedSha);
+  const previousLive = findRenderDeploy(initialInventory);
+  const previousLiveSha =
+    previousLive?.status === "live" ? deployCommit(previousLive) : "";
+  if (previousLiveSha && !/^[a-f0-9]{40}$/.test(previousLiveSha)) {
+    throw new AgentError(
+      "Render live deployment does not identify a Git commit",
+      1
+    );
+  }
+  let deploymentSource = "observed";
+  let createdDeployId = "";
+  if (
+    expectedSha &&
+    ensureLatestDeploy &&
+    (!deploy || TERMINAL_NON_LIVE_STATUSES.has(deploy.status))
+  ) {
+    const created = normalizedDeploy(
+      renderMutationJson(["deploys", "create", service.id], dependencies)
+    );
+    createdDeployId = String(created?.id ?? "");
+    if (!createdDeployId) {
+      throw new AgentError(
+        "Render did not identify the requested latest-branch deployment",
+        1
+      );
+    }
+    deploymentSource = "latest-branch";
+    deploy = null;
+  }
   do {
     if (!deploy) {
       const inventory = await renderJson(
         ["deploys", "list", service.id],
         dependencies
       );
-      deploy = findRenderDeploy(inventory, expectedSha);
+      deploy = createdDeployId
+        ? inventory
+            .map(normalizedDeploy)
+            .find((candidate) => candidate?.id === createdDeployId) ?? null
+        : findRenderDeploy(inventory, expectedSha);
     }
-    if (deploy?.status === "live" || FAILURE_STATUSES.has(deploy?.status)) break;
+    if (
+      deploy?.status === "live" ||
+      TERMINAL_NON_LIVE_STATUSES.has(deploy?.status)
+    ) {
+      break;
+    }
     if (now() >= deadline) break;
     await wait(pollSeconds * 1000);
     deploy = null;
@@ -297,12 +363,19 @@ export async function verifyRenderDeployment(
     );
   }
   const deployedSha = deployCommit(deploy);
-  if (expectedSha && deployedSha !== expectedSha.toLowerCase()) {
+  if (!/^[a-f0-9]{40}$/.test(deployedSha)) {
+    throw new AgentError("Render deployment does not identify a Git commit", 1);
+  }
+  if (
+    expectedSha &&
+    deploymentSource === "observed" &&
+    deployedSha !== expectedSha.toLowerCase()
+  ) {
     throw new AgentError("Render deployment commit does not match the merged commit", 1);
   }
   if (deploy.status !== "live") {
     throw new AgentError(
-      FAILURE_STATUSES.has(deploy.status)
+      TERMINAL_NON_LIVE_STATUSES.has(deploy.status)
         ? `Render deployment reached ${deploy.status}`
         : "Render deployment did not become live before the bounded timeout",
       1
@@ -355,19 +428,20 @@ export async function verifyRenderDeployment(
     );
   }
   return {
-    version: 1,
+    version: 2,
     status: "passed",
     serviceName: config.render.serviceName,
     expectedSha: expectedSha.toLowerCase(),
     deployedSha,
+    deploymentSource,
+    previousLiveSha,
     deployStatus: deploy.status,
     deployStartedAt: createdAt,
     deployFinishedAt: finishedAt,
     logs,
     health,
-    summary: expectedSha
-      ? "Exact merged revision is live with bounded logs and tenant-specific health."
-      : "Current Render revision is live with bounded logs and tenant-specific health.",
+    summary:
+      "A main-branch revision is live with bounded logs and tenant-specific health.",
     blocker: ""
   };
 }
@@ -387,6 +461,7 @@ async function main(args = parseArgs()) {
     const result = await verifyRenderDeployment({
       config,
       expectedSha,
+      ensureLatestDeploy: Boolean(args["ensure-latest-deploy"]),
       timeoutSeconds: args["timeout-seconds"]
         ? Number(args["timeout-seconds"])
         : config.render.deployTimeoutSeconds,
@@ -401,13 +476,15 @@ async function main(args = parseArgs()) {
     );
   } catch (error) {
     const result = {
-      version: 1,
+      version: 2,
       status: "failed",
       serviceName: config.render.serviceName,
       expectedSha: /^[a-f0-9]{40}$/i.test(expectedSha)
         ? expectedSha.toLowerCase()
         : "",
       deployedSha: "",
+      deploymentSource: "unknown",
+      previousLiveSha: "",
       deployStatus: "unknown",
       deployStartedAt: "",
       deployFinishedAt: "",

@@ -57,7 +57,8 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 9. Automerge updates an eligible stale branch, reruns head-bound CI and review, and merges only after every gate passes on the new head.
 10. After a trusted merge, automerge resolves the exact merge commit, dispatches baseline CI, CodeQL, and trusted Render verification for it, removes agent workflow labels, and closes the linked source issue while preserving priority labels.
     Render verification selects the current exact `main` revision containing that merge, checks bounded log summaries and every configured tenant hostname, and publishes `agent-post-merge`.
-    It observes Render auto-deploy and never creates a deployment, so recovery cannot roll production back.
+    If the selected revision is absent, it requests the service's latest configured `main` branch without a commit pin and follows only the returned deployment.
+    Success requires that deployed revision to contain the merge, remain on current `main`, and descend from the prior live revision.
     Failure reopens the source issue with `agent:post-merge-failed` and `agent:blocked`; a passing recovery run removes only the block it owns and closes the issue.
 Trusted recovery dispatches main-defined workflows with an expected head SHA, and CI publishes required check runs on that exact candidate.
 

@@ -19,10 +19,12 @@ const config = {
   }
 };
 const record = {
-  version: 1,
+  version: 2,
   status: "passed",
   expectedSha: sha,
   deployedSha: sha,
+  deploymentSource: "observed",
+  previousLiveSha: sha,
   deployStatus: "live",
   deployStartedAt: "2026-07-25T03:55:00Z",
   deployFinishedAt: "2026-07-25T03:57:00Z",
@@ -50,16 +52,28 @@ test("post-merge workflow can read the exact pull request it validates", () => {
   );
   assert.match(workflow, /RENDER_WORKSPACE_ID: \$\{\{ secrets\.RENDER_WORKSPACE_ID \}\}/);
   assert.match(workflow, /render workspace set "\$RENDER_WORKSPACE_ID"/);
-  assert.doesNotMatch(workflow, /--ensure-deploy|deploys create/);
+  assert.match(workflow, /--ensure-latest-deploy/);
+  assert.doesNotMatch(workflow, /--commit/);
   assert.match(workflow, /DEPLOY_SHA: \$\{\{ steps\.target\.outputs\.deploy-sha \}\}/);
-  assert.match(workflow, /args\+=\(--deploy-sha "\$DEPLOY_SHA"\)/);
+  assert.match(workflow, /args\+=\(--target-sha "\$TARGET_SHA"\)/);
 });
 
-test("post-merge success requires its selected deployment and real health", () => {
+test("post-merge success accepts only bound observation or latest-branch evidence", () => {
   assert.equal(validateRenderRecord(record, sha), record);
   assert.throws(
     () => validateRenderRecord({ ...record, deployedSha: "b".repeat(40) }, sha),
     /inconsistent/
+  );
+  assert.equal(
+    validateRenderRecord(
+      {
+        ...record,
+        deployedSha: newerSha,
+        deploymentSource: "latest-branch"
+      },
+      sha
+    ).deployedSha,
+    newerSha
   );
   assert.throws(
     () =>
@@ -82,8 +96,10 @@ test("post-merge recovery accepts only deployed main descendants of the merge", 
       mergeSha: sha,
       deploySha: newerSha,
       currentMainSha: currentSha,
+      previousLiveSha: sha,
       mergeToDeploy: comparison(sha),
-      deployToMain: comparison(newerSha)
+      deployToMain: comparison(newerSha),
+      previousToDeploy: comparison(sha)
     }),
     {
       mergeSha: sha,
@@ -101,6 +117,23 @@ test("post-merge recovery accepts only deployed main descendants of the merge", 
         deployToMain: comparison(newerSha)
       }),
     /does not contain the merged commit/
+  );
+  assert.throws(
+    () =>
+      validateDeploymentLineage({
+        mergeSha: sha,
+        deploySha: newerSha,
+        currentMainSha: currentSha,
+        previousLiveSha: currentSha,
+        mergeToDeploy: comparison(sha),
+        deployToMain: comparison(newerSha),
+        previousToDeploy: {
+          status: "behind",
+          behind_by: 1,
+          merge_base_commit: { sha: newerSha }
+        }
+      }),
+    /would roll back/
   );
   assert.throws(
     () =>
@@ -149,6 +182,7 @@ test("post-merge comment contains bounded evidence and no provider identifiers",
   );
   assert.match(body, /centralvet\.eepish\.com/);
   assert.match(body, /Logs observed: 10/);
+  assert.match(body, /Deployment source: observed/);
   assert.match(body, new RegExp(`Deployed revision: \\\`${sha}\\\``));
   assert.equal(body.includes("srv-"), false);
   assert.equal(body.includes("dep-"), false);

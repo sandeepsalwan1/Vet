@@ -11,7 +11,12 @@ import {
 } from "./agent-render-proof.mjs";
 
 const sha = "a".repeat(40);
+const latestSha = "b".repeat(40);
+const previousSha = "c".repeat(40);
 const config = {
+  repo: {
+    defaultBranch: "main"
+  },
   render: {
     serviceName: "vetagent-internal",
     serviceUrl: "https://vetagent-internal.onrender.com",
@@ -42,6 +47,7 @@ function renderDependencies(overrides = {}) {
                 id: "srv-private",
                 name: "vetagent-internal",
                 type: "web_service",
+                branch: "main",
                 serviceDetails: {
                   url: "https://vetagent-internal.onrender.com"
                 }
@@ -163,12 +169,12 @@ test("trusted Render proof binds exact commit, logs, and tenant health", async (
   assert.equal(JSON.stringify(result).includes("raw message must not survive"), false);
 });
 
-test("trusted Render proof waits for the exact auto-deployed revision", async () => {
+test("trusted Render proof requests and pins the latest configured branch", async () => {
   const base = renderDependencies();
   const commands = [];
-  let polls = 0;
+  let created = false;
   const result = await verifyRenderDeployment(
-    { config, expectedSha: sha },
+    { config, expectedSha: sha, ensureLatestDeploy: true },
     {
       ...base,
       runCommand(command, args) {
@@ -176,25 +182,33 @@ test("trusted Render proof waits for the exact auto-deployed revision", async ()
         if (args[0] === "services" || args[0] === "logs") {
           return base.runCommand(command, args);
         }
+        if (args[0] === "deploys" && args[1] === "create") {
+          created = true;
+          return {
+            stdout: JSON.stringify({
+              id: "dep-latest",
+              status: "created"
+            })
+          };
+        }
         if (args[0] === "deploys" && args[1] === "list") {
-          polls += 1;
           return {
             stdout: JSON.stringify(
-              polls >= 2
+              created
                 ? [
                     {
-                      id: "dep-auto",
+                      id: "dep-latest",
                       status: "live",
-                      commit: { id: sha },
+                      commit: { id: latestSha },
                       createdAt: "2026-07-25T03:55:00Z",
                       finishedAt: "2026-07-25T03:57:00Z"
                     }
                   ]
                 : [
                     {
-                      id: "dep-newer",
+                      id: "dep-previous",
                       status: "live",
-                      commit: { id: "b".repeat(40) }
+                      commit: { id: previousSha }
                     }
                   ]
             )
@@ -205,20 +219,29 @@ test("trusted Render proof waits for the exact auto-deployed revision", async ()
     }
   );
 
-  assert.equal(result.deployedSha, sha);
+  assert.equal(result.expectedSha, sha);
+  assert.equal(result.deployedSha, latestSha);
+  assert.equal(result.previousLiveSha, previousSha);
+  assert.equal(result.deploymentSource, "latest-branch");
   assert.equal(
     commands.filter((args) => args[0] === "deploys" && args[1] === "create")
       .length,
-    0
+    1
   );
+  assert.equal(commands.some((args) => args.includes("--commit")), false);
 });
 
-test("trusted Render proof never creates a deployment when the revision is absent", async () => {
+test("trusted Render proof does not retry a latest-branch deploy mutation", async () => {
   const base = renderDependencies();
   let createAttempts = 0;
   await assert.rejects(
     verifyRenderDeployment(
-      { config, expectedSha: sha, timeoutSeconds: 0 },
+      {
+        config,
+        expectedSha: sha,
+        ensureLatestDeploy: true,
+        timeoutSeconds: 0
+      },
       {
         ...base,
         renderRetryDelaysMs: [0, 0, 0],
@@ -229,15 +252,16 @@ test("trusted Render proof never creates a deployment when the revision is absen
           }
           if (args[0] === "deploys" && args[1] === "create") {
             createAttempts += 1;
-            throw new Error("deployment mutation must not run");
+            assert.equal(args.includes("--commit"), false);
+            throw new Error("latest-branch deploy mutation failed");
           }
           throw new Error(`unexpected Render command: ${args.join(" ")}`);
         }
       }
     ),
-    /has not observed the exact merged commit/
+    /latest-branch deploy mutation failed/
   );
-  assert.equal(createAttempts, 0);
+  assert.equal(createAttempts, 1);
 });
 
 test("trusted Render proof probes health before requiring runtime logs", async () => {
