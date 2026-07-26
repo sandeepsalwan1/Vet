@@ -22,8 +22,7 @@ Keep working through repair and fresh production-path canaries until every readi
 Treat this file as the outcome and acceptance contract.
 Treat `docs/agent-automation.md` as the operator contract.
 Treat current code and live service state as evidence, not assumptions.
-When they disagree, verify the intended behavior, fix the implementation, and update both documents.
-The agent may change this plan when evidence proves a detail wrong, but it must preserve the unattended, safe, token-efficient outcome and record the reason.
+When they disagree, verify the intended behavior, fix the implementation, and update the operator documentation.
 
 Use deterministic checks before model calls.
 Reuse exact-head state and run focused retries.
@@ -37,14 +36,16 @@ This snapshot was refreshed on 2026-07-25 and must be reverified where state can
 - The checkout is on `main` and intentionally contains uncommitted AFK automation changes.
   Preserve them and inspect the complete diff before editing.
 - The implementation uses Crabbox-only model lanes, a reviewed project skill bundle, structural skill discovery, and scoped credential handoffs.
-- Intent capsule v2 seals acceptance clauses, proof routes and interactions, anti-cheat probes, and a digest-bound behavior contract while remaining compatible with existing v1 issue seals.
+- Intent capsule v4 seals acceptance clauses, per-clause evidence lanes, proof routes and interactions, anti-cheat probes, and a digest-bound behavior contract while remaining compatible with existing v1 through v3 issue seals.
 - Review and no-mistakes share one three-revision semantic ledger.
   Replayed unchanged evaluations, infrastructure retries, malformed-output retries, and active-run reattachment do not spend a revision.
 - Every model lane emits bounded per-call usage.
   Trusted cost accounting adds provider timing, versioned Vercel and conservative Hetzner price snapshots, GitHub Actions usage when available, fixed-service separation, and explicit human-comparison assumptions.
-- UI and GIF proof execute a bounded source-blind browser plan, assert intermediate and final rendered behavior, cover every sealed clause, hash artifacts, and fail closed on semantic mismatch.
+- UI and GIF proof execute a bounded source-blind browser plan, assert intermediate and final rendered behavior, cover every browser-assigned sealed clause, hash artifacts, and fail closed on semantic mismatch.
+  Trusted finalization combines that browser evidence with required deterministic or service evidence for the remaining clauses.
 - Trusted post-merge verification waits for the exact Render commit, checks bounded logs and all configured public tenant hostnames, and reopens or recloses the source issue through one owned failure marker.
 - Daily zero-model readiness now checks exact-main baseline, repository policy, credential presence, deterministic tests, dependency audit, the preferred Vercel or configured Hetzner remote lifecycle, the credential-free fallback lifecycle, and Render health before model spend.
+  It also verifies the trusted publisher's owner identity, intended repository access, and reported push authorization without exposing the token.
   Push readiness waits for baseline checks on its exact main SHA before publishing.
 - Provider acquisition retries may select the next configured provider only before the remote command starts.
 - The full local automation suite, typecheck, lint, dead-code, and duplicate-code gates passed after these changes.
@@ -193,7 +194,7 @@ Line breaks and obvious speech-to-text paragraph boundaries are the only materia
   Checkpoint relevant work safely, begin from current `main`, and selectively rebuild or carry forward only the parts that still fit.
 - Keep going through implementation, repair, live provider validation, and fresh end-to-end canaries until the system is proven ready for the user's next real issue.
 - Remain token-sensitive while testing.
-  Focused reruns and reused state are preferred, but the agent may revise this plan whenever evidence shows that the planned path will not meet the reliability goal.
+  Focused reruns and reused state are preferred.
 - Keep one simple execution design.
   Crabbox is the worker environment and GitHub Issues plus Actions are the control plane.
 - Do not create a second Hostinger implementation worker.
@@ -304,9 +305,9 @@ Refresh live GitHub state before relying on them during implementation.
 
 ### Pull Requests 37 and 38
 
-- Both were bot-created and encountered GitHub's workflow approval path for first-time contributors.
+- Both were bot-created and their pull request create or update events used the built-in `GITHUB_TOKEN`.
 - Implementation itself succeeded in Crabbox using Vercel Sandbox.
-- Normal pull request CI and CodeQL remained `action_required` because of repository approval policy.
+- GitHub deliberately left normal pull request CI and CodeQL `action_required` because workflow-created pull request events used the built-in token.
 - Trusted exact-head reruns then encountered a baseline `npm audit --omit=dev` failure with 16 vulnerabilities.
 - Review repeatedly spent model cycles on an unchanged or insufficiently changed head and eventually exhausted the repair budget.
 - Pull request 37 used 48,645 implementation tokens and 126,795 review tokens, 175,440 observed tokens total.
@@ -441,6 +442,8 @@ At that time:
 Verified bootstrap on 2026-07-24:
 
 - GitHub repository secrets exist for OpenAI API fallback, Vercel Sandbox, Render API access, and the scoped Render workspace.
+- On 2026-07-25, the `AGENT_GITHUB_TOKEN` repository secret name was verified present without reading its value.
+  Its write scope and approval-free publishing behavior remain unproven until a fresh canary passes.
 - The repository is public.
   Actions are enabled, default workflow permissions are write, and workflows may approve pull request reviews.
 - External fork workflows still require approval for first-time contributors.
@@ -651,6 +654,9 @@ It may not override explicit owner intent, lower deterministic risk, grant crede
 ### 3. Check Readiness Before Spending Model Tokens
 
 Trusted zero-model checks verify baseline health, required credentials by name, provider readiness, available concurrency, and repository policy.
+They verify that `AGENT_GITHUB_TOKEN` exists, authenticates as the configured repository owner, resolves the intended repository, and reports push authorization before any model spend, without printing or exposing its value.
+GitHub does not expose a self-inspection endpoint for a personal fine-grained token's complete repository selection and permission set.
+Therefore a fresh publisher canary must prove pull-request mutation access and approval-free workflow startup, while the operator remains responsible for creating the token with only the Vet repository selected.
 A broken baseline or unavailable provider stops before implementation spend.
 Transient infrastructure failure retries or queues automatically.
 
@@ -664,8 +670,18 @@ It receives model auth for that invocation but no GitHub write credential or reu
 ### 5. Publish And Check The Exact Code
 
 Trusted code validates and applies the sealed patch, creates or updates one pull request, and records the exact head commit.
+Trusted branch pushes and pull request creation or updates use the repository-scoped credential stored as `AGENT_GITHUB_TOKEN`, never the built-in `GITHUB_TOKEN`.
+The publishing credential stays in the trusted lane and is never passed to Crabbox, generated code, pull request jobs, logs, comments, or artifacts.
+The built-in token remains available for narrowly scoped base-branch statuses, comments, and workflow dispatch that do not create or update pull request code.
+Every agent-created or agent-updated head must start required pull request CI and CodeQL without a maintainer approval or an `action_required` run.
+Missing, expired, under-scoped, or approval-producing publishing auth is a readiness failure and stops before further model spend.
+Do not weaken external-fork approval policy or execute pull request code through a privileged `pull_request_target` workflow to bypass this requirement.
 CI runs against that exact head.
 Deterministic failures return focused evidence without spending another full review pass.
+
+Recorded correction on 2026-07-25:
+The earlier requirement to introspect every fine-grained personal-token permission before model spend was replaced with the strongest non-mutating checks GitHub exposes plus a fresh production-path publisher canary.
+GitHub documents endpoint permission requirements but provides repository-selection inspection only to organization administration through a GitHub App, not to a personal token inspecting itself.
 
 ### 6. Let Review And no-mistakes Babysit The Pull Request
 
@@ -689,7 +705,15 @@ Do not keep spending tokens merely because another nominal pass remains.
 
 If deterministic proof is enough, record it without starting a desktop.
 If browser, visual, data, integration, or deployment proof is required, run the appropriate Crabbox or trusted service lane automatically.
+Each sealed acceptance clause records one or more required evidence lanes such as deterministic, browser, or trusted service evidence.
+The strongest requested overall proof may add an artifact requirement, but it must not force non-browser clauses into a browser plan.
+The browser plan must cover every browser-assigned clause, while CI, API, CLI, or service results cover their assigned clauses.
+The trusted finalizer combines the lane results and may pass only when every sealed clause has the required direct evidence.
 Proof must show the requested behavior, not merely that an artifact file exists.
+
+Recorded correction on 2026-07-25:
+The capsule version advanced from v3 to v4 because adding sealed per-clause evidence lanes changes the intent digest.
+Trusted reconstruction retains compatibility with v1 through v3 capsules.
 
 ### 8. Finish Automatically
 
@@ -697,6 +721,9 @@ Proof must show the requested behavior, not merely that an artifact file exists.
 - High-priority or high-risk work: finish implementation, checks, review, no-mistakes, and proof, then request only the final policy decision.
 - Unsafe, contradictory, impossible, or materially underspecified work: preserve completed evidence and ask one concise actionable question.
 - Transient failure: resume the same run without duplicate model work, branches, pull requests, leases, or comments.
+
+If proof preparation fails, finalization publishes the original blocker and a terminal result without decoding an absent request or outcome.
+Cleanup and reporting failures may add bounded secondary evidence, but they must never replace the primary failure with a parsing or transport error.
 
 That is the complete normal loop.
 One AutoIssue should produce one understandable outcome, not a collection of half-finished workflows.
@@ -782,8 +809,8 @@ Do not spend implementation or review tokens when `main` cannot satisfy a requir
 Detect baseline failures first and route them to a maintenance lane or explicit blocker.
 Application dependency audit failures and GitHub Action runtime deprecations are different categories and must be reported separately.
 
-Bot-created pull requests must not depend on a first-time-contributor workflow approval that an unattended run cannot grant.
-The future design should use trusted base-controlled dispatch and exact-head verification while preserving GitHub's security boundaries.
+Bot-created pull requests must not use the built-in `GITHUB_TOKEN` for create or update events that GitHub holds for maintainer approval.
+The trusted publisher should use `AGENT_GITHUB_TOKEN`, base-controlled dispatch, and exact-head verification while preserving GitHub's security boundaries.
 Never solve approval friction by giving untrusted model code write credentials or weakening branch protection.
 
 ## Recovery And Idempotence
@@ -853,14 +880,17 @@ For each canary, verify:
 
 - one issue produces one branch and one pull request
 - no maintainer workflow approval is needed during the normal trusted path
+- a fresh agent pull request and a reviewer repair both start required pull request workflows without any `action_required` run
 - no duplicate implementation, review, proof, or no-mistakes run occurs
 - required checks bind to the exact head
 - proofless low- or medium-risk work merges automatically
 - proof-required work produces semantically valid proof before merge
+- mixed UI and deterministic acceptance clauses receive their correct evidence lanes and combine into one complete result
+- proof preparation failure reports its original blocker instead of a missing-output decoding error
 - managed status output remains concise
 - token and cost accounting is complete
 - no secret value appears in logs, comments, artifacts, or model context
-- the exact merged head is the head that passed CI, review, no-mistakes, and proof
+- the exact pull request head that passed CI, review, no-mistakes, and proof is the head that was merged
 
 Run the two issue canaries independently, then run them close enough together to exercise concurrency and slot controls.
 Repeat any failed canary after the fix from a fresh issue.
@@ -899,6 +929,12 @@ Report the exact blocker, affected head or run, prior automatic recovery attempt
 
 ## Execution Start
 
+Follow one critical path.
+Do not start a live canary while a known local, workflow, credential, or contract blocker makes success impossible.
+For each stable implementation checkpoint, run focused checks first, run the full deterministic suite once after known blockers are cleared, and only then spend on the next live canary.
+Do not repeat an already passing expensive capability test unless changed code can affect that capability.
+After each implementation, local-proof, and live-proof milestone, publish one concise status with completed evidence, the current blocker, and the next remaining phase.
+
 1. Read root `AGENTS.md`, this file, `.agent/agent-policy.md`, `docs/agent-automation.md`, and relevant scoped instructions.
 2. Inspect `git status -sb`.
    Preserve all unrelated work.
@@ -932,19 +968,21 @@ Use this order unless evidence shows a safer dependency order.
 2. Seal issue intent and optional bounded transcript context once.
 3. Implement the trusted priority, risk, and proof decision with deterministic floors and bounded semantic fallback.
 4. Make zero-model readiness and baseline checks fail before any paid implementation lane.
-5. Finish the Crabbox-only implementation and repair transport with scoped credentials and structural skill discovery.
-6. Converge model-driven implementation, independent review, repair, no-mistakes, and proof on isolated Crabbox execution or document the smallest trusted exception.
-7. Produce the bounded implementation addendum and pass the same authoritative intent to review, no-mistakes, and proof.
-8. Replace repeated independent repair limits with one shared three-revision ledger.
-9. Deduplicate unchanged heads and findings and reattach to active no-mistakes work.
-10. Upgrade proof requirements when implementation or review discovers stronger evidence needs.
-11. Bind CI, review, no-mistakes, proof, bypasses, approvals, and merge to the same exact head.
-12. Add trusted post-merge verification and concise failure recovery.
-13. Add complete model, provider, fixed-service, and human comparison cost records without recording sensitive model context.
-14. Add scheduled zero-model readiness monitoring and actionable drift reporting.
-15. Complete representative repository, UI, data, deployment, and policy capability tests.
-16. Complete all local, provider, production-path, recovery, and concurrency acceptance tests.
-17. Return to subscription-backed `CODEX_ACCESS_TOKEN` as a cost optimization after reliability is proven.
+5. Wire trusted branch and pull request publishing to `AGENT_GITHUB_TOKEN` and prove agent updates trigger required workflows without approval.
+6. Finish the Crabbox-only implementation and repair transport with scoped credentials and structural skill discovery.
+7. Converge model-driven implementation, independent review, repair, no-mistakes, and proof on isolated Crabbox execution or document the smallest trusted exception.
+8. Produce the bounded implementation addendum and pass the same authoritative intent to review, no-mistakes, and proof.
+9. Replace repeated independent repair limits with one shared three-revision ledger.
+10. Deduplicate unchanged heads and findings and reattach to active no-mistakes work.
+11. Route each acceptance clause to its required evidence lanes and combine the results without weakening proof.
+12. Upgrade proof requirements when implementation or review discovers stronger evidence needs.
+13. Bind CI, review, no-mistakes, proof, bypasses, approvals, and merge to the same exact head.
+14. Add trusted post-merge verification and concise failure recovery.
+15. Add complete model, provider, fixed-service, and human comparison cost records without recording sensitive model context.
+16. Add scheduled zero-model readiness monitoring and actionable drift reporting.
+17. Complete representative repository, UI, data, deployment, and policy capability tests.
+18. Complete all local, provider, production-path, recovery, and concurrency acceptance tests.
+19. Return to subscription-backed `CODEX_ACCESS_TOKEN` as a cost optimization after reliability is proven.
 
 ## Repository Pointers
 

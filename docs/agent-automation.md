@@ -33,6 +33,9 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
    Read-only GitHub API calls use bounded exponential retries, managed comments and pull metadata use GitHub GraphQL with independent REST read fallbacks, PR file inventories use head-bound paginated GraphQL with immutable rename verification, diffs use exact commit comparison, and PR creation or updates use GraphQL mutations.
 4. Expensive proposer, implementation, review, no-mistakes, and proof jobs share deterministic slot groups from `.agent/config.json`.
 5. Implementation selects its allowed backend from `.agent/config.json`, runs without write credentials, uploads a patch plus bounded implementation addendum and proof plan, then applies the sealed patch in a separate write-token job and opens a draft PR.
+   Trusted branch pushes and pull request mutations use only the repository-scoped `AGENT_GITHUB_TOKEN`; routine statuses, comments, and workflow dispatch keep the built-in workflow token.
+   The implementation preflight verifies the publisher token's owner identity, intended repository access, and reported push authorization before inference.
+   GitHub does not provide a personal-token self-inspection API for every fine-grained permission, so fresh acceptance also requires a real approval-free create and update canary.
    Before inference, every model lane verifies the configured model through a zero-model metadata request and retries transient network, rate-limit, and service failures with bounded backoff.
    These preflight retries cannot duplicate model work or consume a semantic revision because Codex has not started.
 6. The current installed worker adapter is Codex; unsupported or unimplemented backend selections fail before model execution.
@@ -49,10 +52,11 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
    Unchanged exact-head evaluations are reused and do not spend a revision.
    Remaining `auto-fix` findings may return to the independent reviewer within the shared three-revision budget, while `ask-user` findings and exhausted repair budgets block.
 8. Proof validates the sealed behavior contract.
-   UI and GIF proof execute the implementation proof plan in a source-blind browser, assert intermediate and final rendered state, bind every acceptance clause, and publish the structured behavior report plus artifact digests.
+   UI and GIF proof execute the implementation proof plan in a source-blind browser, assert intermediate and final rendered state, bind every browser-assigned acceptance clause, and publish the structured behavior report plus artifact digests.
+   Trusted finalization combines browser, deterministic, and service evidence and passes only when every clause's assigned lanes pass.
 9. Automerge updates an eligible stale branch, reruns head-bound CI and review, and merges only after every gate passes on the new head.
 10. After a trusted merge, automerge resolves the exact merge commit, dispatches baseline CI, CodeQL, and trusted Render verification for it, removes agent workflow labels, and closes the linked source issue while preserving priority labels.
-    Render verification waits for that exact commit, checks bounded log summaries and every configured tenant hostname, and publishes `agent-post-merge`.
+    Render verification waits for that exact commit, requests an exact deploy if auto-deploy skipped it, checks bounded log summaries and every configured tenant hostname, and publishes `agent-post-merge`.
     Failure reopens the source issue with `agent:post-merge-failed` and `agent:blocked`; a passing recovery run removes only the block it owns and closes the issue.
 Trusted recovery dispatches main-defined workflows with an expected head SHA, and CI publishes required check runs on that exact candidate.
 
@@ -90,7 +94,7 @@ Confirm the required label set and secret names without printing a secret value.
 
 ```bash
 node scripts/agent-labels.mjs --dry-run --json
-gh secret list --repo "$REPO" | awk '$1 == "OPENAI_API_KEY" || $1 == "RENDER_API_KEY" || $1 == "RENDER_WORKSPACE_ID" || $1 == "VERCEL_TOKEN" { print $1 }'
+gh secret list --repo "$REPO" | awk '$1 == "AGENT_GITHUB_TOKEN" || $1 == "OPENAI_API_KEY" || $1 == "RENDER_API_KEY" || $1 == "RENDER_WORKSPACE_ID" || $1 == "VERCEL_TOKEN" { print $1 }'
 ```
 
 Run `node scripts/agent-labels.mjs --json` only when the label dry-run reports drift.
@@ -298,7 +302,7 @@ Read the newest managed agent comment, answer the decision, or use the exact-hea
 ### Readiness And Recovery
 
 `agent-readiness.yml` runs after every `main` push, daily, and on demand without model access.
-It verifies current-main required checks, the read-only branch summary, required secret presence by name, deterministic agent tests, production dependency audit, the preferred Vercel Sandbox or configured Hetzner remote lifecycle, credential-free local-container fallback lifecycle, and trusted Render tenant health.
+It verifies current-main required checks, the read-only branch summary, required secret presence by name, trusted publisher identity and intended-repository push access, deterministic agent tests, production dependency audit, the preferred Vercel Sandbox or configured Hetzner remote lifecycle, credential-free local-container fallback lifecycle, and trusted Render tenant health.
 Render CLI jobs select the scoped workspace from the masked `RENDER_WORKSPACE_ID` repository secret before reading services, deploys, logs, or validating a Blueprint.
 Push-triggered readiness waits up to 15 minutes for the same main SHA's baseline checks before publishing, so it cannot race CI and strand preflight on a false early failure.
 The scheduled token never calls administration-only repository settings APIs.
