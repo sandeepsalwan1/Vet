@@ -29,6 +29,7 @@ type View =
 
 const HOME_PATH = "/";
 const STAFF_PATH = "/staff";
+const DEFAULT_OPENING_COPY = "Opening your clinic…";
 
 function audienceForRole(role: AccountSession["role"]): Audience {
   return role === "customer" ? "customer" : "staff";
@@ -71,7 +72,7 @@ async function resolveViewForSession(session: AccountSession): Promise<View> {
   return viewForSession(session);
 }
 
-function AppRootContent({ audience }: { audience: Audience }) {
+function AppRootContent({ audience, openingDelayMs = 0 }: { audience: Audience; openingDelayMs?: number }) {
   const [view, setView] = useState<View>({ kind: "loading" });
   const clinic = useClinicBrand();
 
@@ -79,6 +80,9 @@ function AppRootContent({ audience }: { audience: Audience }) {
     let cancelled = false;
     const id = window.setTimeout(() => {
       void (async () => {
+        if (openingDelayMs > 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, openingDelayMs));
+        }
         const session = getSession();
         if (!session) {
           if (!cancelled) setView({ kind: "auth" });
@@ -97,7 +101,7 @@ function AppRootContent({ audience }: { audience: Audience }) {
       cancelled = true;
       window.clearTimeout(id);
     };
-  }, [audience]);
+  }, [audience, openingDelayMs]);
 
   function handleAuth(session: AccountSession) {
     if (audienceForRole(session.role) !== audience) {
@@ -128,7 +132,9 @@ function AppRootContent({ audience }: { audience: Audience }) {
       <main className="entryShell">
         <section className="entryPanel bootPanel">
           <ClinicWordmark name={clinic.name} />
-          <p className="bootLine">{view.kind === "redirecting" ? "Taking you there…" : "Opening…"}</p>
+          <p className="bootLine">
+            {view.kind === "redirecting" ? "Taking you there…" : DEFAULT_OPENING_COPY}
+          </p>
         </section>
       </main>
     );
@@ -160,10 +166,16 @@ function AppRootContent({ audience }: { audience: Audience }) {
   return <AuthScreen audience={audience} onAuth={handleAuth} onOpenPasscodeBoard={handleOpenBoard} />;
 }
 
-export function AppRoot({ audience = "customer" }: { audience?: Audience }) {
+export function AppRoot({
+  audience = "customer",
+  openingDelayMs = 0
+}: {
+  audience?: Audience;
+  openingDelayMs?: number;
+}) {
   return (
     <ClinicProvider>
-      <AppRootContent audience={audience} />
+      <AppRootContent audience={audience} openingDelayMs={openingDelayMs} />
     </ClinicProvider>
   );
 }
