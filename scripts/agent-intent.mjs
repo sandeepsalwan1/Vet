@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 
 import {
   AgentError,
+  candidatePaths,
   extractJson,
   issueLabels,
   issueSnapshotSha256
@@ -81,6 +82,63 @@ function safeProofRoute(value, label = "proof route") {
     throw new AgentError(`${label} is invalid`, 1);
   }
   return route.length > 1 ? route.replace(/\/+$/, "") : route;
+}
+
+export function normalizeExplicitRoute(route) {
+  if (!route) return null;
+  const value = String(route).trim();
+  if (
+    !/^\/[A-Za-z0-9/_-]*$/.test(value) ||
+    value.includes("..") ||
+    value.includes("//") ||
+    value.startsWith("/api/")
+  ) {
+    throw new AgentError(`unsafe or non-UI proof route: ${value}`, 2);
+  }
+  return value.length > 1 ? value.replace(/\/+$/, "") : value;
+}
+
+function routeForPageFile(path) {
+  const match = String(path).match(
+    /^apps\/internal\/app\/(.*\/)?page\.[jt]sx?$/
+  );
+  if (!match) return null;
+  const segments = String(match[1] ?? "")
+    .split("/")
+    .filter(Boolean)
+    .filter((segment) => !/^\([^)]*\)$/.test(segment));
+  if (
+    segments.some(
+      (segment) =>
+        segment.startsWith("@") ||
+        segment.startsWith("(") ||
+        segment.includes("[") ||
+        segment.includes("]")
+    )
+  ) {
+    return null;
+  }
+  return segments.length ? `/${segments.join("/")}` : "/";
+}
+
+export function deriveAffectedRoutes(files, explicitRoute = "") {
+  const requested = normalizeExplicitRoute(explicitRoute);
+  if (requested) return [requested];
+  const routes = [];
+  for (const file of files ?? []) {
+    if (file?.status === "removed") continue;
+    for (const path of candidatePaths([file])) {
+      if (!path) continue;
+      const route = routeForPageFile(path);
+      if (route) routes.push(route);
+      if (
+        /^apps\/internal\/app\/(?:layout\.[jt]sx?|globals\.css)$/.test(path)
+      ) {
+        routes.push("/");
+      }
+    }
+  }
+  return [...new Set(routes)].sort();
 }
 
 function safeProofActionPath(value) {
@@ -229,6 +287,96 @@ export function validateProofPlan(plan) {
       };
     })
   };
+}
+
+function contractCheckEvidenceLanes(check, contract) {
+  if (
+    Array.isArray(check?.evidenceLanes) &&
+    check.evidenceLanes.length > 0
+  ) {
+    return check.evidenceLanes;
+  }
+  return ["UI", "GIF"].includes(contract?.target?.proofKind)
+    ? ["browser"]
+    : contract?.target?.proofKind === "service"
+      ? ["service"]
+      : ["deterministic"];
+}
+
+export function validateBrowserProofPlan({
+  proofKind,
+  routes,
+  behaviorContract,
+  proofPlan,
+  evidenceLanes = null
+}) {
+  const validatedPlan = validateProofPlan(proofPlan);
+  const visualRequired = Array.isArray(evidenceLanes)
+    ? evidenceLanes.includes("browser")
+    : ["UI", "GIF"].includes(proofKind);
+  if (!visualRequired) return proofPlan;
+  if (!behaviorContract || behaviorContract.target?.kind !== "web") {
+    throw new AgentError("visual proof has no sealed web behavior contract", 1);
+  }
+  const expected = new Set(
+    behaviorContract.checks
+      .filter((check) =>
+        (
+          Array.isArray(check.evidenceLanes)
+            ? contractCheckEvidenceLanes(check, behaviorContract)
+            : ["UI", "GIF"].includes(proofKind)
+              ? ["browser"]
+              : contractCheckEvidenceLanes(check, behaviorContract)
+        ).includes("browser")
+      )
+      .map((check) => check.id)
+  );
+  const covered = new Set();
+  if (!validatedPlan.tasks.length) {
+    throw new AgentError("visual proof has no implementation browser plan", 1);
+  }
+  for (const task of validatedPlan.tasks) {
+    if (!routes.includes(task.route)) {
+      throw new AgentError(
+        `browser proof task route was not prepared: ${task.route}`,
+        1
+      );
+    }
+    if (!task.finalAssertions.length) {
+      throw new AgentError("browser proof task has no final assertion", 1);
+    }
+    if (proofKind === "GIF" && !task.intermediateAssertions.length) {
+      throw new AgentError("GIF proof task has no intermediate assertion", 1);
+    }
+    for (const clauseId of task.clauseIds) {
+      if (!expected.has(clauseId)) {
+        throw new AgentError(
+          `browser proof task references unknown or non-browser clause ${clauseId}`,
+          1
+        );
+      }
+      covered.add(clauseId);
+    }
+  }
+  const missing = [...expected].filter(
+    (clauseId) => !covered.has(clauseId)
+  );
+  if (missing.length) {
+    throw new AgentError(
+      `browser proof plan does not cover sealed clauses: ${missing.join(", ")}`,
+      1
+    );
+  }
+  if (
+    proofKind === "GIF" &&
+    behaviorContract.captureBeforeAction !== true
+  ) {
+    throw new AgentError(
+      "GIF proof contract does not require capture before action",
+      1
+    );
+  }
+  return proofPlan;
 }
 
 function cleanSectionValue(value) {

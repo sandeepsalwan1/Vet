@@ -40,9 +40,14 @@ import {
   implementationAddendumEnvelope,
   intentCapsuleForManagedTriage,
   parseManagedTriageDecision,
+  deriveAffectedRoutes,
+  validateBrowserProofPlan,
   validateImplementationResult,
   validateIntentCapsule
 } from "./agent-intent.mjs";
+
+const IMPLEMENTATION_PROOF_PLAN_CHECK =
+  "trusted implementation proof-plan validation";
 
 function fetchIssue(config, issueNumber) {
   const issue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${issueNumber}`);
@@ -93,12 +98,16 @@ export function readValidationFeedback(path, config) {
     throw new AgentError("validation feedback is not valid JSON", 1);
   }
   const expectedKeys = ["command", "exitCode", "ok", "stderr", "stdout", "version"];
+  const allowedCommands = new Set([
+    IMPLEMENTATION_PROOF_PLAN_CHECK,
+    ...config.commands.defaultImplementChecks
+  ]);
   if (
     JSON.stringify(Object.keys(feedback ?? {}).sort()) !==
       JSON.stringify(expectedKeys) ||
     feedback.version !== 1 ||
     feedback.ok !== false ||
-    !config.commands.defaultImplementChecks.includes(feedback.command) ||
+    !allowedCommands.has(feedback.command) ||
     !Number.isInteger(feedback.exitCode) ||
     feedback.exitCode <= 0 ||
     feedback.exitCode > 255 ||
@@ -576,6 +585,77 @@ function readImplementationIntent(path, issueNumber) {
   return intent;
 }
 
+function implementationValidationContextPath(cwd) {
+  return join(cwd, ".agent-output", "implementation-validation.json");
+}
+
+function readImplementationValidationContext(cwd) {
+  const path = implementationValidationContextPath(cwd);
+  if (!existsSync(path)) {
+    throw new AgentError("implementation validation context is missing", 1);
+  }
+  let context;
+  try {
+    context = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new AgentError("implementation validation context is invalid", 1);
+  }
+  if (
+    !context ||
+    Array.isArray(context) ||
+    JSON.stringify(Object.keys(context).sort()) !==
+      JSON.stringify(["implementationResult", "intent", "routes", "version"]) ||
+    context.version !== 1 ||
+    !Array.isArray(context.routes) ||
+    !context.routes.every((route) => typeof route === "string") ||
+    new Set(context.routes).size !== context.routes.length
+  ) {
+    throw new AgentError("implementation validation context is invalid", 1);
+  }
+  return {
+    intent: validateIntentCapsule(context.intent),
+    implementationResult: validateImplementationResult(
+      context.implementationResult
+    ),
+    routes: [...context.routes].sort()
+  };
+}
+
+function validateImplementationProofPlan(cwd) {
+  const { intent, implementationResult, routes } =
+    readImplementationValidationContext(cwd);
+  const proofPlan = implementationResult.intentAddendum.proofPlan;
+  return validateBrowserProofPlan({
+    proofKind: intent.decision.proofNeeded,
+    routes,
+    behaviorContract: intent.behaviorContract ?? null,
+    proofPlan
+  });
+}
+
+function writeValidationFeedback(
+  feedbackPath,
+  { command, exitCode, stdout = "", stderr = "" }
+) {
+  if (!feedbackPath) return;
+  mkdirSync(dirname(feedbackPath), { recursive: true });
+  writeFileSync(
+    feedbackPath,
+    `${JSON.stringify(
+      {
+        version: 1,
+        ok: false,
+        command,
+        exitCode,
+        stdout: boundedValidationText(stdout),
+        stderr: boundedValidationText(stderr)
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
 function stagedChangedPaths(cwd) {
   return runCommand("git", ["diff", "--cached", "--no-renames", "--name-only"], { cwd }).stdout
     .split("\n")
@@ -629,6 +709,14 @@ export function preparePatchValidation(
   const unstaged = runCommand("git", ["diff", "--no-renames", "--name-only"], { cwd }).stdout.trim();
   if (unstaged) throw new AgentError("patch preparation produced unstaged changes", 1);
   const resultTree = gitOutput(["write-tree"], { cwd });
+  const proofRoutes = [
+    ...new Set([
+      ...(intent.behaviorContract?.routes ?? []),
+      ...deriveAffectedRoutes(
+        changed.map((filename) => ({ filename, status: "modified" }))
+      )
+    ])
+  ].sort();
   const prepared = {
     version: 1,
     issueNumber,
@@ -645,6 +733,21 @@ export function preparePatchValidation(
   };
   mkdirSync(candidateDir);
   runCommand("git", ["checkout-index", "--all", `--prefix=${candidateDir}/`], { cwd });
+  const validationContextPath = implementationValidationContextPath(candidateDir);
+  mkdirSync(dirname(validationContextPath), { recursive: true });
+  writeFileSync(
+    validationContextPath,
+    `${JSON.stringify(
+      {
+        version: 1,
+        intent,
+        implementationResult,
+        routes: proofRoutes
+      },
+      null,
+      2
+    )}\n`
+  );
   writeFileSync(preparedPath, `${JSON.stringify(prepared, null, 2)}\n`);
   return { ...prepared, candidateDir };
 }
@@ -654,33 +757,39 @@ export function runPatchValidationChecks(config, cwd = repoRoot(), feedbackPath 
     throw new AgentError("implementation checks must run in the isolated validation container", 1);
   }
   const env = checkEnvironment();
+  try {
+    validateImplementationProofPlan(cwd);
+  } catch (error) {
+    const message = error?.message ?? String(error);
+    writeValidationFeedback(feedbackPath, {
+      command: IMPLEMENTATION_PROOF_PLAN_CHECK,
+      exitCode: 1,
+      stderr: message
+    });
+    throw new AgentError(`${IMPLEMENTATION_PROOF_PLAN_CHECK} exited 1`, 1, {
+      stderr: message
+    });
+  }
   for (const command of config.commands.defaultImplementChecks) {
     const result = runShell(command, { env, cwd, check: false });
     if (result.status === 0) continue;
-    if (feedbackPath) {
-      mkdirSync(dirname(feedbackPath), { recursive: true });
-      writeFileSync(
-        feedbackPath,
-        `${JSON.stringify(
-          {
-            version: 1,
-            ok: false,
-            command,
-            exitCode: result.status,
-            stdout: boundedValidationText(result.stdout),
-            stderr: boundedValidationText(result.stderr)
-          },
-          null,
-          2
-        )}\n`
-      );
-    }
+    writeValidationFeedback(feedbackPath, {
+      command,
+      exitCode: result.status,
+      stdout: result.stdout,
+      stderr: result.stderr
+    });
     throw new AgentError(`${result.command} exited ${result.status}`, result.status || 1, {
       stdout: result.stdout,
       stderr: result.stderr
     });
   }
-  return { checks: [...config.commands.defaultImplementChecks] };
+  return {
+    checks: [
+      IMPLEMENTATION_PROOF_PLAN_CHECK,
+      ...config.commands.defaultImplementChecks
+    ]
+  };
 }
 
 export function finalizePatchValidation(

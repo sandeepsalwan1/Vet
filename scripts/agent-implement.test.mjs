@@ -73,10 +73,85 @@ function implementationOutput(overrides = {}) {
       assumptions: [],
       scopeClarifications: [],
       verificationDecisions: ["Ran the focused checks."],
+      proofPlan: {
+        version: 1,
+        tasks: []
+      },
       unresolvedQuestions: []
     },
     ...overrides
   });
+}
+
+function writeImplementationValidationContext(
+  cwd,
+  intent = implementationIntent(),
+  implementationResult = JSON.parse(implementationOutput()),
+  routes = intent.behaviorContract?.routes ?? []
+) {
+  const outputDir = join(cwd, ".agent-output");
+  mkdirSync(outputDir, { recursive: true });
+  writeFileSync(
+    join(outputDir, "implementation-validation.json"),
+    `${JSON.stringify({
+      version: 1,
+      intent,
+      implementationResult,
+      routes
+    })}\n`
+  );
+}
+
+function visualImplementationIntent(proofRoute = "") {
+  const proofRouteSection = proofRoute
+    ? `\n\n### Proof route\n${proofRoute}`
+    : "";
+  return createIntentCapsule({
+    issue: {
+      number: 42,
+      title: "Polish clinic opening",
+      body: `### Outcome
+Show a clear clinic-opening transition.
+
+### Acceptance criteria
+- Show "Opening your clinic..." while loading.
+- Show the sign-in screen after loading finishes.${proofRouteSection}
+
+### Proof interaction
+- Visit /proof/loading.`,
+      labels: [{ name: "agent:implement" }, { name: "agent:automerge" }]
+    },
+    decision: {
+      value: "medium",
+      priority: "medium",
+      risk: "medium",
+      alignment: "yes",
+      implementationScope: "Polish and prove the clinic-opening transition.",
+      proofNeeded: "GIF",
+      automationDecision: "implement",
+      humanQuestion: ""
+    }
+  });
+}
+
+function isolatedValidationContext(t, prefix) {
+  const cwd = mkdtempSync(join(tmpdir(), prefix));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const previous = process.env.AGENT_VALIDATION_CONTAINER;
+  process.env.AGENT_VALIDATION_CONTAINER = "1";
+  t.after(() => {
+    if (previous === undefined) delete process.env.AGENT_VALIDATION_CONTAINER;
+    else process.env.AGENT_VALIDATION_CONTAINER = previous;
+  });
+  return {
+    cwd,
+    feedbackPath: join(
+      cwd,
+      ".agent-output",
+      "validation-feedback.json"
+    ),
+    feedbackConfig: { commands: { defaultImplementChecks: [] } }
+  };
 }
 
 test("upsertPullRequest creates a draft PR through GraphQL", () => {
@@ -476,6 +551,20 @@ test("isolated validation binds patch, output, base, and result tree", (t) => {
 
   assert.equal(prepared.baseSha, git("rev-parse", "HEAD").trim());
   assert.equal(readFileSync(join(candidateDir, "file.txt"), "utf8"), "after\n");
+  assert.deepEqual(
+    JSON.parse(
+      readFileSync(
+        join(candidateDir, ".agent-output", "implementation-validation.json"),
+        "utf8"
+      )
+    ),
+    {
+      version: 1,
+      intent,
+      implementationResult: JSON.parse(implementationOutput()),
+      routes: []
+    }
+  );
   assert.equal(manifest.baseSha, prepared.baseSha);
   assert.equal(manifest.resultTree, git("write-tree").trim());
   assert.deepEqual(manifest.changedPaths, ["file.txt"]);
@@ -558,6 +647,7 @@ test("isolated validation command environment removes credentials and workflow c
     }
   });
   const script = `require("node:fs").writeFileSync(${JSON.stringify(outputPath)}, JSON.stringify({GITHUB_ENV:process.env.GITHUB_ENV,GITHUB_OUTPUT:process.env.GITHUB_OUTPUT,ACTIONS_RUNTIME_TOKEN:process.env.ACTIONS_RUNTIME_TOKEN,VERCEL_TOKEN:process.env.VERCEL_TOKEN,HCLOUD_TOKEN:process.env.HCLOUD_TOKEN}))`;
+  writeImplementationValidationContext(cwd);
 
   runPatchValidationChecks({ commands: { defaultImplementChecks: [`node -e ${JSON.stringify(script)}`] } }, cwd);
 
@@ -576,6 +666,7 @@ test("failed isolated validation writes bounded deterministic repair feedback", 
   });
   const command = `node -e ${JSON.stringify("process.stdout.write('type error\\n'); process.stderr.write('failed\\n'); process.exit(2)")}`;
   const feedbackConfig = { commands: { defaultImplementChecks: [command] } };
+  writeImplementationValidationContext(cwd);
 
   assert.throws(
     () => runPatchValidationChecks(feedbackConfig, cwd, feedbackPath),
@@ -589,6 +680,94 @@ test("failed isolated validation writes bounded deterministic repair feedback", 
     stdout: "type error\n",
     stderr: "failed\n"
   });
+});
+
+test("isolated validation rejects an empty GIF proof plan before publication", (t) => {
+  const { cwd, feedbackPath, feedbackConfig } = isolatedValidationContext(
+    t,
+    "vet-agent-proof-plan-test-"
+  );
+  const visualIntent = visualImplementationIntent();
+  const implementationResult = JSON.parse(implementationOutput());
+  implementationResult.intentAddendum.proofPlan = {
+    version: 1,
+    tasks: []
+  };
+  writeImplementationValidationContext(
+    cwd,
+    visualIntent,
+    implementationResult
+  );
+
+  assert.throws(
+    () => runPatchValidationChecks(feedbackConfig, cwd, feedbackPath),
+    /trusted implementation proof-plan validation exited 1/
+  );
+  assert.deepEqual(readValidationFeedback(feedbackPath, feedbackConfig), {
+    version: 1,
+    ok: false,
+    command: "trusted implementation proof-plan validation",
+    exitCode: 1,
+    stdout: "",
+    stderr: "visual proof has no implementation browser plan"
+  });
+});
+
+test("isolated validation accepts only trusted visual routes", (t) => {
+  const { cwd, feedbackPath, feedbackConfig } = isolatedValidationContext(
+    t,
+    "vet-agent-proof-route-test-"
+  );
+  const visualIntent = visualImplementationIntent("/proof/loading");
+  const implementationResult = JSON.parse(implementationOutput());
+  implementationResult.intentAddendum.proofPlan = {
+    version: 1,
+    tasks: [
+      {
+        clauseIds: ["AC1", "AC2"],
+        route: "/unrelated",
+        actions: [{ type: "navigate", path: "/unrelated" }],
+        intermediateAssertions: [
+          { type: "visible", selector: "[data-agent-proof-state='loading']" }
+        ],
+        finalAssertions: [
+          { type: "visible", selector: "[data-agent-proof-state='complete']" }
+        ]
+      }
+    ]
+  };
+  writeImplementationValidationContext(
+    cwd,
+    visualIntent,
+    implementationResult
+  );
+
+  assert.throws(
+    () => runPatchValidationChecks(feedbackConfig, cwd, feedbackPath),
+    /trusted implementation proof-plan validation exited 1/
+  );
+  assert.equal(
+    readValidationFeedback(feedbackPath, feedbackConfig).stderr,
+    "browser proof task route was not prepared: /unrelated"
+  );
+
+  implementationResult.intentAddendum.proofPlan.tasks[0] = {
+    ...implementationResult.intentAddendum.proofPlan.tasks[0],
+    route: "/proof/loading",
+    actions: [{ type: "navigate", path: "/proof/loading" }]
+  };
+  writeImplementationValidationContext(
+    cwd,
+    visualIntent,
+    implementationResult
+  );
+  rmSync(feedbackPath);
+  assert.deepEqual(
+    runPatchValidationChecks(feedbackConfig, cwd, feedbackPath),
+    {
+      checks: ["trusted implementation proof-plan validation"]
+    }
+  );
 });
 
 test("repair feedback accepts only configured validation commands", (t) => {
