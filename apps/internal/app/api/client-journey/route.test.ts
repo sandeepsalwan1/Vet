@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hasOutstandingFeedbackPrompt } from "./route";
+import { hasOutstandingFeedbackPrompt } from "./_clientJourneyRequest";
 import { clientJourneySettingsPatchSchema } from "./staff/route";
 
 const due = "2030-02-05T18:30:00.000Z";
