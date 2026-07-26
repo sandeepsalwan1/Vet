@@ -12,7 +12,11 @@ const ClinicContext = createContext<ClinicBrand>(defaultClinicBrand);
 
 export function ClinicLoadingPanel({ failed = false }: { failed?: boolean }) {
   return (
-    <main className="entryShell">
+    <main
+      className="entryShell"
+      data-agent-proof={failed ? "failed" : "opening"}
+      data-agent-proof-state={failed ? "failed" : "loading"}
+    >
       <section className="entryPanel clinicResolutionPanel">
         <PawPrint aria-hidden="true" />
         <h1>{failed ? "Clinic unavailable" : "Opening your clinic…"}</h1>

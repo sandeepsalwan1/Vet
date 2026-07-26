@@ -8,9 +8,13 @@ const readSource = (relativePath: string) =>
 test("customer landing copy uses the opening clinic panel", () => {
   const clinicContextSource = readSource("./ClinicContext.tsx");
   const appRootSource = readSource("./AppRoot.tsx");
+  const authScreenSource = readSource("./auth/AuthScreen.tsx");
 
   assert.match(clinicContextSource, /Opening your clinic…/);
+  assert.match(clinicContextSource, /data-agent-proof-state=\{failed \? "failed" : "loading"\}/);
   assert.match(appRootSource, /if \(view\.kind === "loading"\) \{\s+return <ClinicLoadingPanel \/>\;/s);
+  assert.match(authScreenSource, /data-agent-proof="signin"/);
+  assert.match(authScreenSource, /data-agent-proof-state="complete"/);
   assert.doesNotMatch(appRootSource, /PROOF_DELAY_MS|1200/);
 });
 
