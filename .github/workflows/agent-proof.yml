@@ -222,6 +222,47 @@ jobs:
           include-hidden-files: true
           if-no-files-found: ignore
 
+  published_media:
+    name: verify published media
+    needs:
+      - prepare
+      - remote
+    if: >-
+      always() &&
+      needs.prepare.outputs.requested == 'true' &&
+      needs.prepare.outputs.needs_browser == 'true' &&
+      needs.remote.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      outcome_b64: ${{ steps.verify.outputs.outcome_b64 }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-proof-${{ inputs.target-kind }}-${{ inputs.target-number }}
+          path: ${{ runner.temp }}/published-proof
+      - name: Download, open, and bind exact-head proof media
+        id: verify
+        env:
+          REQUEST_B64: ${{ needs.prepare.outputs.request_b64 }}
+          REMOTE_OUTCOME_B64: ${{ needs.remote.outputs.outcome_b64 }}
+        run: >-
+          node trusted/scripts/agent-proof.mjs
+          --verify-published-media
+          --request-base64 "$REQUEST_B64"
+          --remote-outcome-base64 "$REMOTE_OUTCOME_B64"
+          --artifact-dir "$RUNNER_TEMP/published-proof"
+          --json
+
   service:
     name: disposable service proof
     needs: prepare
@@ -395,6 +436,7 @@ jobs:
       - service
       - service-config
       - local
+      - published_media
     if: always()
     runs-on: ubuntu-latest
     permissions:
@@ -425,6 +467,8 @@ jobs:
           LOCAL_JOB_RESULT: ${{ needs.local.result }}
           SERVICE_JOB_RESULT: ${{ needs.service.result }}
           SERVICE_CONFIG_JOB_RESULT: ${{ needs.service-config.result }}
+          PUBLISHED_MEDIA_JOB_RESULT: ${{ needs.published_media.result }}
+          PUBLISHED_MEDIA_OUTCOME_B64: ${{ needs.published_media.outputs.outcome_b64 }}
           NEEDS_BROWSER: ${{ needs.prepare.outputs.needs_browser }}
           REMOTE_ARTIFACT_URL: ${{ needs.remote.outputs.artifact_url }}
           SERVICE_ARTIFACT_URL: ${{ needs.service.outputs.artifact_url }}
@@ -460,6 +504,7 @@ jobs:
             --local-job-result "$LOCAL_JOB_RESULT"
             --service-job-result "$SERVICE_JOB_RESULT"
             --service-config-job-result "$SERVICE_CONFIG_JOB_RESULT"
+            --published-media-job-result "$PUBLISHED_MEDIA_JOB_RESULT"
             --status-sha "$STATUS_SHA"
             --terminal-marker "$TERMINAL_MARKER"
             --cost-outcome-file "$COST_OUTCOME_FILE"
@@ -480,6 +525,9 @@ jobs:
           fi
           if [ -n "$SERVICE_OUTCOME_B64" ]; then
             args+=(--service-outcome-base64 "$SERVICE_OUTCOME_B64")
+          fi
+          if [ -n "$PUBLISHED_MEDIA_OUTCOME_B64" ]; then
+            args+=(--published-media-outcome-base64 "$PUBLISHED_MEDIA_OUTCOME_B64")
           fi
           node trusted/scripts/agent-proof.mjs "${args[@]}"
       - name: Enforce terminal proof status

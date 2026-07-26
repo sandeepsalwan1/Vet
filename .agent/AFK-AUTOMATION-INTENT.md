@@ -36,7 +36,7 @@ This snapshot was refreshed on 2026-07-26 and must be reverified where state can
 - The verified implementation baseline through `e86cb2a` is on `main`.
   Preserve unrelated work and inspect the complete diff before editing.
 - The implementation uses Crabbox-only model lanes, a reviewed project skill bundle, structural skill discovery, and scoped credential handoffs.
-- Intent capsule v4 seals acceptance clauses, per-clause evidence lanes, proof routes and interactions, anti-cheat probes, and a digest-bound behavior contract while remaining compatible with existing v1 through v3 issue seals.
+- Intent capsule v5 seals acceptance clauses, refined per-clause evidence lanes, proof routes and interactions, anti-cheat probes, and a digest-bound behavior contract while remaining compatible with existing v1 through v4 issue seals.
 - Review and no-mistakes share one three-revision semantic ledger.
   Replayed unchanged evaluations, infrastructure retries, malformed-output retries, and active-run reattachment do not spend a revision.
 - Every model lane emits bounded per-call usage.
@@ -726,6 +726,11 @@ Recorded correction on 2026-07-25:
 The capsule version advanced from v3 to v4 because adding sealed per-clause evidence lanes changes the intent digest.
 Trusted reconstruction retains compatibility with v1 through v3 capsules.
 
+Recorded correction on 2026-07-26:
+The v4 classifier treated the word `route` as browser evidence even when the clause required a deterministic localhost access-control check.
+Proof-required canary 66 correctly failed instead of pretending its browser plan proved that clause.
+Capsule v5 refines that classification, keeps v1 through v4 reconstruction, and requires a fresh canary because an existing sealed contract must not be rewritten after implementation.
+
 Recorded correction on 2026-07-25:
 Replaying an older exact merge during post-merge recovery could roll Render back after newer merges.
 Recovery first observes the selected `main` revision and otherwise requests Render's latest configured branch without a commit pin.
@@ -806,6 +811,8 @@ Proof must demonstrate the user's requested behavior, not only that an artifact 
 Derive proof steps from the sealed intent before implementation.
 For UI transitions, begin capture before the triggering action.
 Assert the intermediate state, final state, route, and tenant where relevant.
+For high-priority user-visible work, automatically publish a clearly labeled reviewer-friendly GIF or video on the pull request before requesting the final human decision.
+Before proof passes, trusted validation must download and open the exact-head media, verify that it is playable, and confirm that it visibly covers the requested behavior from the triggering action through the final result.
 Keep proof runs deterministic when possible.
 Use model interpretation only when machine assertions cannot establish the behavior.
 

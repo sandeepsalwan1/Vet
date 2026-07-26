@@ -6,6 +6,7 @@ import {
   IMPLEMENTATION_ADDENDUM_MARKER,
   clauseEvidenceLanes,
   createIntentCapsule,
+  createIntentCapsuleVersion,
   implementationAddendumEnvelope,
   intentCapsuleForManagedTriage,
   parseImplementationAddendum,
@@ -107,14 +108,14 @@ test("intent capsule binds issue, requirements, clarifications, transcript, and 
   assert.deepEqual(capsule.explicitExclusions, ["Do not expose private findings."]);
   assert.equal(capsule.transcriptContext.sourceDigest, "a".repeat(64));
   assert.equal(capsule.ownerClarifications[0].commentId, 55);
-  assert.equal(capsule.version, 4);
+  assert.equal(capsule.version, 5);
   assert.deepEqual(capsule.behaviorContract.routes, ["/staff/tasks"]);
   assert.deepEqual(
     capsule.behaviorContract.checks.map((check) => check.id),
     ["AC1", "AC2"]
   );
   assert.equal(capsule.behaviorContract.target.kind, "web");
-  assert.equal(capsule.behaviorContract.version, 2);
+  assert.equal(capsule.behaviorContract.version, 3);
   assert.deepEqual(capsule.behaviorContract.artifactLanes, ["browser"]);
   assert.deepEqual(
     capsule.behaviorContract.checks.map((check) => check.evidenceLanes),
@@ -139,6 +140,77 @@ test("acceptance clauses select direct evidence without forcing every UI clause 
   assert.deepEqual(
     clauseEvidenceLanes("Existing repository tests continue to pass", "GIF"),
     ["deterministic"]
+  );
+  assert.deepEqual(
+    clauseEvidenceLanes(
+      "The proof route returns not found unless the request host is localhost",
+      "GIF"
+    ),
+    ["deterministic"]
+  );
+  assert.deepEqual(
+    clauseEvidenceLanes(
+      "The proof route returns not found unless the request host is localhost",
+      "GIF",
+      2
+    ),
+    ["deterministic", "browser"]
+  );
+});
+
+test("version 4 intent capsules retain their original evidence classification", () => {
+  const sourceIssue = issue({
+    body: `### Outcome
+
+The loading proof remains local.
+
+### Acceptance criteria
+
+- [ ] The proof route returns not found unless the request host is localhost.
+
+### Proof
+
+GIF
+
+### Proof route
+
+/proof/loading`
+  });
+  const sourceDecision = decision({ proofNeeded: "GIF" });
+  const capsule = createIntentCapsuleVersion({
+    issue: sourceIssue,
+    decision: sourceDecision,
+    version: 4
+  });
+
+  assert.equal(capsule.version, 4);
+  assert.equal(capsule.behaviorContract.version, 2);
+  assert.deepEqual(capsule.behaviorContract.checks[0].evidenceLanes, [
+    "deterministic",
+    "browser"
+  ]);
+  assert.equal(validateIntentCapsule(capsule), capsule);
+  const managedDecision = {
+    ...sourceDecision,
+    issueSnapshotSha256: capsule.issueSnapshotSha256,
+    ownerClarifications: [],
+    intentDigest: capsule.intentDigest
+  };
+  const triageComment = {
+    body: `<!-- agent-triage:v1 -->
+\`\`\`json
+${JSON.stringify(managedDecision)}
+\`\`\``
+  };
+  assert.equal(
+    intentCapsuleForManagedTriage({
+      issue: sourceIssue,
+      comments: [triageComment],
+      triageComment,
+      marker: "<!-- agent-triage:v1 -->",
+      repoOwner: "owner"
+    }).capsule.version,
+    4
   );
 });
 

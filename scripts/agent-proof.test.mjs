@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { commandBehaviorReport } from "./agent-behavior-report.mjs";
 
@@ -18,6 +27,8 @@ import {
   structuredProofKind,
   untrustedCodeEnvironment,
   validateArtifactUrl,
+  validatePublishedMedia,
+  validatePublishedMediaOutcome,
   validateVisualBehaviorPlan,
   visualServerCommand
 } from "./agent-proof.mjs";
@@ -434,7 +445,7 @@ test("proof comments link the trusted Actions artifact and collapse runner-only 
   const body = proofBody(result, ["/"], { totalMs: 10, commandMs: 5 });
 
   assert.equal(validateArtifactUrl(artifactUrl, { repo: { owner: "sandeepsalwan1", name: "Vet" } }), artifactUrl);
-  assert.match(body, new RegExp(`\\[Open or download the proof bundle\\]\\(${artifactUrl}\\)`));
+  assert.match(body, new RegExp(`\\[Open reviewer GIF/video proof bundle\\]\\(${artifactUrl}\\)`));
   assert.match(body, /<summary>Runner artifact inventory<\/summary>/);
   assert.ok(body.includes("`/home/runner/work/Vet"));
   assert.throws(
@@ -443,6 +454,126 @@ test("proof comments link the trusted Actions artifact and collapse runner-only 
         repo: { owner: "sandeepsalwan1", name: "Vet" }
       }),
     /outside the trusted GitHub Actions run/
+  );
+});
+
+test("published GIF proof is downloaded, digest-bound, exact-head, and playable", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "vet-published-proof-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const bundle = join(root, "bundle");
+  mkdirSync(bundle);
+  const log = join(root, "crabbox-gifProof.log");
+  const gif = join(bundle, "screen.trimmed.gif");
+  const video = join(bundle, "screen.trimmed.mp4");
+  const sha = "a".repeat(40);
+  writeFileSync(log, `AGENT_PROOF_HEAD_OK ${sha}\n`);
+  writeFileSync(gif, "GIF89a-reviewable");
+  writeFileSync(video, Buffer.concat([Buffer.alloc(4), Buffer.from("ftypisom")]));
+  const digest = (path) =>
+    createHash("sha256").update(readFileSync(path)).digest("hex");
+  const behaviorContract = {
+    version: 3,
+    target: { kind: "web", proofKind: "GIF" },
+    artifactLanes: ["browser"],
+    captureBeforeAction: true,
+    contractDigest: "d".repeat(64),
+    checks: [
+      {
+        id: "AC1",
+        statement: "The loading transition is visible.",
+        evidenceLanes: ["browser"]
+      }
+    ]
+  };
+  const request = {
+    kind: "pr",
+    number: 67,
+    requested: true,
+    proofKind: "GIF",
+    routes: ["/proof/loading"],
+    sha,
+    checkoutRef: sha,
+    intentDigest: "b".repeat(64),
+    behaviorContract,
+    proofPlan: {
+      version: 1,
+      tasks: [
+        {
+          clauseIds: ["AC1"],
+          route: "/proof/loading",
+          actions: [{ type: "navigate", path: "/proof/loading" }],
+          intermediateAssertions: [
+            { type: "visible", selector: "[data-agent-proof='opening']" }
+          ],
+          finalAssertions: [
+            { type: "visible", selector: "[data-agent-proof='signin']" }
+          ]
+        }
+      ]
+    },
+    evidenceLanes: ["browser"]
+  };
+  const result = {
+    proofKind: "GIF",
+    status: "passed",
+    commands: ["open /proof/loading"],
+    artifactPaths: [log, gif, video],
+    artifactUrl: "",
+    artifactDigests: [
+      { name: "crabbox-gifProof.log", sha256: digest(log) },
+      { name: "bundle/screen.trimmed.gif", sha256: digest(gif) },
+      { name: "bundle/screen.trimmed.mp4", sha256: digest(video) }
+    ],
+    provider: "test",
+    leaseId: "test-lease",
+    summary: "Browser behavior passed.",
+    blocker: "",
+    evidenceLanes: ["browser"],
+    behaviorReport: commandBehaviorReport({
+      contract: behaviorContract,
+      passed: true,
+      access: `pull request #67 head ${sha}`,
+      commands: ["open /proof/loading"],
+      evidenceLanes: ["browser"]
+    })
+  };
+  const remoteOutcome = { terminal: true, result, timing: null };
+  const probe = (_path, kind) => ({
+    codec: kind === "gif" ? "gif" : "h264",
+    width: 1280,
+    height: 720,
+    frames: kind === "gif" ? 12 : 24,
+    durationSeconds: 2
+  });
+
+  const outcome = validatePublishedMedia({
+    request,
+    remoteOutcome,
+    artifactDir: root,
+    probe
+  });
+
+  assert.equal(outcome.status, "passed");
+  assert.equal(outcome.headSha, sha);
+  assert.deepEqual(
+    outcome.files.map((file) => file.kind).sort(),
+    ["gif", "video"]
+  );
+  assert.equal(
+    validatePublishedMediaOutcome(outcome, request, result),
+    outcome
+  );
+
+  writeFileSync(gif, "GIF89a-tampered");
+  assert.throws(
+    () =>
+      validatePublishedMedia({
+        request,
+        remoteOutcome,
+        artifactDir: root,
+        probe
+      }),
+    /digest mismatch/
   );
 });
 
@@ -698,6 +829,13 @@ test("proof workflow dispatches automerge only after terminal success is publish
   assert.match(workflow, /create role anon nologin/);
   assert.match(workflow, /create role authenticated nologin/);
   assert.match(workflow, /--execute-service/);
+  assert.match(workflow, /name: verify published media/);
+  assert.match(workflow, /uses: actions\/download-artifact@v4/);
+  assert.match(workflow, /--verify-published-media/);
+  assert.match(
+    finalizeJob,
+    /--published-media-job-result "\$PUBLISHED_MEDIA_JOB_RESULT"/
+  );
   assert.match(workflow, /needs\.prepare\.outputs\.needs_remote == 'true'/);
   assert.match(workflow, /needs\.prepare\.outputs\.needs_service == 'true'/);
   assert.match(workflow, /needs\.prepare\.outputs\.needs_browser != 'true'/);

@@ -389,7 +389,7 @@ export function lightweightTriageDecision(config, issue) {
     /\b(?:render\s+(?:api|blueprint|deploy(?:ment)?|environment|health|logs?|service)|(?:blueprint|deploy(?:ment)?|health|logs?|service)\s+(?:on\s+)?render)\b/i.test(
       classificationProofText
     );
-  const proofNeeded = /\b(?:gif|video|screen recording)\b/i.test(
+  const classifiedProof = /\b(?:gif|video|screen recording)\b/i.test(
     classificationProofText
   )
     ? "GIF"
@@ -403,6 +403,10 @@ export function lightweightTriageDecision(config, issue) {
           ) || labels.includes(config.labels.proof)
         ? "UI"
         : "CI";
+  const proofNeeded =
+    priority === "high" && classifiedProof === "UI"
+      ? "GIF"
+      : classifiedProof;
   const highRisk =
     /\b(?:auth(?:entication|orization)?|security|secret|credential|billing|payment|migration|production data|destructive|delete production|external integration|webhook|broad refactor|architecture|tenant isolation|permission|role)\b/i.test(
       classificationWorkText

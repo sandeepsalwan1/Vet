@@ -1,7 +1,14 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import {
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  writeFileSync
+} from "node:fs";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   AgentError,
@@ -425,6 +432,15 @@ function browserBehaviorReport({ contract, observations, routes }) {
   );
 }
 
+function artifactRecordName(path) {
+  const normalized = resolve(path).replaceAll("\\", "/");
+  const marker = "/.agent-output/";
+  const index = normalized.lastIndexOf(marker);
+  return index === -1
+    ? basename(path)
+    : normalized.slice(index + marker.length);
+}
+
 function artifactDigestRecords(paths) {
   return paths
     .filter((path) => {
@@ -435,9 +451,289 @@ function artifactDigestRecords(paths) {
       }
     })
     .map((path) => ({
-      name: basename(path),
+      name: artifactRecordName(path),
       sha256: createHash("sha256").update(readFileSync(path)).digest("hex")
     }));
+}
+
+function publishedArtifactFiles(root) {
+  const base = resolve(root);
+  const baseInfo = lstatSync(base);
+  if (!baseInfo.isDirectory() || baseInfo.isSymbolicLink()) {
+    throw new AgentError("published proof artifact directory is invalid", 1);
+  }
+  const realBase = realpathSync(base);
+  const files = [];
+  const visit = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isSymbolicLink()) {
+        throw new AgentError("published proof artifact contains a symlink", 1);
+      }
+      if (entry.isDirectory()) {
+        visit(path);
+        continue;
+      }
+      const info = lstatSync(path);
+      if (!info.isFile() || info.size <= 0) {
+        throw new AgentError("published proof artifact contains an invalid file", 1);
+      }
+      const realPath = realpathSync(path);
+      const offset = relative(realBase, realPath);
+      if (!offset || offset.startsWith("..")) {
+        throw new AgentError("published proof artifact path escapes its bundle", 1);
+      }
+      files.push({
+        name: offset.replaceAll("\\", "/"),
+        path: realPath,
+        sha256: createHash("sha256")
+          .update(readFileSync(realPath))
+          .digest("hex")
+      });
+    }
+  };
+  visit(base);
+  return files.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function publishedMediaKind(name) {
+  const extension = extname(name).toLowerCase();
+  if (extension === ".gif") return "gif";
+  if (extension === ".mp4" || extension === ".webm") return "video";
+  if (extension === ".png") return "screenshot";
+  return "";
+}
+
+function ffprobePublishedMedia(path, kind) {
+  const probe = runCommand(
+    "ffprobe",
+    [
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-count_frames",
+      "-show_entries",
+      "stream=codec_name,width,height,nb_read_frames,duration:format=duration",
+      "-of",
+      "json",
+      path
+    ],
+    { check: false }
+  );
+  if (probe.status !== 0) {
+    throw new AgentError(`published ${kind} proof media is not playable`, 1);
+  }
+  let value;
+  try {
+    value = JSON.parse(probe.stdout);
+  } catch {
+    throw new AgentError(`published ${kind} proof media probe is invalid`, 1);
+  }
+  const stream = value?.streams?.[0];
+  const codec = String(stream?.codec_name ?? "");
+  const width = Number(stream?.width);
+  const height = Number(stream?.height);
+  const frames = Number(stream?.nb_read_frames ?? 0);
+  const durationSeconds = Number(
+    stream?.duration ?? value?.format?.duration ?? 0
+  );
+  const expectedCodec =
+    kind === "gif" ? "gif" : kind === "screenshot" ? "png" : "";
+  if (
+    !stream ||
+    !codec ||
+    (expectedCodec && codec !== expectedCodec) ||
+    !Number.isFinite(width) ||
+    width <= 0 ||
+    !Number.isFinite(height) ||
+    height <= 0 ||
+    (kind === "gif" && (!Number.isFinite(frames) || frames < 2)) ||
+    (kind === "video" &&
+      (!Number.isFinite(durationSeconds) || durationSeconds <= 0))
+  ) {
+    throw new AgentError(`published ${kind} proof media is not playable`, 1);
+  }
+  return {
+    codec,
+    width,
+    height,
+    frames: Number.isFinite(frames) ? frames : 0,
+    durationSeconds: Number.isFinite(durationSeconds)
+      ? durationSeconds
+      : 0
+  };
+}
+
+export function validatePublishedMedia({
+  request,
+  remoteOutcome,
+  artifactDir,
+  probe = ffprobePublishedMedia
+}) {
+  validateRequest(request);
+  if (!request.evidenceLanes.includes("browser")) {
+    throw new AgentError("published media validation requires browser proof", 1);
+  }
+  if (remoteOutcome?.terminal !== true) {
+    throw new AgentError("published media validation has no terminal remote proof", 1);
+  }
+  const remoteResult = normalizeResult(remoteOutcome.result, request);
+  if (remoteResult.status !== "passed") {
+    throw new AgentError("published media validation requires passing remote proof", 1);
+  }
+  const files = publishedArtifactFiles(artifactDir);
+  const expected = remoteResult.artifactDigests;
+  const expectedFor = (file) => {
+    const exact = expected.filter((record) => record.name === file.name);
+    if (exact.length === 1) return exact[0];
+    const byBasename = expected.filter(
+      (record) => basename(record.name) === basename(file.name)
+    );
+    return byBasename.length === 1 ? byBasename[0] : null;
+  };
+  for (const record of expected) {
+    const matches = files.filter(
+      (file) =>
+        file.name === record.name ||
+        basename(file.name) === basename(record.name)
+    );
+    if (
+      matches.length !== 1 ||
+      matches[0].sha256 !== record.sha256
+    ) {
+      throw new AgentError(
+        `published proof artifact digest mismatch: ${record.name}`,
+        1
+      );
+    }
+  }
+  const headMarker = `AGENT_PROOF_HEAD_OK ${request.sha}`;
+  if (
+    request.kind === "pr" &&
+    !files.some(
+      (file) =>
+        extname(file.name).toLowerCase() === ".log" &&
+        readFileSync(file.path, "utf8").includes(headMarker)
+    )
+  ) {
+    throw new AgentError(
+      "published proof artifact is not bound to the exact pull request head",
+      1
+    );
+  }
+  const media = files
+    .map((file) => ({ ...file, kind: publishedMediaKind(file.name) }))
+    .filter((file) => file.kind);
+  const requiredKinds =
+    request.proofKind === "GIF"
+      ? ["gif", "video"]
+      : ["screenshot"];
+  for (const kind of requiredKinds) {
+    if (!media.some((file) => file.kind === kind)) {
+      throw new AgentError(
+        `published proof artifact has no reviewable ${kind} media`,
+        1
+      );
+    }
+  }
+  const verifiedFiles = media.map((file) => {
+    const expectedRecord = expectedFor(file);
+    if (!expectedRecord || expectedRecord.sha256 !== file.sha256) {
+      throw new AgentError(
+        `published proof media digest mismatch: ${file.name}`,
+        1
+      );
+    }
+    return {
+      name: file.name,
+      sha256: file.sha256,
+      kind: file.kind,
+      ...probe(file.path, file.kind)
+    };
+  });
+  return {
+    version: 1,
+    status: "passed",
+    headSha: request.sha,
+    proofKind: request.proofKind,
+    files: verifiedFiles,
+    summary: `Downloaded and opened ${verifiedFiles.length} exact-head proof media file(s).`
+  };
+}
+
+export function validatePublishedMediaOutcome(
+  outcome,
+  request,
+  proofResult = null
+) {
+  if (
+    !outcome ||
+    Array.isArray(outcome) ||
+    JSON.stringify(Object.keys(outcome).sort()) !==
+      JSON.stringify(
+        ["files", "headSha", "proofKind", "status", "summary", "version"].sort()
+      ) ||
+    outcome.version !== 1 ||
+    outcome.status !== "passed" ||
+    outcome.headSha !== request.sha ||
+    outcome.proofKind !== request.proofKind ||
+    typeof outcome.summary !== "string" ||
+    !outcome.summary ||
+    !Array.isArray(outcome.files) ||
+    outcome.files.length === 0 ||
+    outcome.files.some(
+      (file) =>
+        !file ||
+        typeof file.name !== "string" ||
+        !file.name ||
+        !/^[a-f0-9]{64}$/.test(file.sha256 ?? "") ||
+        !["gif", "video", "screenshot"].includes(file.kind) ||
+        typeof file.codec !== "string" ||
+        !file.codec ||
+        !Number.isFinite(file.width) ||
+        file.width <= 0 ||
+        !Number.isFinite(file.height) ||
+        file.height <= 0 ||
+        !Number.isFinite(file.frames) ||
+        file.frames < 0 ||
+        !Number.isFinite(file.durationSeconds) ||
+        file.durationSeconds < 0 ||
+        (file.kind === "gif" && file.frames < 2) ||
+        (file.kind === "video" && file.durationSeconds <= 0)
+    )
+  ) {
+    throw new AgentError("published proof media outcome is invalid", 1);
+  }
+  const requiredKinds =
+    request.proofKind === "GIF"
+      ? ["gif", "video"]
+      : ["screenshot"];
+  if (
+    requiredKinds.some(
+      (kind) => !outcome.files.some((file) => file.kind === kind)
+    )
+  ) {
+    throw new AgentError("published proof media outcome is incomplete", 1);
+  }
+  if (
+    proofResult &&
+    outcome.files.some(
+      (file) =>
+        !proofResult.artifactDigests?.some(
+          (record) =>
+            record.sha256 === file.sha256 &&
+            (record.name === file.name ||
+              basename(record.name) === basename(file.name))
+        )
+    )
+  ) {
+    throw new AgentError(
+      "published proof media outcome does not match the proof result",
+      1
+    );
+  }
+  return outcome;
 }
 
 function shellQuote(value) {
@@ -504,6 +800,12 @@ export function proofBody(result, routes, timingRecord) {
   const timing = timingRecord
     ? `${timingRecord.totalMs}ms total, ${timingRecord.commandMs ?? 0}ms command`
     : "none";
+  const artifactLabel =
+    result.proofKind === "GIF"
+      ? "Open reviewer GIF/video proof bundle"
+      : result.proofKind === "UI"
+        ? "Open reviewer visual proof bundle"
+        : "Open or download the proof bundle";
   return `## Agent Proof
 
 Status: ${result.status}
@@ -522,11 +824,15 @@ ${result.commands.length ? result.commands.map((command) => `- ${command}`).join
 
 Artifacts:
 
-${result.artifactUrl ? `- [Open or download the proof bundle](${result.artifactUrl})` : "- none"}
+${result.artifactUrl ? `- [${artifactLabel}](${result.artifactUrl})` : "- none"}
 
 Artifact digests:
 
 ${result.artifactDigests?.length ? result.artifactDigests.map((record) => `- \`${record.sha256}\` ${record.name}`).join("\n") : "- none"}
+
+Published media validation:
+
+${result.publishedMedia?.files?.length ? result.publishedMedia.files.map((file) => `- ${file.kind}: \`${file.name}\` (${file.width}x${file.height}, ${file.codec}${file.frames ? `, ${file.frames} frames` : ""}${file.durationSeconds ? `, ${file.durationSeconds}s` : ""})`).join("\n") : "- none"}
 
 <details>
 <summary>Runner artifact inventory</summary>
@@ -1194,6 +1500,28 @@ async function executeRemoteMain(args, config) {
   finish({ ok: true, message: "remote proof orchestration completed", outcome }, Boolean(args.json));
 }
 
+async function verifyPublishedMediaMain(args) {
+  const request = validateRequest(readModeDocument(args, "request"));
+  const remoteOutcome = readModeDocument(args, "remote-outcome");
+  const outcome = validatePublishedMedia({
+    request,
+    remoteOutcome,
+    artifactDir: args["artifact-dir"]
+  });
+  if (args["outcome-file"]) {
+    writeJsonFile(args["outcome-file"], outcome);
+  }
+  setGitHubOutput({ outcome_b64: encodeJson(outcome) });
+  finish(
+    {
+      ok: true,
+      message: outcome.summary,
+      outcome
+    },
+    Boolean(args.json)
+  );
+}
+
 function assertExactCheckout(request, workdir) {
   if (request.kind !== "pr") return;
   const actual = runCommand("git", ["rev-parse", "HEAD"], { cwd: workdir }).stdout.trim();
@@ -1567,6 +1895,9 @@ async function finalizeMain(args, config) {
   const serviceConfigJobResult = String(
     args["service-config-job-result"] ?? "skipped"
   );
+  const publishedMediaJobResult = String(
+    args["published-media-job-result"] ?? "skipped"
+  );
   let result = resolveTerminalResult({
     request,
     remoteOutcome,
@@ -1590,7 +1921,6 @@ async function finalizeMain(args, config) {
   let timingRecord = selectedOutcome?.timing ?? null;
   let mayMutateTarget = true;
   const artifactUrl = validateArtifactUrl(args["artifact-url"], config);
-  result.artifactUrl = artifactUrl;
   if (
     request.evidenceLanes.includes("browser") &&
     result.status === "passed" &&
@@ -1599,6 +1929,37 @@ async function finalizeMain(args, config) {
     result = failedWorkflowResult(request, "Visual capture completed, but no reviewable GitHub artifact was published.");
     timingRecord = null;
   }
+  if (
+    request.evidenceLanes.includes("browser") &&
+    result.status === "passed"
+  ) {
+    try {
+      if (
+        publishedMediaJobResult !== "success" ||
+        !args["published-media-outcome-base64"]
+      ) {
+        throw new AgentError(
+          "the published proof bundle was not downloaded and opened",
+          1
+        );
+      }
+      result.publishedMedia = validatePublishedMediaOutcome(
+        decodeJson(
+          args["published-media-outcome-base64"],
+          "published media outcome"
+        ),
+        request,
+        result
+      );
+    } catch (error) {
+      result = failedWorkflowResult(
+        request,
+        `Published proof media validation failed: ${error.message}`
+      );
+      timingRecord = null;
+    }
+  }
+  result.artifactUrl = artifactUrl;
 
   if (request.kind === "pr" && request.requested) {
     const current = targetDetails(config, "pr", request.number);
@@ -1755,6 +2116,9 @@ async function main(args = parseArgs()) {
   const config = loadConfig();
   if (args["prepare-file"] || args.prepare) return prepareMain(args, config);
   if (args["execute-remote"]) return executeRemoteMain(args, config);
+  if (args["verify-published-media"]) {
+    return verifyPublishedMediaMain(args);
+  }
   if (args["execute-service"]) return executeServiceMain(args, config);
   if (args["execute-local"]) return executeLocalMain(args, config);
   if (args["finalize-prepare-failure"]) {

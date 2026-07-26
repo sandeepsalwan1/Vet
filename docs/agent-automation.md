@@ -55,6 +55,8 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
    Remaining `auto-fix` findings may return to the independent reviewer within the shared three-revision budget, while `ask-user` findings and exhausted repair budgets block.
 8. Proof validates the sealed behavior contract.
    UI and GIF proof execute the implementation proof plan in a source-blind browser, assert intermediate and final rendered state, bind every browser-assigned acceptance clause, and publish the structured behavior report plus artifact digests.
+   High-priority user-visible work automatically requires GIF or video proof.
+   Before visual proof passes, a credential-free job downloads the published Actions artifact, verifies its exact-head marker and digests, opens each media file with `ffprobe`, and publishes a clearly labeled pull-request link for manual review.
    Trusted finalization combines browser, deterministic, and service evidence and passes only when every clause's assigned lanes pass.
 9. Automerge updates an eligible stale branch, reruns head-bound CI and review, and merges only after every gate passes on the new head.
 10. After a trusted merge, automerge resolves the exact merge commit, dispatches baseline CI, CodeQL, and trusted Render verification for it, removes agent workflow labels, and closes the linked source issue while preserving priority labels.

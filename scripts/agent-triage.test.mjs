@@ -378,6 +378,25 @@ The Render service deploys the exact merge.
   assert.equal(service.proofNeeded, "service");
 });
 
+test("high-priority user-visible work automatically requires reviewable motion proof", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 39,
+    title: "Polish the patient handoff screen",
+    body: `### Outcome
+
+Staff see a clear handoff confirmation.
+
+### Acceptance criteria
+
+- The handoff page visibly transitions from saving to complete.`,
+    labels: [{ name: config.labels.priorityHigh }]
+  });
+
+  assert.equal(result.priority, "high");
+  assert.equal(result.proofNeeded, "GIF");
+  assert.equal(result.automationDecision, "implement");
+});
+
 test("proofless issue-form headings do not request UI proof", () => {
   const result = lightweightTriageDecision(config, {
     number: 42,

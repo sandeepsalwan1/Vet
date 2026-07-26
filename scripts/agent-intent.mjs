@@ -9,7 +9,7 @@ import {
   issueSnapshotSha256
 } from "./agent-lib.mjs";
 
-export const INTENT_CAPSULE_VERSION = 4;
+export const INTENT_CAPSULE_VERSION = 5;
 export const IMPLEMENTATION_RESULT_VERSION = 1;
 export const IMPLEMENTATION_ADDENDUM_MARKER =
   "<!-- agent-intent-addendum:v1 -->";
@@ -23,6 +23,7 @@ const TRANSIENT_INTENT_LABELS = new Set(["agent:implement", "agent:triage"]);
 const BEHAVIOR_CONTRACT_VERSION = 2;
 const STABLE_INTENT_LABEL_VERSION = 3;
 const EVIDENCE_LANE_CONTRACT_VERSION = 4;
+const REFINED_EVIDENCE_LANE_CONTRACT_VERSION = 5;
 export const BASE_TRIAGE_FIELDS = Object.freeze([
   "value",
   "priority",
@@ -375,7 +376,11 @@ function proofRoutes(sections) {
   return [...new Set(value.split(/\s+/).filter(Boolean).map((route) => safeProofRoute(route)))].sort();
 }
 
-export function clauseEvidenceLanes(statement, proofKind) {
+export function clauseEvidenceLanes(
+  statement,
+  proofKind,
+  contractVersion = 3
+) {
   const text = normalizedText(statement).toLowerCase();
   const lanes = new Set();
   if (
@@ -392,11 +397,11 @@ export function clauseEvidenceLanes(statement, proofKind) {
   ) {
     lanes.add("service");
   }
-  if (
-    /\b(?:visible|page|screen|route|open|click|loading|render|copy|text|layout|style|form|button|link|user|browser|animation|transition)\b/.test(
-      text
-    )
-  ) {
+  const browserPattern =
+    contractVersion >= 3
+      ? /\b(?:visible|page|screen|click|loading|render|copy|text|layout|style|form|button|user|browser|animation|transition|navigation|timing)\b/
+      : /\b(?:visible|page|screen|route|open|click|loading|render|copy|text|layout|style|form|button|link|user|browser|animation|transition)\b/;
+  if (browserPattern.test(text)) {
     lanes.add("browser");
   }
   if (!lanes.size) {
@@ -427,7 +432,11 @@ function behaviorContract({
 }) {
   const userTasks = requirementLines(sections["proof interaction"]);
   const contractVersion =
-    version >= EVIDENCE_LANE_CONTRACT_VERSION ? 2 : 1;
+    version >= REFINED_EVIDENCE_LANE_CONTRACT_VERSION
+      ? 3
+      : version >= EVIDENCE_LANE_CONTRACT_VERSION
+        ? 2
+        : 1;
   const payload = {
     version: contractVersion,
     goal: outcome,
@@ -446,7 +455,13 @@ function behaviorContract({
       id: `AC${index + 1}`,
       statement,
       ...(contractVersion >= 2
-        ? { evidenceLanes: clauseEvidenceLanes(statement, proofKind) }
+        ? {
+            evidenceLanes: clauseEvidenceLanes(
+              statement,
+              proofKind,
+              contractVersion
+            )
+          }
         : {})
     })),
     antiCheatProbes:
@@ -513,7 +528,7 @@ function validateBehaviorContract(contract, acceptanceCriteria, proofKind) {
     !contract ||
     Array.isArray(contract) ||
     JSON.stringify(Object.keys(contract).sort()) !== JSON.stringify(expectedKeys) ||
-    ![1, 2].includes(contract.version) ||
+    ![1, 2, 3].includes(contract.version) ||
     !/^[a-f0-9]{64}$/.test(contract.contractDigest ?? "") ||
     sha256(JSON.stringify(payload)) !== contract.contractDigest ||
     contract.target?.proofKind !== proofKind ||
@@ -533,7 +548,13 @@ function validateBehaviorContract(contract, acceptanceCriteria, proofKind) {
           id: `AC${index + 1}`,
           statement,
           ...(contract.version >= 2
-            ? { evidenceLanes: clauseEvidenceLanes(statement, proofKind) }
+            ? {
+                evidenceLanes: clauseEvidenceLanes(
+                  statement,
+                  proofKind,
+                  contract.version
+                )
+              }
             : {})
         }))
       ) ||
@@ -549,7 +570,7 @@ function validateBehaviorContract(contract, acceptanceCriteria, proofKind) {
   return contract;
 }
 
-function createIntentCapsuleVersion({
+export function createIntentCapsuleVersion({
   issue,
   decision,
   ownerClarifications = [],
@@ -633,9 +654,13 @@ export function validateIntentCapsule(capsule) {
     !capsule ||
     Array.isArray(capsule) ||
     JSON.stringify(Object.keys(capsule).sort()) !== JSON.stringify(expectedKeys) ||
-    ![1, BEHAVIOR_CONTRACT_VERSION, STABLE_INTENT_LABEL_VERSION, INTENT_CAPSULE_VERSION].includes(
-      capsule.version
-    ) ||
+    ![
+      1,
+      BEHAVIOR_CONTRACT_VERSION,
+      STABLE_INTENT_LABEL_VERSION,
+      EVIDENCE_LANE_CONTRACT_VERSION,
+      INTENT_CAPSULE_VERSION
+    ].includes(capsule.version) ||
     !Number.isSafeInteger(capsule.sourceIssue) ||
     capsule.sourceIssue <= 0 ||
     !/^[a-f0-9]{64}$/.test(capsule.issueSnapshotSha256 ?? "") ||
@@ -883,6 +908,7 @@ export function intentCapsuleForManagedTriage({
   }
   for (const legacyIssue of legacyIntentIssues(issue, decision)) {
     for (const version of [
+      EVIDENCE_LANE_CONTRACT_VERSION,
       STABLE_INTENT_LABEL_VERSION,
       BEHAVIOR_CONTRACT_VERSION,
       1
