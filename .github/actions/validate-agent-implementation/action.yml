@@ -1,0 +1,180 @@
+name: Validate agent implementation
+description: Validate one sealed implementation artifact without credentials or network access
+
+inputs:
+  artifact-name:
+    description: Generated implementation artifact name
+    required: true
+  issue-number:
+    description: Source issue number
+    required: true
+  allow-repair:
+    description: Publish bounded feedback instead of failing on candidate check failure
+    required: false
+    default: "false"
+
+outputs:
+  validated:
+    description: Whether the candidate passed and was sealed
+    value: ${{ steps.result.outputs.validated }}
+  repair-needed:
+    description: Whether one focused pre-publication repair should run
+    value: ${{ steps.result.outputs.repair-needed }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+        cache: npm
+    - name: Install dependencies without host lifecycle scripts
+      shell: bash
+      run: |
+        stop_token="$(openssl rand -hex 32)"
+        printf '::stop-commands::%s\n' "$stop_token"
+        restore_commands() { printf '::%s::\n' "$stop_token"; }
+        trap restore_commands EXIT
+        env -u GH_TOKEN -u GITHUB_TOKEN -u AGENT_PAT \
+          -u OPENAI_API_KEY -u CODEX_API_KEY \
+          -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
+          -u GITHUB_ENV -u GITHUB_OUTPUT -u GITHUB_PATH -u GITHUB_STEP_SUMMARY \
+          npm ci --ignore-scripts --no-audit --no-fund
+    - name: Rebuild dependencies offline and isolated
+      shell: bash
+      env:
+        DOCKER_IMAGE: node:22-bookworm@sha256:a25c9934ff6382cd4f08b6bc26c82bf4ea69b1e6f8dabfb2ead457374127c365
+      run: |
+        docker pull "$DOCKER_IMAGE"
+        stop_token="$(openssl rand -hex 32)"
+        printf '::stop-commands::%s\n' "$stop_token"
+        restore_commands() { printf '::%s::\n' "$stop_token"; }
+        trap restore_commands EXIT
+        docker run --rm \
+          --network none \
+          --user "$(id -u):$(id -g)" \
+          --cap-drop ALL \
+          --security-opt no-new-privileges \
+          --read-only \
+          --mount "type=bind,src=$PWD,dst=/workspace,readonly" \
+          --mount "type=bind,src=$PWD/node_modules,dst=/workspace/node_modules" \
+          --mount type=tmpfs,dst=/tmp,tmpfs-mode=1777 \
+          --workdir /workspace \
+          --env HOME=/tmp/home \
+          --env npm_config_cache=/tmp/npm-cache \
+          --env npm_config_nodedir=/usr/local \
+          "$DOCKER_IMAGE" \
+          npm rebuild --offline --no-audit --no-fund
+    - uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: .agent-output
+    - name: Prepare pristine candidate tree
+      id: prepare
+      shell: bash
+      run: >-
+        node scripts/agent-implement.mjs
+        --issue-number "${{ inputs.issue-number }}"
+        --prepare-validation .agent-output/codex.patch
+        --codex-output .agent-output/implementation.md
+        --prepared-metadata "$RUNNER_TEMP/implementation-prepared.json"
+        --candidate-dir "$RUNNER_TEMP/implementation-candidate"
+        --json
+    - name: Run candidate checks in isolated container
+      id: candidate-checks
+      continue-on-error: true
+      shell: bash
+      env:
+        DOCKER_IMAGE: node:22-bookworm@sha256:a25c9934ff6382cd4f08b6bc26c82bf4ea69b1e6f8dabfb2ead457374127c365
+      run: |
+        stop_token="$(openssl rand -hex 32)"
+        printf '::stop-commands::%s\n' "$stop_token"
+        restore_commands() { printf '::%s::\n' "$stop_token"; }
+        trap restore_commands EXIT
+        docker run --rm \
+          --network none \
+          --cap-drop ALL \
+          --security-opt no-new-privileges \
+          --read-only \
+          --mount "type=bind,src=$RUNNER_TEMP/implementation-candidate,dst=/workspace" \
+          --mount "type=bind,src=$PWD/node_modules,dst=/workspace/node_modules,readonly" \
+          --mount type=tmpfs,dst=/tmp,tmpfs-mode=1777 \
+          --workdir /workspace \
+          --env AGENT_VALIDATION_CONTAINER=1 \
+          --env CI=true \
+          --env HOME=/tmp/home \
+          --env npm_config_cache=/tmp/npm-cache \
+          "$DOCKER_IMAGE" \
+          node scripts/agent-implement.mjs \
+            --issue-number "${{ inputs.issue-number }}" \
+            --run-validation-checks \
+            --validation-feedback .agent-output/validation-feedback.json \
+            --json
+    - name: Reverify and seal validated artifact
+      id: finalize
+      if: steps.candidate-checks.outcome == 'success'
+      shell: bash
+      run: >-
+        node scripts/agent-implement.mjs
+        --issue-number "${{ inputs.issue-number }}"
+        --finalize-validation .agent-output/codex.patch
+        --codex-output .agent-output/implementation.md
+        --prepared-metadata "$RUNNER_TEMP/implementation-prepared.json"
+        --write-manifest .agent-output/integrity.json
+        --json
+    - name: Upload validated implementation
+      id: validated-artifact
+      if: steps.candidate-checks.outcome == 'success' && steps.finalize.outcome == 'success'
+      uses: actions/upload-artifact@v4
+      with:
+        name: agent-implementation-validated-${{ inputs.issue-number }}
+        path: |
+          .agent-output/codex.patch
+          .agent-output/implementation.md
+          .agent-output/model-usage.json
+          .agent-output/implementation-remote.json
+          .agent-output/model-usage-initial.json
+          .agent-output/implementation-remote-initial.json
+          .agent-output/integrity.json
+        include-hidden-files: true
+        if-no-files-found: error
+    - name: Prepare bounded repair context
+      if: steps.candidate-checks.outcome == 'failure' && inputs.allow-repair == 'true'
+      shell: bash
+      run: cp "$RUNNER_TEMP/implementation-candidate/.agent-output/validation-feedback.json" .agent-output/validation-feedback.json
+    - name: Upload bounded repair context
+      id: repair-context
+      if: steps.candidate-checks.outcome == 'failure' && inputs.allow-repair == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: agent-implementation-repair-context-${{ inputs.issue-number }}
+        path: |
+          .agent-output/codex.patch
+          .agent-output/implement-prompt.md
+          .agent-output/implementation-intent.json
+          .agent-output/implementation.md
+          .agent-output/model-usage.json
+          .agent-output/implementation-remote.json
+          .agent-output/validation-feedback.json
+        include-hidden-files: true
+        if-no-files-found: error
+    - name: Classify validation result
+      id: result
+      if: always()
+      shell: bash
+      env:
+        ALLOW_REPAIR: ${{ inputs.allow-repair }}
+        CHECK_OUTCOME: ${{ steps.candidate-checks.outcome }}
+        REPAIR_CONTEXT_OUTCOME: ${{ steps.repair-context.outcome }}
+        VALIDATED_ARTIFACT_OUTCOME: ${{ steps.validated-artifact.outcome }}
+      run: |
+        if [ "$CHECK_OUTCOME" = success ] && [ "$VALIDATED_ARTIFACT_OUTCOME" = success ]; then
+          printf 'validated=true\nrepair-needed=false\n' >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        if [ "$ALLOW_REPAIR" = true ] && [ "$CHECK_OUTCOME" = failure ] && [ "$REPAIR_CONTEXT_OUTCOME" = success ]; then
+          printf 'validated=false\nrepair-needed=true\n' >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        printf 'validated=false\nrepair-needed=false\n' >> "$GITHUB_OUTPUT"
+        exit 1

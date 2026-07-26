@@ -66,7 +66,7 @@ test("every costly agent job uses its configured global slot with queued admissi
   const expectations = [
     [".github/workflows/agent-propose.yml", "proposer", 1],
     [".github/workflows/agent-triage.yml", "triage", 1],
-    [".github/workflows/agent-implement.yml", "implement", 1],
+    [".github/workflows/agent-implement.yml", "implement", 2],
     [".github/workflows/agent-review.yml", "review", 1],
     [".github/workflows/agent-no-mistakes.yml", "review", 1],
     [".github/workflows/agent-proof.yml", "proof", 3]

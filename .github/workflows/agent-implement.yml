@@ -155,6 +155,7 @@ jobs:
             node scripts/agent-crabbox-run.mjs
             --seed-exact-repository
             --expected-tree "${{ steps.source-tree.outputs.tree }}" --json &&
+            npm ci --ignore-scripts --no-audit --no-fund &&
             npm install --global --ignore-scripts --no-audit --no-fund @openai/codex@0.144.1 &&
             codex debug prompt-input 'skill discovery probe'
             > /tmp/vet-worker-prompt-input.json &&
@@ -199,10 +200,40 @@ jobs:
     runs-on: ubuntu-latest
     needs: generate-patch-remote
     if: needs.generate-patch-remote.outputs.generated == 'true'
+    outputs:
+      repair-needed: ${{ steps.validate.outputs.repair-needed }}
+      validated: ${{ steps.validate.outputs.validated }}
     permissions:
       contents: read
-    env:
-      DOCKER_IMAGE: node:22-bookworm@sha256:a25c9934ff6382cd4f08b6bc26c82bf4ea69b1e6f8dabfb2ead457374127c365
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/validate-agent-implementation
+        id: validate
+        with:
+          artifact-name: agent-implementation-${{ inputs.issue-number }}
+          issue-number: ${{ inputs.issue-number }}
+          allow-repair: "true"
+
+  repair-patch-remote:
+    name: repair-patch-remote
+    needs:
+      - prepare-prompt
+      - generate-patch-remote
+      - validate-patch
+    if: needs.validate-patch.outputs.repair-needed == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      generated: ${{ steps.generate.outcome == 'success' && steps.repair-artifact.outcome == 'success' }}
+    concurrency:
+      group: ${{ needs.prepare-prompt.outputs.concurrency-group }}
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v5
         with:
@@ -213,106 +244,125 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-      # Install the trusted base without lifecycle code. Rebuild lifecycle
-      # dependencies offline in a credential-free container before the patch exists.
-      - name: Install dependencies without host lifecycle scripts
-        run: |
-          stop_token="$(openssl rand -hex 32)"
-          printf '::stop-commands::%s\n' "$stop_token"
-          restore_commands() { printf '::%s::\n' "$stop_token"; }
-          trap restore_commands EXIT
-          env -u GH_TOKEN -u GITHUB_TOKEN -u AGENT_PAT \
-            -u OPENAI_API_KEY -u CODEX_API_KEY \
-            -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
-            -u GITHUB_ENV -u GITHUB_OUTPUT -u GITHUB_PATH -u GITHUB_STEP_SUMMARY \
-            npm ci --ignore-scripts --no-audit --no-fund
-      - name: Rebuild dependencies offline and isolated
-        run: |
-          docker pull "$DOCKER_IMAGE"
-          stop_token="$(openssl rand -hex 32)"
-          printf '::stop-commands::%s\n' "$stop_token"
-          restore_commands() { printf '::%s::\n' "$stop_token"; }
-          trap restore_commands EXIT
-          docker run --rm \
-            --network none \
-            --user "$(id -u):$(id -g)" \
-            --cap-drop ALL \
-            --security-opt no-new-privileges \
-            --read-only \
-            --mount "type=bind,src=$PWD,dst=/workspace,readonly" \
-            --mount "type=bind,src=$PWD/node_modules,dst=/workspace/node_modules" \
-            --mount type=tmpfs,dst=/tmp,tmpfs-mode=1777 \
-            --workdir /workspace \
-            --env HOME=/tmp/home \
-            --env npm_config_cache=/tmp/npm-cache \
-            --env npm_config_nodedir=/usr/local \
-            "$DOCKER_IMAGE" \
-            npm rebuild --offline --no-audit --no-fund
       - uses: actions/download-artifact@v4
         with:
-          name: agent-implementation-${{ inputs.issue-number }}
+          name: agent-implementation-repair-context-${{ inputs.issue-number }}
           path: .agent-output
-      - name: Prepare pristine candidate tree
+      - name: Build bounded repair prompt
         run: >-
           node scripts/agent-implement.mjs
           --issue-number "${{ inputs.issue-number }}"
-          --prepare-validation .agent-output/codex.patch
+          --write-repair-prompt .agent-output/implement-repair-prompt.md
+          --validation-feedback .agent-output/validation-feedback.json
           --codex-output .agent-output/implementation.md
-          --prepared-metadata "$RUNNER_TEMP/implementation-prepared.json"
-          --candidate-dir "$RUNNER_TEMP/implementation-candidate"
           --json
-      # Candidate code can write only its disposable tree. It has no network,
-      # credentials, workflow command paths, artifact directory, or writable dependencies.
-      - name: Run candidate checks in isolated container
+      - name: Preserve initial cost evidence
         run: |
-          stop_token="$(openssl rand -hex 32)"
-          printf '::stop-commands::%s\n' "$stop_token"
-          restore_commands() { printf '::%s::\n' "$stop_token"; }
-          trap restore_commands EXIT
-          docker run --rm \
-            --network none \
-            --cap-drop ALL \
-            --security-opt no-new-privileges \
-            --read-only \
-            --mount "type=bind,src=$RUNNER_TEMP/implementation-candidate,dst=/workspace" \
-            --mount "type=bind,src=$PWD/node_modules,dst=/workspace/node_modules,readonly" \
-            --mount type=tmpfs,dst=/tmp,tmpfs-mode=1777 \
-            --workdir /workspace \
-            --env AGENT_VALIDATION_CONTAINER=1 \
-            --env CI=true \
-            --env HOME=/tmp/home \
-            --env npm_config_cache=/tmp/npm-cache \
-            "$DOCKER_IMAGE" \
-            node scripts/agent-implement.mjs \
-              --issue-number "${{ inputs.issue-number }}" \
-              --run-validation-checks \
-              --json
-      - name: Reverify and seal validated artifact
-        run: >-
-          node scripts/agent-implement.mjs
-          --issue-number "${{ inputs.issue-number }}"
-          --finalize-validation .agent-output/codex.patch
-          --codex-output .agent-output/implementation.md
-          --prepared-metadata "$RUNNER_TEMP/implementation-prepared.json"
-          --write-manifest .agent-output/integrity.json
-          --json
-      - uses: actions/upload-artifact@v4
+          mv .agent-output/model-usage.json .agent-output/model-usage-initial.json
+          mv .agent-output/implementation-remote.json .agent-output/implementation-remote-initial.json
+      - name: Capture exact repair tree
+        id: source-tree
+        run: printf 'tree=%s\n' "$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+      - name: Stage trusted remote repair input
+        run: node scripts/agent-crabbox-run.mjs --stage-input-lane implementRepairRemote --json
+      - uses: ./.github/actions/setup-crabbox
         with:
-          name: agent-implementation-validated-${{ inputs.issue-number }}
-          path: |
-            .agent-output/codex.patch
-            .agent-output/implementation.md
-            .agent-output/model-usage.json
-            .agent-output/implementation-remote.json
-            .agent-output/integrity.json
+          vercel-ready: ${{ vars.CRABBOX_VERCEL_READY }}
+      - name: Repair patch in Crabbox
+        id: generate
+        env:
+          CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_OIDC_TOKEN: ${{ secrets.VERCEL_OIDC_TOKEN }}
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          HETZNER_TOKEN: ${{ secrets.HETZNER_TOKEN }}
+          HETZNER_API_TOKEN: ${{ secrets.HETZNER_API_TOKEN }}
+          CRABBOX_VERCEL_READY: ${{ vars.CRABBOX_VERCEL_READY }}
+          CRABBOX_HETZNER_READY: ${{ vars.CRABBOX_HETZNER_READY }}
+          REMOTE_COMMAND: >-
+            set -e;
+            node scripts/agent-crabbox-run.mjs
+            --restore-input-lane implementRepairRemote --json &&
+            agent_key="$CODEX_API_KEY"; unset CODEX_API_KEY OPENAI_API_KEY;
+            node scripts/agent-crabbox-run.mjs
+            --seed-exact-repository
+            --expected-tree "${{ steps.source-tree.outputs.tree }}" --json &&
+            git apply .agent-output/codex.patch &&
+            npm ci --ignore-scripts --no-audit --no-fund &&
+            npm install --global --ignore-scripts --no-audit --no-fund @openai/codex@0.144.1 &&
+            codex debug prompt-input 'skill discovery probe'
+            > /tmp/vet-worker-repair-prompt-input.json &&
+            node scripts/agent-skill-discovery.mjs
+            --input /tmp/vet-worker-repair-prompt-input.json --json &&
+            CODEX_API_KEY="$agent_key" node scripts/agent-worker.mjs
+            --lane implement
+            --model "${{ needs.prepare-prompt.outputs.backend-model }}"
+            --effort "${{ needs.prepare-prompt.outputs.backend-effort }}"
+            --sandbox danger-full-access
+            --prompt-file .agent-output/implement-repair-prompt.md
+            --schema .agent/schemas/implementation.schema.json
+            --usage-file .agent-output/model-usage.json
+            --output-file .agent-output/implementation.md &&
+            unset agent_key && node scripts/agent-implement.mjs
+            --issue-number "${{ inputs.issue-number }}"
+            --create-patch .agent-output/codex.patch --json
+        run: >-
+          node scripts/agent-crabbox-run.mjs
+          --lane implementRepairRemote
+          --command "$REMOTE_COMMAND"
+          --record-file .agent-output/implementation-remote.json
+          --json
+      - id: repair-artifact
+        uses: actions/upload-artifact@v4
+        if: steps.generate.outcome == 'success'
+        with:
+          name: agent-implementation-repaired-${{ inputs.issue-number }}
+          path: .agent-output/*
           include-hidden-files: true
           if-no-files-found: error
+      - name: Upload redacted repair diagnostics
+        if: always() && (steps.generate.outcome != 'success' || steps.repair-artifact.outcome != 'success')
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-implementation-repair-remote-diagnostics-${{ inputs.issue-number }}
+          path: |
+            .agent-output/crabbox-implementRepairRemote-*.json
+            .agent-output/crabbox-implementRepairRemote-*.log
+          include-hidden-files: true
+          if-no-files-found: warn
+
+  validate-repair:
+    name: validate-repair
+    runs-on: ubuntu-latest
+    needs: repair-patch-remote
+    if: needs.repair-patch-remote.outputs.generated == 'true'
+    outputs:
+      validated: ${{ steps.validate.outputs.validated }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/validate-agent-implementation
+        id: validate
+        with:
+          artifact-name: agent-implementation-repaired-${{ inputs.issue-number }}
+          issue-number: ${{ inputs.issue-number }}
+          allow-repair: "false"
 
   open-pr:
     name: open-pr
     runs-on: ubuntu-latest
-    needs: validate-patch
-    if: always() && needs.validate-patch.result == 'success'
+    needs:
+      - validate-patch
+      - validate-repair
+    if: >-
+      always() &&
+      (needs.validate-patch.outputs.validated == 'true' ||
+      needs.validate-repair.outputs.validated == 'true')
     permissions:
       actions: write
       contents: write
@@ -344,7 +394,8 @@ jobs:
           --codex-output .agent-output/implementation.md
           --integrity-manifest .agent-output/integrity.json
           --json
-      - name: Record exact implementation cost
+      - name: Record failed initial implementation cost
+        if: hashFiles('.agent-output/model-usage-initial.json') != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
@@ -352,10 +403,27 @@ jobs:
           --pr-number "${{ steps.apply.outputs.pr_number }}"
           --head-sha "${{ steps.apply.outputs.head_sha }}"
           --lane implement
+          --usage-file .agent-output/model-usage-initial.json
+          --remote-record .agent-output/implementation-remote-initial.json
+          --remote-lane implementRemote
+          --retry-reason "initial validation failure"
+          --effect none
+          --omit-actions-usage
+          --json
+      - name: Record exact implementation cost
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REMOTE_LANE: ${{ needs.validate-repair.outputs.validated == 'true' && 'implementRepairRemote' || 'implementRemote' }}
+          RETRY_REASON: ${{ needs.validate-repair.outputs.validated == 'true' && 'focused validation repair' || 'initial' }}
+        run: >-
+          node scripts/agent-cost.mjs
+          --pr-number "${{ steps.apply.outputs.pr_number }}"
+          --head-sha "${{ steps.apply.outputs.head_sha }}"
+          --lane implement
           --usage-file .agent-output/model-usage.json
           --remote-record .agent-output/implementation-remote.json
-          --remote-lane implementRemote
-          --retry-reason initial
+          --remote-lane "$REMOTE_LANE"
+          --retry-reason "$RETRY_REASON"
           --effect new-head
           --json
 
@@ -365,6 +433,8 @@ jobs:
     needs:
       - generate-patch-remote
       - validate-patch
+      - repair-patch-remote
+      - validate-repair
       - open-pr
     if: always() && needs.open-pr.result != 'success'
     permissions:

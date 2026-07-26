@@ -33,6 +33,8 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
    Read-only GitHub API calls use bounded exponential retries, managed comments and pull metadata use GitHub GraphQL with independent REST read fallbacks, PR file inventories use head-bound paginated GraphQL with immutable rename verification, diffs use exact commit comparison, and PR creation or updates use GraphQL mutations.
 4. Expensive proposer, implementation, review, no-mistakes, and proof jobs share deterministic slot groups from `.agent/config.json`.
 5. Implementation selects its allowed backend from `.agent/config.json`, runs without write credentials, uploads a patch plus bounded implementation addendum and proof plan, then applies the sealed patch in a separate write-token job and opens a draft PR.
+   If credential-free trusted checks reject the unpublished candidate, one fresh Crabbox lease receives the sealed intent, prior patch, and bounded deterministic failure output, then repairs the candidate once before the full validator reruns.
+   Both attempts retain separate model and provider cost records, and a second validation failure blocks without publishing a branch or pull request.
    Trusted branch pushes and pull request mutations use only the repository-scoped `AGENT_GITHUB_TOKEN`; routine statuses, comments, and workflow dispatch keep the built-in workflow token.
    The implementation preflight verifies the publisher token's owner identity, intended repository access, and reported push authorization before inference.
    GitHub does not provide a personal-token self-inspection API for every fine-grained permission, so fresh acceptance also requires a real approval-free create and update canary.
@@ -131,7 +133,7 @@ A successful seal adds `agent:implement`, adds `agent:automerge` only when polic
 If trusted triage asks a real question, reply on the source issue from the repository-owner account.
 That exact reply resumes zero-model triage automatically, is frozen as untrusted implementation context, and dispatches implementation once.
 Bot replies, non-owner replies, stale comments, duplicate replies, and pull-request comments do not resume work.
-Implementation creates `agent/issue-<number>-<slug>`, validates the patch, opens or updates a draft PR, starts exact-head CI, and starts review.
+Implementation validates the patch, performs at most one focused unpublished repair when deterministic checks fail, creates `agent/issue-<number>-<slug>`, opens or updates a draft PR, starts exact-head CI, and starts review.
 Review can apply a safe patch, reruns exact-head CI and review until clean within the shared three-revision ledger, requests proof when needed, publishes `agent-review`, then starts no-mistakes.
 After model review, a credential-free deterministic repair removes extra blank lines at EOF only when `git diff --check` identifies them in a safe, non-privileged text file.
 Malformed no-mistakes output retries once inside the same isolated run on the unchanged head.

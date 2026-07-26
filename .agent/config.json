@@ -151,10 +151,11 @@
     ],
     "lanes": {
       "implementRemote": [],
+      "implementRepairRemote": [],
       "reviewRemote": [],
-    "noMistakesRemote": [],
-    "readinessRemote": [],
-    "fallbackReadinessRemote": [],
+      "noMistakesRemote": [],
+      "readinessRemote": [],
+      "fallbackReadinessRemote": [],
       "ciRemote": [
         "npm run build",
         "npm run test:scenarios"

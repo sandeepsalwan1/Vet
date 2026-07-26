@@ -46,6 +46,13 @@ const DELEGATED_OUTPUTS = new Map([
     },
   ],
   [
+    "implementRepairRemote",
+    {
+      marker: "AGENT_CRABBOX_IMPLEMENTATION_REPAIR_OUTPUT_V1 ",
+      files: ["codex.patch", "implementation.md", "model-usage.json"],
+    },
+  ],
+  [
     "reviewRemote",
     {
       marker: "AGENT_CRABBOX_REVIEW_OUTPUT_V1 ",
@@ -64,6 +71,15 @@ const DELEGATED_OUTPUTS = new Map([
 ]);
 const DELEGATED_INPUTS = new Map([
   ["implementRemote", ["implement-prompt.md", "implementation-intent.json"]],
+  [
+    "implementRepairRemote",
+    [
+      "codex.patch",
+      "implement-repair-prompt.md",
+      "implementation-intent.json",
+      "validation-feedback.json",
+    ],
+  ],
   ["reviewRemote", ["review-prompt.md", "review.schema.json"]],
   ["noMistakesRemote", ["no-mistakes-intent", "no-mistakes-parent.bundle"]]
 ]);

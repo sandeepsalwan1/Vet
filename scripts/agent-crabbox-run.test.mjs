@@ -343,6 +343,10 @@ test("Crabbox child receives only selected provider auth and readiness", () => {
     "agent"
   );
   assert.equal(
+    providerChildEnvironment(config, { provider: "vercel-sandbox", lane: "implementRepairRemote" }, source).CODEX_API_KEY,
+    "agent"
+  );
+  assert.equal(
     providerChildEnvironment(config, { provider: "vercel-sandbox", lane: "reviewRemote" }, source).CODEX_API_KEY,
     "agent"
   );
@@ -878,6 +882,15 @@ test("remote no-mistakes handoff allows an absent sealed fix patch", (t) => {
 test("delegated inputs cross Crabbox sync through a bounded nonignored handoff", (t) => {
   const lanes = new Map([
     ["implementRemote", ["implement-prompt.md", "implementation-intent.json"]],
+    [
+      "implementRepairRemote",
+      [
+        "codex.patch",
+        "implement-repair-prompt.md",
+        "implementation-intent.json",
+        "validation-feedback.json"
+      ]
+    ],
     ["reviewRemote", ["review-prompt.md", "review.schema.json"]],
     ["noMistakesRemote", ["no-mistakes-intent", "no-mistakes-parent.bundle"]]
   ]);

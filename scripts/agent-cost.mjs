@@ -592,6 +592,14 @@ export async function main() {
     ? readJson(args["remote-record"])
     : proofRemote?.record ?? null;
   const runId = String(process.env.GITHUB_RUN_ID ?? "");
+  const githubActions = args["omit-actions-usage"]
+    ? {
+        runId: "",
+        observedJobMinutes: 0,
+        billing: "included-with-later-record-from-same-workflow",
+        estimatedUsd: 0
+      }
+    : actionsUsage(config, runId);
   const record = buildCostRecord(config, {
     lane,
     headSha,
@@ -600,7 +608,7 @@ export async function main() {
     remoteLane: String(args["remote-lane"] ?? proofRemote?.lane ?? ""),
     retryReason: args["retry-reason"],
     effect: String(args.effect ?? "decision"),
-    githubActions: actionsUsage(config, runId)
+    githubActions
   });
   const result = recordCost(config, {
     prNumber,
