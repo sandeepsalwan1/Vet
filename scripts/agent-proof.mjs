@@ -270,7 +270,8 @@ function implementationProofPlan(details) {
 function visualRoutes(details, explicitRoute = "") {
   const routes = [
     ...deriveAffectedRoutes(details.files, explicitRoute),
-    ...(proofContract(details)?.routes ?? [])
+    ...(proofContract(details)?.routes ?? []),
+    ...implementationProofPlan(details).tasks.map((task) => task.route)
   ];
   return [...new Set(routes)].sort();
 }

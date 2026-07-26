@@ -632,6 +632,8 @@ Risk controls safety:
 - high: auth, security, billing, migrations, production data, destructive work, broad architecture, external integrations, or unclear product policy
 
 Trusted policy computes risk independently from priority.
+The word `architecture` alone does not make work high risk.
+Narrow cleanup remains eligible for automatic merge, while an architecture replacement, migration, system-wide redesign, or similarly broad change is high risk.
 High risk never auto-merges even when every technical check passes.
 
 Proof controls evidence:
@@ -753,6 +755,10 @@ Fresh high-priority accessibility issue 78 used HTML `role="status"`, which dete
 Risk classification now distinguishes ARIA role syntax from user, staff, access, assignment, and permission role changes, while high priority still prevents automatic merge.
 
 Recorded correction on 2026-07-26:
+Issue 83 and pull request 84 proved that treating every mention of `architecture` as high risk blocks a narrow code cleanup after every required technical gate passes.
+Triage now keeps narrow cleanup low risk and reserves the high-risk architecture rule for replacement, migration, system-wide redesign, and similarly broad work.
+
+Recorded correction on 2026-07-26:
 Fresh proofless pull request 81 showed a red automerge run while review, cost, and no-mistakes were normally still pending.
 Automerge now treats missing or active gates as a successful waiting state without a blocker comment, while terminal gate and policy failures remain red and merge-blocking.
 
@@ -850,6 +856,13 @@ Do not lower review quality merely to avoid the third cycle.
 
 Proof must demonstrate the user's requested behavior, not only that an artifact exists.
 Derive proof steps from the sealed intent before implementation.
+Every browser task must declare whether it uses no session or one bounded visible demo role.
+Protected staff interactions require a matching staff-capable demo session.
+Click and fill selectors must be executable CSS, while visible-text clicks use the explicit text-click action.
+A save or submit proof must change the relevant form control before invoking the action.
+An existing static route may be used by the proof plan without changing an unrelated page file merely to make the route appear affected.
+When protected data-backed UI cannot run without disposable external state, use a localhost-only deterministic proof harness that exercises the same user-visible component behavior.
+Browser action and assertion errors must produce a structured exact-head failure that can enter the bounded repair loop instead of ending without a report.
 For UI transitions, begin capture before the triggering action.
 Assert the intermediate state, final state, route, and tenant where relevant.
 For high-priority user-visible work, automatically publish a clearly labeled reviewer-friendly GIF or video on the pull request before requesting the final human decision.
@@ -870,6 +883,10 @@ Every proof bundle should include:
 - clear failure state when the requested behavior was not observed
 
 A valid GIF of the wrong page is failed proof.
+
+Recorded correction on 2026-07-26:
+Issue 82 and pull request 85 produced a playable recording of only the sign-in page because the generated proof plan omitted authentication, used non-CSS text selectors, clicked a disabled save control without changing a setting, and changed an unrelated page solely to manufacture an affected route.
+Implementation validation now rejects those proof plans before publication, the source-blind runner supports bounded visible demo sessions and text clicks, existing static routes remain available without unrelated changes, and execution errors become actionable structured failures.
 
 ## Baseline Health And Workflow Approval
 

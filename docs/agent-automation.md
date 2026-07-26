@@ -244,6 +244,12 @@ UI or GIF proof prefers a credentialed Crabbox provider that passed a live smoke
 Without one, Crabbox uses its credential-free `local-container` provider on the GitHub runner with `--desktop` and `--browser`.
 The trusted behavior contract comes from the sealed issue and implementation addendum.
 The browser driver receives only routes, actions, selectors, and assertions, not source code.
+Every browser task declares `session: none` or one bounded visible demo role.
+Protected staff interactions require a staff-capable demo session.
+`click` and `fill` use executable CSS selectors; `clickText` selects a CSS element type and visible text without Playwright-only selector syntax.
+A task that clicks save or submit must first exercise the form-control change that enables the action.
+The proof plan may use an existing static app route without modifying that page merely to mark it affected.
+When a protected data-backed screen cannot run without disposable external state, implementation provides a localhost-only deterministic harness for the same user-visible component behavior.
 When an acceptance clause explicitly names a sealed route, its proof task must exercise that route.
 For visible text assertions whose model-generated selector is one heading level, the driver accepts the same text on any visible `h1` through `h6`.
 The heading level is a locator preference; the sealed route and acceptance text remain exact.
@@ -253,6 +259,7 @@ The lane checks each affected route, desktop health, actual provider, lease, rou
 Published multi-route bundles bind digests by exact artifact-relative path before using a unique-basename fallback, so repeated route-local filenames do not conflict.
 The managed GitHub comment links the downloadable Actions artifact and keeps runner-only paths in a collapsed diagnostic section.
 Visual proof fails closed when the proof plan is incomplete, behavior assertions fail, a clause is missing, or no reviewable artifact URL is published.
+Browser action and assertion exceptions are recorded as structured exact-head failures, so the bounded repair loop receives the actual failed step instead of a missing-report error.
 An actionable exact-head behavior failure automatically returns its failed clauses to the shared bounded reviewer repair loop.
 The failed proof remains merge-blocking, and unchanged or unsafe findings stop instead of looping.
 Published-media verification runs only after the structured browser result passes, so artifact publication errors cannot hide the original behavior failure.

@@ -4,6 +4,9 @@ import test from "node:test";
 import {
   assertionLabel,
   assertionExpression,
+  establishDemoSession,
+  intermediateAssertionTimeout,
+  runTask,
   validateBrowserPayload
 } from "./agent-browser-behavior.mjs";
 
@@ -80,4 +83,113 @@ test("heading text proof accepts the visible text across semantic heading levels
     assertionLabel({ type: "text", selector: "h1", value: "Welcome back" }),
     assertionLabel({ type: "text", selector: "h2", value: "Opening your clinic" })
   );
+});
+
+test("browser payload accepts bounded demo sessions and rejects unknown sessions", () => {
+  const authenticated = {
+    ...payload,
+    tasks: [{ ...payload.tasks[0], session: "demo-admin" }]
+  };
+  assert.equal(validateBrowserPayload(authenticated), authenticated);
+  assert.throws(
+    () =>
+      validateBrowserPayload({
+        ...payload,
+        tasks: [{ ...payload.tasks[0], session: "personal-browser" }]
+      }),
+    /payload is invalid/
+  );
+});
+
+test("demo session setup clears ambient state before visible login", async () => {
+  const calls = [];
+  const evaluationResults = [true, true, true, true, true, true];
+  const client = {
+    async send(method, params = {}) {
+      calls.push({ method, params });
+      if (method === "Runtime.evaluate") {
+        return { result: { value: evaluationResults.shift() } };
+      }
+      return {};
+    }
+  };
+
+  const result = await establishDemoSession(
+    client,
+    "demo-staff",
+    "http://127.0.0.1:3000",
+    "/staff/approvals"
+  );
+
+  assert.equal(result, "Sign in with the visible demo-staff account");
+  assert.ok(
+    calls.some(
+      ({ method, params }) =>
+        method === "Runtime.evaluate" &&
+        params.expression.includes(
+          'localStorage.removeItem("central-vet-session")'
+        )
+    )
+  );
+  assert.deepEqual(
+    calls
+      .filter(({ method }) => method === "Page.navigate")
+      .map(({ params }) => params.url),
+    [
+      "http://127.0.0.1:3000/staff",
+      "http://127.0.0.1:3000/staff/approvals"
+    ]
+  );
+});
+
+test("browser task converts interaction exceptions into exact failed evidence", async () => {
+  const task = {
+    clauseIds: ["AC1"],
+    route: "/staff",
+    session: "none",
+    actions: [{ type: "click", selector: "button[data-missing]" }],
+    intermediateAssertions: [],
+    finalAssertions: [{ type: "visible", selector: "main" }]
+  };
+  const client = {
+    async send(method) {
+      if (method === "Runtime.evaluate") return { exceptionDetails: {} };
+      return {};
+    }
+  };
+
+  const result = await runTask(client, payload, task);
+
+  assert.equal(result.status, "fail");
+  assert.match(result.evidence, /browser assertion evaluation failed/);
+  assert.deepEqual(result.clauseIds, ["AC1"]);
+});
+
+test("browser task converts final assertion exceptions into exact failed evidence", async () => {
+  const task = {
+    clauseIds: ["AC1"],
+    route: "/request",
+    session: "none",
+    actions: [],
+    intermediateAssertions: [],
+    finalAssertions: [{ type: "visible", selector: "main" }]
+  };
+  const client = {
+    async send(method) {
+      if (method === "Runtime.evaluate") return { exceptionDetails: {} };
+      return {};
+    }
+  };
+
+  const result = await runTask(client, payload, task);
+
+  assert.equal(result.status, "fail");
+  assert.match(result.evidence, /Browser assertion failed/);
+  assert.deepEqual(result.reproductionSteps, ["Navigate to /request"]);
+});
+
+test("intermediate observations wait fully only after the final action", () => {
+  assert.equal(intermediateAssertionTimeout(4, 0), 250);
+  assert.equal(intermediateAssertionTimeout(4, 2), 250);
+  assert.equal(intermediateAssertionTimeout(4, 3), 4_000);
 });

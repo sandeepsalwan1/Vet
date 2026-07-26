@@ -18,4 +18,9 @@ Rules:
 - Browser proof tasks may name only clauses listed under trusted `browserClauses`.
 - Never put a clause listed under `excludedFromBrowserPlan` in a browser task.
 - Exercise every listed `requiredRoutes` entry on that exact route.
+- Set every browser task `session` explicitly and use the matching visible demo session for protected behavior.
+- Use CSS selectors for `click` and `fill`; use `clickText` for visible text instead of Playwright-only selectors.
+- Exercise the form-control change before clicking save or submit.
+- Never change an unrelated page merely to make a proof route appear changed.
+- If protected data-backed UI cannot run without external state, use a localhost-only deterministic proof harness for the same user-visible component behavior.
 - Return the configured structured implementation result with a concise updated summary, changes, checks, intent addendum, and proof plan.

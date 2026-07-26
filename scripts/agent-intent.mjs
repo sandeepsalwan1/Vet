@@ -15,6 +15,13 @@ export const IMPLEMENTATION_RESULT_VERSION = 1;
 export const IMPLEMENTATION_ADDENDUM_MARKER =
   "<!-- agent-intent-addendum:v1 -->";
 export const PROOF_KINDS = Object.freeze(["none", "CI", "UI", "GIF", "service"]);
+export const PROOF_SESSIONS = Object.freeze([
+  "none",
+  "demo-admin",
+  "demo-staff",
+  "demo-veterinarian",
+  "demo-customer"
+]);
 export const EVIDENCE_LANES = Object.freeze([
   "deterministic",
   "browser",
@@ -167,10 +174,31 @@ function boundedProofValue(value, label, { allowEmpty = false } = {}) {
   return boundedText(value, MAX_PROOF_VALUE_BYTES, label);
 }
 
+function boundedProofSelector(value) {
+  const selector = boundedProofValue(value, "implementation proof selector");
+  if (
+    /:(?:has-text|text(?:-is|-matches)?|contains|visible|hidden)(?:\s*\(|\b)/i.test(
+      selector
+    ) ||
+    /(?:^|[\s,>+~])(?:text|xpath|css|id|role|data-testid)\s*=/i.test(
+      selector
+    ) ||
+    /^\s*(?:\.{0,2}|\()\s*\/\//.test(selector) ||
+    /(?:^|\s)>>(?:\s|$)|\bgetBy[A-Z]/.test(selector)
+  ) {
+    throw new AgentError(
+      "implementation proof selector must be CSS; use clickText for visible text",
+      1
+    );
+  }
+  return selector;
+}
+
 function validateProofAction(action) {
   const shapes = {
     navigate: ["path", "type"],
     click: ["selector", "type"],
+    clickText: ["selector", "type", "value"],
     fill: ["selector", "type", "value"],
     press: ["key", "type"],
     wait: ["milliseconds", "type"]
@@ -198,14 +226,71 @@ function validateProofAction(action) {
   }
   const normalized = {
     type: action.type,
-    selector: boundedProofValue(action.selector, "implementation proof selector")
+    selector: boundedProofSelector(action.selector)
   };
-  if (action.type === "fill") {
+  if (action.type === "fill" || action.type === "clickText") {
     normalized.value = boundedProofValue(action.value, "implementation proof value", {
-      allowEmpty: true
+      allowEmpty: action.type === "fill"
     });
   }
   return normalized;
+}
+
+function proofTaskSession(task) {
+  if (!Object.hasOwn(task, "session")) return "none";
+  if (!PROOF_SESSIONS.includes(task.session)) {
+    throw new AgentError("implementation proof task session is invalid", 1);
+  }
+  return task.session;
+}
+
+function mutatesForm(action) {
+  if (action.type === "fill") return true;
+  if (!["click", "clickText"].includes(action.type)) return false;
+  return /\b(?:input|textarea|select)\b|\[(?:role|type)\s*=\s*['"]?(?:switch|checkbox|radio|combobox|slider)/i.test(
+    action.selector
+  );
+}
+
+function validateProofTaskInteraction(task) {
+  const session = task.session ?? "none";
+  const interacts = task.actions.some(
+    (action) => !["navigate", "wait"].includes(action.type)
+  );
+  if (
+    /^\/staff(?:\/|$)/.test(task.route) &&
+    interacts &&
+    session === "none"
+  ) {
+    throw new AgentError(
+      "protected staff browser proof must declare a demo staff session",
+      1
+    );
+  }
+  if (
+    /^\/staff(?:\/|$)/.test(task.route) &&
+    session === "demo-customer"
+  ) {
+    throw new AgentError(
+      "staff browser proof cannot use a demo customer session",
+      1
+    );
+  }
+  for (const [index, action] of task.actions.entries()) {
+    const saveLabel = `${action.selector ?? ""} ${action.value ?? ""}`;
+    if (
+      !["click", "clickText"].includes(action.type) ||
+      !/\b(?:save|submit)\b/i.test(saveLabel)
+    ) {
+      continue;
+    }
+    if (!task.actions.slice(0, index).some(mutatesForm)) {
+      throw new AgentError(
+        "browser proof clicks save or submit without first changing a form control",
+        1
+      );
+    }
+  }
 }
 
 function validateProofAssertion(assertion) {
@@ -228,7 +313,7 @@ function validateProofAssertion(assertion) {
   if (assertion.type === "url") return { type: assertion.type, path: safeProofRoute(assertion.path) };
   const normalized = {
     type: assertion.type,
-    selector: boundedProofValue(assertion.selector, "implementation proof selector")
+    selector: boundedProofSelector(assertion.selector)
   };
   if (assertion.type === "text" || assertion.type === "attribute") {
     normalized.value = boundedProofValue(assertion.value, "implementation proof expected value", {
@@ -255,16 +340,22 @@ export function validateProofPlan(plan) {
   return {
     version: 1,
     tasks: plan.tasks.map((task) => {
-      const keys = [
+      const legacyKeys = [
         "actions",
         "clauseIds",
         "finalAssertions",
         "intermediateAssertions",
         "route"
       ];
+      if (!task || Array.isArray(task)) {
+        throw new AgentError("implementation proof task is invalid", 1);
+      }
+      const hasExplicitSession = Object.hasOwn(task, "session");
+      const session = proofTaskSession(task);
+      const keys = hasExplicitSession
+        ? [...legacyKeys, "session"].sort()
+        : legacyKeys;
       if (
-        !task ||
-        Array.isArray(task) ||
         JSON.stringify(Object.keys(task).sort()) !== JSON.stringify(keys) ||
         !Array.isArray(task.clauseIds) ||
         task.clauseIds.length > MAX_REQUIREMENTS ||
@@ -278,13 +369,15 @@ export function validateProofPlan(plan) {
           throw new AgentError(`implementation proof task ${field} is invalid`, 1);
         }
       }
-      return {
+      const normalized = {
         clauseIds: task.clauseIds,
         route: safeProofRoute(task.route),
         actions: task.actions.map(validateProofAction),
         intermediateAssertions: task.intermediateAssertions.map(validateProofAssertion),
         finalAssertions: task.finalAssertions.map(validateProofAssertion)
       };
+      normalized.session = session;
+      return normalized;
     })
   };
 }
@@ -396,6 +489,7 @@ export function validateBrowserProofPlan({
     if (proofKind === "GIF" && !task.intermediateAssertions.length) {
       throw new AgentError("GIF proof task has no intermediate assertion", 1);
     }
+    validateProofTaskInteraction(task);
     for (const clauseId of task.clauseIds) {
       if (!expected.has(clauseId)) {
         throw new AgentError(
