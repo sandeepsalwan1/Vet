@@ -128,21 +128,33 @@ export function priceModelUsage(config, usage) {
   };
 }
 
-export function validateRemoteRecord(config, value, expectedRemoteLane) {
+export function validateRemoteRecord(
+  config,
+  value,
+  expectedRemoteLane,
+  options = {},
+) {
   const allowedProviders = new Set([
     ...(config.crabbox.nonVisualProviders ?? []),
     ...(config.crabbox.visualProviders ?? [])
   ]);
+  const successful =
+    value?.ok === true &&
+    value?.timing?.exitCode === 0;
+  const terminalFailure =
+    options.allowFailure === true &&
+    value?.ok === false &&
+    Number.isInteger(value?.timing?.exitCode) &&
+    value.timing.exitCode !== 0;
   if (
     !value ||
-    value.ok !== true ||
+    (!successful && !terminalFailure) ||
     value.attempted !== true ||
     value.lane !== expectedRemoteLane ||
     !allowedProviders.has(value.provider) ||
     !/^[A-Za-z0-9._:-]+$/.test(String(value.leaseId ?? "")) ||
     value.timing?.provider !== value.provider ||
     value.timing?.leaseId !== value.leaseId ||
-    value.timing?.exitCode !== 0 ||
     !Number.isFinite(value.timing?.totalMs) ||
     value.timing.totalMs < 0
   ) {
@@ -254,6 +266,32 @@ export function priceProviderUsage(config, remote) {
   };
 }
 
+function incompleteTerminalProviderUsage(config, remote) {
+  const allowedProviders = new Set([
+    ...(config.crabbox.nonVisualProviders ?? []),
+    ...(config.crabbox.visualProviders ?? [])
+  ]);
+  const provider = allowedProviders.has(remote?.provider)
+    ? remote.provider
+    : "";
+  const leaseId = /^[A-Za-z0-9._:-]+$/.test(String(remote?.leaseId ?? ""))
+    ? remote.leaseId
+    : "";
+  return {
+    attempted: remote?.attempted === true,
+    complete: false,
+    provider,
+    leaseId,
+    durationMs: Number.isFinite(remote?.timing?.totalMs)
+      ? Math.max(0, remote.timing.totalMs)
+      : 0,
+    estimatedIncrementalUsd: null,
+    estimateKind: "terminal-failure-provenance-incomplete",
+    networkCost: "not-reported",
+    outcome: "failed"
+  };
+}
+
 export function proofOutcomeRecord(remote, local = null) {
   const outcome =
     remote?.terminal === true && remote?.result?.status === "passed"
@@ -337,7 +375,8 @@ function stableRecordId(record) {
         modelCalls: record.model.calls.map((call) => call.id),
         provider: record.provider.provider,
         leaseId: record.provider.leaseId,
-        runId: record.githubActions.runId
+        runId: record.githubActions.runId,
+        terminalFailure: record.terminalFailure
       })
     )
     .digest("hex");
@@ -356,14 +395,31 @@ export function buildCostRecord(config, options) {
         version: 1,
         backend: "codex",
         lane: options.lane,
-        model: config.backend.model,
-        effort: config.backend.effort,
+        model: String(options.model ?? config.backend.model),
+        effort: String(options.effort ?? config.backend.effort),
         complete: options.lane === "proof",
         calls: []
       };
-  const remote = options.remoteRecord
-    ? validateRemoteRecord(config, options.remoteRecord, options.remoteLane)
-    : null;
+  let remote = null;
+  let provider = null;
+  if (options.remoteRecord) {
+    try {
+      remote = validateRemoteRecord(
+        config,
+        options.remoteRecord,
+        options.remoteLane,
+        { allowFailure: options.terminalFailure === true },
+      );
+    } catch (error) {
+      if (options.terminalFailure !== true) throw error;
+      provider = incompleteTerminalProviderUsage(
+        config,
+        options.remoteRecord,
+      );
+    }
+  }
+  provider ??= priceProviderUsage(config, remote);
+  if (remote?.ok === false) provider.outcome = "failed";
   const record = {
     id: "",
     lane: options.lane,
@@ -373,14 +429,18 @@ export function buildCostRecord(config, options) {
     effect: options.effect,
     complete: usage.complete,
     model: priceModelUsage(config, usage),
-    provider: priceProviderUsage(config, remote),
+    provider,
     githubActions: options.githubActions,
+    terminalFailure: options.terminalFailure === true,
     fixedServices: {
       incrementalUsd: 0,
       note: "Render, Hostinger, and database fixed subscriptions are not allocated when the lane does not use them"
     }
   };
-  record.complete = record.model.complete && record.provider.complete;
+  record.complete =
+    !record.terminalFailure &&
+    record.model.complete &&
+    record.provider.complete;
   record.id = stableRecordId(record);
   return record;
 }
@@ -588,6 +648,7 @@ export async function main() {
         ? proofOutcomeRecord(readJson(args["proof-outcome-file"]))
         : proofRemoteRecord(args["proof-remote-outcome-base64"], args["proof-local-outcome-base64"])
       : null;
+  const terminalFailure = Boolean(args["terminal-failure"]);
   const remoteRecord = args["remote-record"]
     ? readJson(args["remote-record"])
     : proofRemote?.record ?? null;
@@ -608,7 +669,10 @@ export async function main() {
     remoteLane: String(args["remote-lane"] ?? proofRemote?.lane ?? ""),
     retryReason: args["retry-reason"],
     effect: String(args.effect ?? "decision"),
-    githubActions
+    githubActions,
+    terminalFailure,
+    model: args.model,
+    effort: args.effort
   });
   const result = recordCost(config, {
     prNumber,
@@ -618,13 +682,13 @@ export async function main() {
   });
   finish(
     {
-      ok: result.state.state !== "failure",
+      ok: terminalFailure || result.state.state !== "failure",
       message: `recorded ${lane} cost for PR #${prNumber}`,
       record,
       state: result.state
     },
     Boolean(args.json),
-    result.state.state === "failure" ? 1 : 0
+    result.state.state === "failure" && !terminalFailure ? 1 : 0
   );
 }
 

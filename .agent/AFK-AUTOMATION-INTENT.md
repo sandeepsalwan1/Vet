@@ -31,10 +31,10 @@ Do not ask the user to perform routine debugging, polling, approvals, reruns, or
 
 ## Current Handoff Snapshot
 
-This snapshot was refreshed on 2026-07-25 and must be reverified where state can drift.
+This snapshot was refreshed on 2026-07-26 and must be reverified where state can drift.
 
-- The checkout is on `main` and intentionally contains uncommitted AFK automation changes.
-  Preserve them and inspect the complete diff before editing.
+- The verified implementation baseline through `e86cb2a` is on `main`.
+  Preserve unrelated work and inspect the complete diff before editing.
 - The implementation uses Crabbox-only model lanes, a reviewed project skill bundle, structural skill discovery, and scoped credential handoffs.
 - Intent capsule v4 seals acceptance clauses, per-clause evidence lanes, proof routes and interactions, anti-cheat probes, and a digest-bound behavior contract while remaining compatible with existing v1 through v3 issue seals.
 - Review and no-mistakes share one three-revision semantic ledger.
@@ -49,15 +49,25 @@ This snapshot was refreshed on 2026-07-25 and must be reverified where state can
   It also verifies the trusted publisher's owner identity, intended repository access, and reported push authorization without exposing the token.
   Push readiness waits for baseline checks on its exact main SHA before publishing.
 - Provider acquisition retries may select the next configured provider only before the remote command starts.
-- The full local automation suite, typecheck, lint, dead-code, and duplicate-code gates passed after these changes.
+- The full local automation suite, including 367 deterministic agent tests, typecheck, lint, dead-code, and duplicate-code gates passed after these changes.
   Rerun them after final documentation and live-canary changes.
 - A redacted zero-model Vercel Sandbox lifecycle and exact project-local skill discovery passed during bootstrap.
 - Local Codex is signed in through ChatGPT.
   `CODEX_ACCESS_TOKEN` is not configured and its setup is deliberately deferred.
   The existing scoped API-key lane remains the non-interactive fallback and must not block the core reliability work.
-- Fresh proofless, proof-required, recovery, and concurrency issue canaries have not passed through the production GitHub path yet.
+- Proofless issue 63 and pull request 64 passed the production GitHub path without workflow approval and merged automatically as `f700d291`.
+- Proof-required issue 66 and pull request 67 reached repaired exact head `a1169b5f`.
+  Exact-head CI and CodeQL passed without workflow approval.
+  The next review stopped on exhausted OpenAI API project quota before UI proof, no-mistakes, merge, and source-blind final validation.
+  `agent-review` and `agent-cost` now report terminal failures instead of leaving an ambiguous pending check.
+- Recovery canary run 30185784286 was deliberately cancelled before provider acquisition and resumed as attempt 2 under the same run ID.
+  It passed with one primary lease and one fallback lease, both stopped, without model work, branches, pull requests, proof leases, or comments.
+- The data capability check applied all 28 migrations to disposable PostgreSQL 17, performed a real tenant-scoped write, proved the same-tenant read, and blocked the cross-tenant read.
+- The deployment capability check observed a live main deployment, summarized 130 bounded application logs with zero errors, and passed all three configured tenant health checks.
+- Policy issue 68 blocked once before model spend with one actionable question and created no branch or pull request.
+- Near-concurrent proofless and proof-required issue canaries remain acceptance work and must wait until the model quota blocker is cleared.
 - Subscription-token migration remains a deferred cost optimization.
-- Fresh production-path canaries and closeout review remain acceptance work.
+- Final proof-required completion, concurrency evidence, source-blind validation, and closeout documentation remain acceptance work.
 
 Do not claim completion from this snapshot.
 It exists to prevent duplicated investigation and accidental loss of working progress.

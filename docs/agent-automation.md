@@ -141,6 +141,7 @@ no-mistakes uses the full issue plus trusted triage as authoritative implementat
 Every native fix is published through the sealed exact-head handoff, then exact-head CI, independent review, and no-mistakes run again.
 Actionable findings left after native repair return to exact-head reviewer repair within the same three-revision ledger.
 Provider acquisition may move to the next configured Crabbox provider only when the remote command never started, which prevents duplicate model work.
+The final configured provider retries acquisition once when no lease timing or remote-command marker exists.
 Automerge waits for every configured gate, updates a stale branch from `main`, reruns head-bound gates, merges, dispatches baseline CI, CodeQL, and trusted Render verification for the exact merge commit, closes the source issue, and removes workflow labels.
 If GitHub reports a stale-branch merge conflict, trusted automation creates a merge commit that preserves `main` in conflicting hunks, then sends the linked issue back through implementation, CI, review, proof when required, and no-mistakes so the issue behavior must be restored and verified before merge.
 Implementation advances a conflict-recovered zero-diff branch to its validated base only when the branch tree exactly matches the common-base tree, then applies the validated patch without discarding divergent work.
@@ -242,7 +243,7 @@ This fallback spends GitHub Actions time only and does not require the user's la
 A missing Docker runtime, failed desktop bootstrap, or invalid artifact blocks required visual proof instead of silently replacing it with weaker evidence.
 
 Service proof runs on the exact pull request head with no production credential.
-It installs from the lockfile, applies every migration to disposable PostgreSQL 17, builds, and runs scenarios.
+It installs from the lockfile, applies every migration to disposable PostgreSQL 17, proves a real tenant-scoped write is visible only to its clinic, builds, and runs scenarios.
 A separate trusted job treats candidate `render.yaml` only as data and validates it with the pinned Render CLI.
 Known account-level payment blocks are recorded but do not masquerade as Blueprint syntax failures.
 Production credentials, exact deployed revision, bounded logs, and tenant health remain in the post-merge Render lane.
@@ -326,6 +327,10 @@ An interruption after that model-turn signal is recorded separately and remains 
 Active-run reattachment may continue after that signal, but the outer no-mistakes helper cannot start a fresh daemon retry.
 Rerunning automerge for a merged pull request dispatches only missing exact-SHA CI, CodeQL, or Render verification.
 Provider retries stop once a remote command starts.
+Review preparation reuses an active or successful exact-head CodeQL run instead of restarting it.
+If review infrastructure or model access fails, the pull request receives one actionable `agent:blocked` report; a successful rerun removes that label only when the review failure originally added it.
+The same failure publishes terminal `agent-review` and `agent-cost` statuses, records available model and provider usage, and never leaves the pull request looking active when no workflow is running.
+After the reported dependency is restored, rerun Agent Review on the unchanged head; the newer complete cost record supersedes the incomplete failure record for that head.
 This is the duplicate-model boundary for interruption recovery.
 
 ## Plan Acceptance Map

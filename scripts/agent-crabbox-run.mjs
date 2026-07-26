@@ -1867,24 +1867,27 @@ export function runCrabboxLane(options) {
 
   const attempts = [];
   for (const [index, selection] of candidates.entries()) {
-    const result = runCrabboxAttempt({
-      ...options,
-      config,
-      env,
-      selection,
-      attempt: index
-    });
-    attempts.push(providerAttemptSummary(result));
-    const final = { ...result, providerAttempts: attempts };
-    if (result.ok) return final;
+    const retries = index === candidates.length - 1 ? 1 : 0;
+    for (let retry = 0; retry <= retries; retry += 1) {
+      const result = runCrabboxAttempt({
+        ...options,
+        config,
+        env,
+        selection,
+        attempt: attempts.length
+      });
+      attempts.push(providerAttemptSummary(result));
+      const final = { ...result, providerAttempts: attempts };
+      if (result.ok) return final;
 
-    const acquisitionFailedBeforeRemoteExecution =
-      result.attempted === true &&
-      result.remoteCommandStarted !== true &&
-      !result.leaseId &&
-      !result.timing;
-    if (!acquisitionFailedBeforeRemoteExecution || index === candidates.length - 1) {
-      return final;
+      const acquisitionFailedBeforeRemoteExecution =
+        result.attempted === true &&
+        result.remoteCommandStarted !== true &&
+        !result.leaseId &&
+        !result.timing;
+      if (!acquisitionFailedBeforeRemoteExecution) return final;
+      if (retry === retries && index === candidates.length - 1) return final;
+      if (retry === retries) break;
     }
   }
   throw new AgentError("Crabbox provider selection exhausted unexpectedly", 1);

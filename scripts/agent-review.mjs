@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -53,6 +53,7 @@ import {
 
 export const MAX_REVIEW_DIFF_BYTES = 50000;
 export const MAX_REVIEW_REPAIR_ATTEMPTS = MAX_SEMANTIC_REVISIONS;
+export const REVIEW_WORKFLOW_FAILURE_MARKER = "<!-- agent-review-workflow-failure:v1 -->";
 
 export function reviewReplayNextGate({
   config,
@@ -559,6 +560,28 @@ export function dispatchPullSecurity(
     rejectPrivilegedPaths: true,
     allowEmptyFiles: true,
   }, dependencies);
+  const getWorkflowRuns =
+    dependencies.getWorkflowRuns ??
+    (() => {
+      const response = ghApiJson(
+        `repos/${config.repo.owner}/${config.repo.name}/actions/workflows/codeql.yml/runs?event=workflow_dispatch&branch=${encodeURIComponent(config.repo.defaultBranch)}&per_page=100`,
+      );
+      return response?.workflow_runs ?? [];
+    });
+  const existing = getWorkflowRuns().find(
+    (run) =>
+      run?.event === "workflow_dispatch" &&
+      run?.display_title === `CodeQL ${expectedHeadSha}` &&
+      (run?.status !== "completed" || run?.conclusion === "success"),
+  );
+  if (existing) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: "exact security run already active or successful",
+      runId: existing.id ?? null,
+    };
+  }
   return dispatch(
     config,
     "codeql.yml",
@@ -569,6 +592,172 @@ export function dispatchPullSecurity(
     false,
     config.repo.defaultBranch,
   );
+}
+
+export function classifyReviewWorkflowFailure(text) {
+  const evidence = String(text ?? "");
+  if (
+    /quota exceeded(?:\. check your plan and billing details)?|insufficient_quota|billing_hard_limit_reached/i.test(
+      evidence,
+    )
+  ) {
+    return {
+      kind: "model-quota",
+      summary: "The OpenAI API project quota is exhausted.",
+      requiredAction:
+        "Increase or restore the OpenAI API project quota, then rerun the failed Agent Review workflow on this unchanged head.",
+    };
+  }
+  if (/invalid api key|incorrect api key|authentication failed|status(?: code)?:? 401/i.test(evidence)) {
+    return {
+      kind: "model-auth",
+      summary: "The configured model credential was rejected.",
+      requiredAction:
+        "Replace the OPENAI_API_KEY repository secret with a valid project key, then rerun the failed Agent Review workflow on this unchanged head.",
+    };
+  }
+  if (/rate limit|too many requests|status(?: code)?:? 429/i.test(evidence)) {
+    return {
+      kind: "model-capacity",
+      summary: "The model provider rejected the review because capacity was temporarily unavailable.",
+      requiredAction:
+        "Wait for provider capacity, then rerun the failed Agent Review workflow on this unchanged head.",
+    };
+  }
+  return {
+    kind: "review-infrastructure",
+    summary: "The Agent Review workflow failed before it could publish a trusted result.",
+    requiredAction:
+      "Inspect the linked Actions run, correct the provider or workflow failure, then rerun Agent Review on this unchanged head.",
+  };
+}
+
+export function classifyReviewWorkflowFailurePath(path) {
+  const root = String(path ?? "").trim();
+  if (!root || !existsSync(root)) return classifyReviewWorkflowFailure("");
+  const pending = [resolve(root)];
+  const parts = [];
+  let bytes = 0;
+  while (pending.length && parts.length < 12 && bytes < 1_000_000) {
+    const current = pending.shift();
+    const info = lstatSync(current);
+    if (info.isSymbolicLink()) continue;
+    if (info.isDirectory()) {
+      for (const name of readdirSync(current).sort()) pending.push(join(current, name));
+      continue;
+    }
+    if (!info.isFile() || !/\.(?:json|log|txt)$/i.test(current)) continue;
+    const text = readFileSync(current, "utf8");
+    const bounded = text.slice(-Math.min(text.length, 250_000));
+    parts.push(bounded);
+    bytes += Buffer.byteLength(bounded);
+  }
+  return classifyReviewWorkflowFailure(parts.join("\n"));
+}
+
+export function reviewFailureOwnedBlockedLabel(comments, config) {
+  const prior = newestManagedComment(comments, config.comments.review, config.repo.owner);
+  return Boolean(
+    prior?.body?.includes(REVIEW_WORKFLOW_FAILURE_MARKER) &&
+      /"ownsBlockedLabel"\s*:\s*true/.test(prior.body),
+  );
+}
+
+export function markReviewWorkflowFailure(
+  config,
+  prNumber,
+  expectedHeadSha,
+  failure,
+  dryRun = false,
+  dependencies = {},
+) {
+  const api = dependencies.ghApiJson ?? ghApiJson;
+  const snapshot =
+    dependencies.fetchSnapshot?.(config, prNumber, dependencies) ??
+    getPullSnapshot(config, prNumber, dependencies);
+  assertReviewedHead(snapshot.pull, expectedHeadSha);
+  const metadata = implementationMetadata(snapshot.pull.body);
+  const sourceIssue =
+    dependencies.fetchSourceIssue?.(metadata.sourceIssue) ??
+    api(`repos/${config.repo.owner}/${config.repo.name}/issues/${metadata.sourceIssue}`);
+  assertTrustedAgentPull(
+    snapshot.pull,
+    config,
+    {
+      files: snapshot.files,
+      sourceIssue,
+      rejectPrivilegedPaths: true,
+      allowEmptyFiles: true,
+    },
+    { ...dependencies, ghApiJson: api },
+  );
+  const pullIssue =
+    dependencies.fetchPullIssue?.(prNumber) ??
+    api(`repos/${config.repo.owner}/${config.repo.name}/issues/${prNumber}`);
+  const comments =
+    dependencies.fetchComments?.(prNumber) ??
+    getIssueComments(config, prNumber);
+  const ownsBlockedLabel =
+    reviewFailureOwnedBlockedLabel(comments, config) ||
+    !issueLabels(pullIssue).includes(config.labels.blocked);
+  const actionsRun =
+    process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
+      ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
+      : "";
+  const blocker = failure ?? classifyReviewWorkflowFailure("");
+  const comment = upsertManagedComment({
+    config,
+    number: prNumber,
+    marker: config.comments.review,
+    body: `${REVIEW_WORKFLOW_FAILURE_MARKER}
+## Agent Review
+
+Review blocked by an automation failure.
+
+${blocker.summary}
+
+Required action: ${blocker.requiredAction}
+
+Structured blocker:
+${markdownJsonBlock({
+  failureKind: blocker.kind,
+  headSha: expectedHeadSha,
+  actionsRun,
+  requiredAction: blocker.requiredAction,
+  ownsBlockedLabel,
+})}`,
+    dryRun,
+  });
+  const labels = {
+    added: addLabels(config, prNumber, [config.labels.blocked], dryRun),
+    removed: removeLabels(config, prNumber, [config.labels.automerge], dryRun),
+  };
+  const status = setCommitStatus({
+    config,
+    sha: expectedHeadSha,
+    state: "failure",
+    context: "agent-review",
+    description: blocker.summary,
+    targetUrl: actionsRun,
+    dryRun,
+  });
+  const costStatus = setCommitStatus({
+    config,
+    sha: expectedHeadSha,
+    state: "failure",
+    context: config.cost?.status ?? "agent-cost",
+    description: "review failed before complete cost accounting",
+    targetUrl: actionsRun,
+    dryRun,
+  });
+  return {
+    blocker,
+    comment,
+    labels,
+    status,
+    costStatus,
+    ownsBlockedLabel,
+  };
 }
 
 export function validateReviewRemoteRecord(config, path) {
@@ -971,6 +1160,12 @@ function applyReview(
     ciPassed: patchApplied ? false : ciPassed
   });
   const policy = reviewCycleLabelChanges(config, review, cycle, { automergeEligible });
+  if (
+    ["ready", "retry"].includes(cycle.state) &&
+    reviewFailureOwnedBlockedLabel(comments, config)
+  ) {
+    policy.remove = [...new Set([...policy.remove, config.labels.blocked])];
+  }
 
   const comment = upsertManagedComment({
     config,
@@ -1116,6 +1311,25 @@ async function main() {
     );
     return;
   }
+  if (args["mark-failed"]) {
+    const failure = classifyReviewWorkflowFailurePath(args["failure-evidence"]);
+    const result = markReviewWorkflowFailure(
+      config,
+      prNumber,
+      args["expected-head-sha"],
+      failure,
+      dryRun,
+    );
+    finish(
+      {
+        ok: true,
+        message: `${dryRun ? "would record" : "recorded"} review workflow failure for #${prNumber}`,
+        result,
+      },
+      Boolean(args.json),
+    );
+    return;
+  }
   if (args["from-file"]) {
     const result = applyReview(
       config,
@@ -1136,7 +1350,7 @@ async function main() {
     return;
   }
   throw new AgentError(
-    "missing --wait-for-ci, --write-prompt, --create-patch, --repair-whitespace, --dispatch-pr-security, or --from-file",
+    "missing --wait-for-ci, --write-prompt, --create-patch, --repair-whitespace, --dispatch-pr-security, --mark-failed, or --from-file",
     2,
   );
 }

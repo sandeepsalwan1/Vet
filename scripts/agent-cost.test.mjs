@@ -12,6 +12,7 @@ import {
   proofOutcomeRecord,
   proofRemoteRecord,
   recordCost,
+  validateRemoteRecord,
   validateModelUsage
 } from "./agent-cost.mjs";
 
@@ -150,6 +151,88 @@ test("Hetzner estimate uses the pinned beast-class ceiling and hourly rounding",
   assert.equal(priced.estimatedIncrementalUsd, 1.6148);
   assert.match(priced.storageCost, /included/);
   assert.match(priced.networkCost, /excluded/);
+});
+
+test("terminal failures retain priced provider timing and fail the cost gate", () => {
+  const failedRemote = {
+    ...remote("reviewRemote"),
+    ok: false,
+    remoteCommandStarted: true,
+    timing: {
+      ...remote("reviewRemote").timing,
+      exitCode: 1,
+      runStatus: "failed"
+    }
+  };
+  assert.throws(
+    () => validateRemoteRecord(config, failedRemote, "reviewRemote"),
+    /Crabbox cost provenance is invalid/
+  );
+
+  const failed = buildCostRecord(config, {
+    lane: "review",
+    headSha,
+    remoteRecord: failedRemote,
+    remoteLane: "reviewRemote",
+    retryReason: "review workflow failure",
+    effect: "none",
+    githubActions: {
+      runId: "43",
+      observedJobMinutes: 2,
+      billing: "included-public-repository",
+      estimatedUsd: 0
+    },
+    terminalFailure: true,
+    model: "gpt-5.4-mini",
+    effort: "medium",
+    now: new Date("2026-07-24T10:01:00Z")
+  });
+
+  assert.equal(failed.complete, false);
+  assert.equal(failed.terminalFailure, true);
+  assert.equal(failed.model.attempted, false);
+  assert.equal(failed.model.effort, "medium");
+  assert.equal(failed.provider.outcome, "failed");
+  assert.equal(failed.provider.leaseId, failedRemote.leaseId);
+  assert.ok(failed.provider.estimatedIncrementalUsd > 0);
+});
+
+test("terminal cost reporting survives provider acquisition without timing", () => {
+  const acquisitionFailure = {
+    ok: false,
+    attempted: true,
+    lane: "reviewRemote",
+    provider: "vercel-sandbox",
+    leaseId: "",
+    timing: null,
+    remoteCommandStarted: false,
+    reason: "provider acquisition failed"
+  };
+  const failed = buildCostRecord(config, {
+    lane: "review",
+    headSha,
+    remoteRecord: acquisitionFailure,
+    remoteLane: "reviewRemote",
+    retryReason: "review workflow failure",
+    effect: "none",
+    githubActions: {
+      runId: "44",
+      observedJobMinutes: 1,
+      billing: "included-public-repository",
+      estimatedUsd: 0
+    },
+    terminalFailure: true,
+    now: new Date("2026-07-24T10:02:00Z")
+  });
+
+  assert.equal(failed.complete, false);
+  assert.equal(failed.provider.attempted, true);
+  assert.equal(failed.provider.complete, false);
+  assert.equal(failed.provider.estimatedIncrementalUsd, null);
+  assert.equal(
+    failed.provider.estimateKind,
+    "terminal-failure-provenance-incomplete"
+  );
 });
 
 test("proof cost accepts only a passing terminal outcome and actual provider provenance", () => {

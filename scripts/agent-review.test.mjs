@@ -7,11 +7,14 @@ import test from "node:test";
 import {
   MAX_REVIEW_DIFF_BYTES,
   MAX_REVIEW_REPAIR_ATTEMPTS,
+  REVIEW_WORKFLOW_FAILURE_MARKER,
   assertReviewedHead,
   assertReviewDiffFits,
   blankLineAtEofPaths,
   buildReviewPrompt,
+  classifyReviewWorkflowFailure,
   dispatchPullSecurity,
+  markReviewWorkflowFailure,
   normalizeReviewPolicy,
   normalizeTrailingBlankLines,
   privilegedPatchPaths,
@@ -19,6 +22,7 @@ import {
   resolveSourceIssueNumber,
   reviewCycleDecision,
   reviewCycleLabelChanges,
+  reviewFailureOwnedBlockedLabel,
   reviewLabelChanges,
   reviewPolicyOutcome,
   reviewReplayNextGate,
@@ -39,7 +43,9 @@ const config = {
     priorityTrivial: "priority:trivial"
   },
   automerge: { requiredChecks: ["quality", "build"] },
-  crabbox: { nonVisualProviders: ["vercel-sandbox", "hetzner"] }
+  cost: { status: "agent-cost" },
+  crabbox: { nonVisualProviders: ["vercel-sandbox", "hetzner"] },
+  comments: { review: "<!-- agent-review:v1 -->" }
 };
 
 function review(overrides = {}) {
@@ -400,6 +406,7 @@ test("trusted security dispatch uses the main workflow for the validated SHA", (
     fetchSnapshot: () => fixture.snapshot,
     fetchSourceIssue: () => fixture.sourceIssue,
     ghApiJson: () => [{ commit: { message: fixture.commitMessage } }],
+    getWorkflowRuns: () => [],
     dispatchWorkflow: (...args) => {
       calls.push(args);
       return { ok: true };
@@ -421,6 +428,60 @@ test("trusted security dispatch uses the main workflow for the validated SHA", (
   ]);
 });
 
+test("trusted security dispatch reuses an active or successful exact run", () => {
+  const fixture = trustedSecurityDispatchFixture();
+  let dispatched = false;
+  const result = dispatchPullSecurity(config, 8, fixture.pull.head.sha, {
+    fetchSnapshot: () => fixture.snapshot,
+    fetchSourceIssue: () => fixture.sourceIssue,
+    ghApiJson: () => [{ commit: { message: fixture.commitMessage } }],
+    getWorkflowRuns: () => [
+      {
+        id: 99,
+        event: "workflow_dispatch",
+        display_title: `CodeQL ${fixture.pull.head.sha}`,
+        status: "in_progress",
+        conclusion: null,
+      },
+    ],
+    dispatchWorkflow: () => {
+      dispatched = true;
+    },
+  });
+
+  assert.equal(dispatched, false);
+  assert.deepEqual(result, {
+    ok: true,
+    skipped: true,
+    reason: "exact security run already active or successful",
+    runId: 99,
+  });
+});
+
+test("trusted security dispatch retries a failed exact run", () => {
+  const fixture = trustedSecurityDispatchFixture();
+  let dispatched = false;
+  dispatchPullSecurity(config, 8, fixture.pull.head.sha, {
+    fetchSnapshot: () => fixture.snapshot,
+    fetchSourceIssue: () => fixture.sourceIssue,
+    ghApiJson: () => [{ commit: { message: fixture.commitMessage } }],
+    getWorkflowRuns: () => [
+      {
+        event: "workflow_dispatch",
+        display_title: `CodeQL ${fixture.pull.head.sha}`,
+        status: "completed",
+        conclusion: "failure",
+      },
+    ],
+    dispatchWorkflow: () => {
+      dispatched = true;
+      return { ok: true };
+    },
+  });
+
+  assert.equal(dispatched, true);
+});
+
 test("trusted security dispatch rejects stale or changed authorization", () => {
   const fixture = trustedSecurityDispatchFixture();
   let dispatched = false;
@@ -428,6 +489,7 @@ test("trusted security dispatch rejects stale or changed authorization", () => {
     fetchSnapshot: () => fixture.snapshot,
     fetchSourceIssue: () => fixture.sourceIssue,
     ghApiJson: () => [{ commit: { message: fixture.commitMessage } }],
+    getWorkflowRuns: () => [],
     dispatchWorkflow: () => {
       dispatched = true;
     }
@@ -457,6 +519,87 @@ test("trusted security dispatch rejects stale or changed authorization", () => {
     /privileged candidate paths/
   );
   assert.equal(dispatched, false);
+});
+
+test("review workflow failures publish one actionable owned blocker", () => {
+  const fixture = trustedSecurityDispatchFixture();
+  const failure = classifyReviewWorkflowFailure(
+    "Quota exceeded. Check your plan and billing details.",
+  );
+  const result = markReviewWorkflowFailure(
+    config,
+    8,
+    fixture.pull.head.sha,
+    failure,
+    true,
+    {
+      fetchSnapshot: () => fixture.snapshot,
+      fetchSourceIssue: () => fixture.sourceIssue,
+      fetchPullIssue: () => ({ labels: [] }),
+      fetchComments: () => [],
+      ghApiJson: () => [{ commit: { message: fixture.commitMessage } }],
+    },
+  );
+
+  assert.equal(result.blocker.kind, "model-quota");
+  assert.equal(result.ownsBlockedLabel, true);
+  assert.match(result.comment.body, /OpenAI API project quota is exhausted/);
+  assert.match(result.comment.body, /"ownsBlockedLabel": true/);
+  assert.deepEqual(result.labels.added, [config.labels.blocked]);
+  assert.deepEqual(result.labels.removed, [config.labels.automerge]);
+  assert.equal(result.costStatus.context, "agent-cost");
+  assert.equal(result.costStatus.state, "failure");
+});
+
+test("repeated review failures retain ownership of the blocker label", () => {
+  const fixture = trustedSecurityDispatchFixture();
+  const result = markReviewWorkflowFailure(
+    config,
+    8,
+    fixture.pull.head.sha,
+    classifyReviewWorkflowFailure("Quota exceeded."),
+    true,
+    {
+      fetchSnapshot: () => fixture.snapshot,
+      fetchSourceIssue: () => fixture.sourceIssue,
+      fetchPullIssue: () => ({ labels: [{ name: config.labels.blocked }] }),
+      fetchComments: () => [
+        {
+          id: 1,
+          user: { login: "github-actions[bot]" },
+          body: `${config.comments.review}\n${REVIEW_WORKFLOW_FAILURE_MARKER}\n{"ownsBlockedLabel": true}`,
+        },
+      ],
+      ghApiJson: () => [{ commit: { message: fixture.commitMessage } }],
+    },
+  );
+
+  assert.equal(result.ownsBlockedLabel, true);
+  assert.match(result.comment.body, /"ownsBlockedLabel": true/);
+});
+
+test("review recovery removes only the blocker label owned by review failure", () => {
+  const owned = [
+    {
+      id: 1,
+      user: { login: "github-actions[bot]" },
+      body: `${config.comments.review}\n${REVIEW_WORKFLOW_FAILURE_MARKER}\n{"ownsBlockedLabel": true}`,
+    },
+  ];
+  const unowned = [
+    {
+      id: 2,
+      user: { login: "github-actions[bot]" },
+      body: `${config.comments.review}\n${REVIEW_WORKFLOW_FAILURE_MARKER}\n{"ownsBlockedLabel": false}`,
+    },
+  ];
+
+  assert.equal(reviewFailureOwnedBlockedLabel(owned, config), true);
+  assert.equal(reviewFailureOwnedBlockedLabel(unowned, config), false);
+  assert.equal(
+    classifyReviewWorkflowFailure("provider returned status code: 429").kind,
+    "model-capacity",
+  );
 });
 
 test("oversized diff blocks instead of truncating", () => {
@@ -758,6 +901,17 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(noMistakes, /needs\.apply-review\.result == 'success'/);
   assert.doesNotMatch(noMistakes, /uses: \.\/\.github\/workflows\/agent-no-mistakes\.yml/);
   assert.match(failure, /REVIEWED_HEAD_SHA: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
-  assert.match(failure, /statuses\/\$REVIEWED_HEAD_SHA/);
+  assert.match(failure, /--mark-failed/);
+  assert.match(failure, /--failure-evidence \.agent-output\/review-failure/);
+  assert.match(failure, /review-remote\.json/);
+  assert.match(failure, /agent-review-result-\$\{\{ inputs\.pr-number \}\}/);
+  assert.match(failure, /--usage-file "\$usage_file"/);
+  assert.ok(
+    failure.indexOf("review-result/review-remote.json") <
+      failure.indexOf("review-failure/review-remote.json")
+  );
+  assert.match(failure, /--terminal-failure/);
+  assert.match(failure, /if \[ -n "\$backend_model" \]/);
+  assert.match(failure, /if \[ -n "\$backend_effort" \]/);
   assert.doesNotMatch(failure, /pulls\/\$PR_NUMBER|--jq \.head\.sha/);
 });

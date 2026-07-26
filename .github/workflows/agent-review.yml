@@ -290,6 +290,7 @@ jobs:
         with:
           name: agent-review-remote-diagnostics-${{ inputs.pr-number }}
           path: |
+            ${{ runner.temp }}/agent-review-workspace/candidate/.agent-output/review-remote.json
             ${{ runner.temp }}/agent-review-workspace/candidate/.agent-output/crabbox-reviewRemote-*.json
             ${{ runner.temp }}/agent-review-workspace/candidate/.agent-output/crabbox-reviewRemote-*.log
           include-hidden-files: true
@@ -451,18 +452,71 @@ jobs:
       needs.generate-review.result != 'success' ||
       needs.apply-review.result != 'success')
     permissions:
+      actions: read
+      contents: read
+      issues: write
+      pull-requests: write
       statuses: write
     steps:
-      - name: Mark agent review failed
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: agent-review-remote-diagnostics-${{ inputs.pr-number }}
+          path: .agent-output/review-failure
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: agent-review-result-${{ inputs.pr-number }}
+          path: .agent-output/review-result
+      - name: Record actionable review failure
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVIEWED_HEAD_SHA: ${{ needs.prepare-review.outputs.reviewed-head-sha }}
+        run: >-
+          node scripts/agent-review.mjs
+          --pr-number "${{ inputs.pr-number }}"
+          --expected-head-sha "$REVIEWED_HEAD_SHA"
+          --mark-failed
+          --failure-evidence .agent-output/review-failure
+          --json
+      - name: Record terminal review cost
         env:
           GH_TOKEN: ${{ github.token }}
           REVIEWED_HEAD_SHA: ${{ needs.prepare-review.outputs.reviewed-head-sha }}
         run: |
           set -euo pipefail
-          [[ "$REVIEWED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
-          gh api "repos/$GITHUB_REPOSITORY/statuses/$REVIEWED_HEAD_SHA" \
-            --method POST \
-            -f state=failure \
-            -f context=agent-review \
-            -f description='agent review workflow failed' \
-            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          backend_model="${{ needs.prepare-review.outputs.backend-model }}"
+          backend_effort="${{ needs.prepare-review.outputs.backend-effort }}"
+          args=(
+            --pr-number "${{ inputs.pr-number }}"
+            --head-sha "$REVIEWED_HEAD_SHA"
+            --lane review
+            --retry-reason "review workflow failure"
+            --effect none
+            --terminal-failure
+          )
+          if [ -n "$backend_model" ]; then
+            args+=(--model "$backend_model")
+          fi
+          if [ -n "$backend_effort" ]; then
+            args+=(--effort "$backend_effort")
+          fi
+          usage_file=".agent-output/review-result/model-usage.json"
+          if [ -f "$usage_file" ]; then
+            args+=(--usage-file "$usage_file")
+          fi
+          remote_record=".agent-output/review-result/review-remote.json"
+          if [ ! -f "$remote_record" ]; then
+            remote_record=".agent-output/review-failure/review-remote.json"
+          fi
+          if [ -f "$remote_record" ]; then
+            args+=(--remote-record "$remote_record" --remote-lane reviewRemote)
+          fi
+          node scripts/agent-cost.mjs "${args[@]}" --json
