@@ -1007,6 +1007,11 @@ test("proof workflow dispatches automerge only after terminal success is publish
   assert.match(workflow, /proof_passed: \$\{\{ steps\.remote\.outputs\.proof_passed \}\}/);
   assert.match(workflow, /needs\.remote\.outputs\.proof_passed == 'true'/);
   assert.match(workflow, /uses: actions\/download-artifact@v4/);
+  assert.match(
+    workflow,
+    /sudo apt-get install -y --no-install-recommends ffmpeg/
+  );
+  assert.match(workflow, /ffprobe -version/);
   assert.match(workflow, /--verify-published-media/);
   assert.match(
     finalizeJob,

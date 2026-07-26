@@ -248,6 +248,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Ensure published media probe is available
+        run: |
+          if ! command -v ffprobe >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+          ffprobe -version
       - uses: actions/download-artifact@v4
         with:
           name: agent-proof-${{ inputs.target-kind }}-${{ inputs.target-number }}
