@@ -252,6 +252,7 @@ Visual proof fails closed when the proof plan is incomplete, behavior assertions
 An actionable exact-head behavior failure automatically returns its failed clauses to the shared bounded reviewer repair loop.
 The failed proof remains merge-blocking, and unchanged or unsafe findings stop instead of looping.
 Published-media verification runs only after the structured browser result passes, so artifact publication errors cannot hide the original behavior failure.
+The verifier explicitly installs `ffprobe` when the runner image does not provide it, then confirms the command before downloading and opening the media.
 This fallback spends GitHub Actions time only and does not require the user's laptop or a paid provider key.
 A missing Docker runtime, failed desktop bootstrap, or invalid artifact blocks required visual proof instead of silently replacing it with weaker evidence.
 

@@ -753,6 +753,10 @@ Pull request 76 produced valid multi-route media whose two route bundles both co
 Published verification now prefers the exact artifact-relative path and uses a basename fallback only when no exact path exists.
 
 Recorded correction on 2026-07-25:
+Pull request 76 then proved that the separate GitHub runner used to open the downloaded media did not include `ffprobe`.
+The publication verifier now installs the bounded media probe when absent and confirms it is callable before downloading and opening proof files.
+
+Recorded correction on 2026-07-25:
 Pull request 76 proved that a model-generated `h1` locator can reject visibly correct acceptance text rendered in an `h2`.
 For text assertions whose generated selector is one heading level, source-blind proof now requires the same text on a visible `h1` through `h6`; the sealed route and text remain exact.
 
