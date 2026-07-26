@@ -741,7 +741,23 @@ ${markdownJsonBlock({
     targetUrl: actionsRun,
     dryRun,
   });
-  return { blocker, comment, labels, status, ownsBlockedLabel };
+  const costStatus = setCommitStatus({
+    config,
+    sha: expectedHeadSha,
+    state: "failure",
+    context: config.cost?.status ?? "agent-cost",
+    description: "review failed before complete cost accounting",
+    targetUrl: actionsRun,
+    dryRun,
+  });
+  return {
+    blocker,
+    comment,
+    labels,
+    status,
+    costStatus,
+    ownsBlockedLabel,
+  };
 }
 
 export function validateReviewRemoteRecord(config, path) {

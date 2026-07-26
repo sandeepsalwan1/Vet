@@ -43,6 +43,7 @@ const config = {
     priorityTrivial: "priority:trivial"
   },
   automerge: { requiredChecks: ["quality", "build"] },
+  cost: { status: "agent-cost" },
   crabbox: { nonVisualProviders: ["vercel-sandbox", "hetzner"] },
   comments: { review: "<!-- agent-review:v1 -->" }
 };
@@ -546,6 +547,8 @@ test("review workflow failures publish one actionable owned blocker", () => {
   assert.match(result.comment.body, /"ownsBlockedLabel": true/);
   assert.deepEqual(result.labels.added, [config.labels.blocked]);
   assert.deepEqual(result.labels.removed, [config.labels.automerge]);
+  assert.equal(result.costStatus.context, "agent-cost");
+  assert.equal(result.costStatus.state, "failure");
 });
 
 test("repeated review failures retain ownership of the blocker label", () => {
@@ -900,5 +903,15 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(failure, /REVIEWED_HEAD_SHA: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
   assert.match(failure, /--mark-failed/);
   assert.match(failure, /--failure-evidence \.agent-output\/review-failure/);
+  assert.match(failure, /review-remote\.json/);
+  assert.match(failure, /agent-review-result-\$\{\{ inputs\.pr-number \}\}/);
+  assert.match(failure, /--usage-file "\$usage_file"/);
+  assert.ok(
+    failure.indexOf("review-result/review-remote.json") <
+      failure.indexOf("review-failure/review-remote.json")
+  );
+  assert.match(failure, /--terminal-failure/);
+  assert.match(failure, /if \[ -n "\$backend_model" \]/);
+  assert.match(failure, /if \[ -n "\$backend_effort" \]/);
   assert.doesNotMatch(failure, /pulls\/\$PR_NUMBER|--jq \.head\.sha/);
 });
