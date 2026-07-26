@@ -326,6 +326,8 @@ An interruption after that model-turn signal is recorded separately and remains 
 Active-run reattachment may continue after that signal, but the outer no-mistakes helper cannot start a fresh daemon retry.
 Rerunning automerge for a merged pull request dispatches only missing exact-SHA CI, CodeQL, or Render verification.
 Provider retries stop once a remote command starts.
+Review preparation reuses an active or successful exact-head CodeQL run instead of restarting it.
+If review infrastructure or model access fails, the pull request receives one actionable `agent:blocked` report; a successful rerun removes that label only when the review failure originally added it.
 This is the duplicate-model boundary for interruption recovery.
 
 ## Plan Acceptance Map
