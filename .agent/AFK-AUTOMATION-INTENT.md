@@ -757,6 +757,8 @@ Risk classification now distinguishes ARIA role syntax from user, staff, access,
 Recorded correction on 2026-07-26:
 Issue 83 and pull request 84 proved that treating every mention of `architecture` as high risk blocks a narrow code cleanup after every required technical gate passes.
 Triage now keeps narrow cleanup low risk and reserves the high-risk architecture rule for replacement, migration, system-wide redesign, and similarly broad work.
+Pull request 84 then passed fresh exact-head CI run 30221185211 and CodeQL run 30221185213, merged as `ad0ac2617d6b445338a0570f90127e75adfe0e48`, and closed issue 83.
+That historical pull request required maintainer recovery because its already sealed high-risk decision could not be honestly rewritten, while future equivalent narrow cleanups use the corrected automatic classification.
 
 Recorded correction on 2026-07-26:
 Fresh proofless pull request 81 showed a red automerge run while review, cost, and no-mistakes were normally still pending.
@@ -887,6 +889,9 @@ A valid GIF of the wrong page is failed proof.
 Recorded correction on 2026-07-26:
 Issue 82 and pull request 85 produced a playable recording of only the sign-in page because the generated proof plan omitted authentication, used non-CSS text selectors, clicked a disabled save control without changing a setting, and changed an unrelated page solely to manufacture an affected route.
 Implementation validation now rejects those proof plans before publication, the source-blind runner supports bounded visible demo sessions and text clicks, existing static routes remain available without unrelated changes, and execution errors become actionable structured failures.
+Pull request 85 replacement head `e2c8e55fe1b4e6d42b559a9ae09dc0f1335cd1ee` then passed exact-head CI, CodeQL, review, no-mistakes, source-blind behavior proof, and published-media verification.
+Proof run 30221708062 artifact 8637420624 visibly covers the changed setting, enabled save action, transient sparkle burst, and settled saved state.
+The automatic merge workflow merged it as `f893cc0c731a8a2fd690f534c7f1b28c94050fe2` and closed issue 82 without a manual merge.
 
 ## Baseline Health And Workflow Approval
 
