@@ -913,13 +913,29 @@ test("implementation workflow isolates candidate checks from credentials, artifa
   assert.match(validationAction, /npm_config_nodedir=\/usr\/local/);
   assert.match(validationAction, /--network none/);
   assert.match(validationAction, /--user "\$\(id -u\):\$\(id -g\)"/);
+  assert.equal(
+    validationAction.match(/--user "\$\(id -u\):\$\(id -g\)"/g)?.length,
+    2
+  );
   assert.match(validationAction, /src=\$PWD,dst=\/workspace,readonly/);
+  assert.match(
+    validationAction,
+    /src=\$RUNNER_TEMP\/implementation-candidate,dst=\/workspace,readonly/
+  );
+  assert.match(validationAction, /src=\$feedback_dir,dst=\/feedback/);
   assert.match(validationAction, /--read-only/);
   assert.match(validationAction, /node_modules,dst=\/workspace\/node_modules,readonly/);
   assert.match(validationAction, /::stop-commands::/);
   assert.match(validationAction, /--prepare-validation/);
   assert.match(validationAction, /--run-validation-checks/);
-  assert.match(validationAction, /--validation-feedback/);
+  assert.match(
+    validationAction,
+    /--validation-feedback \/feedback\/validation-feedback\.json/
+  );
+  assert.match(
+    validationAction,
+    /implementation-validation-feedback\/validation-feedback\.json/
+  );
   assert.match(validationAction, /--env AGENT_VALIDATION_CONTAINER=1/);
   assert.match(validationAction, /--finalize-validation/);
   assert.doesNotMatch(validationAction, /\$\{\{ secrets\./);

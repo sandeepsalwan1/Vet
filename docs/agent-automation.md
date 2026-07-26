@@ -34,6 +34,7 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 4. Expensive proposer, implementation, review, no-mistakes, and proof jobs share deterministic slot groups from `.agent/config.json`.
 5. Implementation selects its allowed backend from `.agent/config.json`, runs without write credentials, uploads a patch plus bounded implementation addendum and proof plan, then applies the sealed patch in a separate write-token job and opens a draft PR.
    If credential-free trusted checks reject the unpublished candidate, one fresh Crabbox lease receives the sealed intent, prior patch, and bounded deterministic failure output, then repairs the candidate once before the full validator reruns.
+   The candidate checkout remains read-only during validation; only a separate credential-free feedback mount is writable, and trusted code copies that bounded output into the repair artifact.
    Both attempts retain separate model and provider cost records, and a second validation failure blocks without publishing a branch or pull request.
    Trusted branch pushes and pull request mutations use only the repository-scoped `AGENT_GITHUB_TOKEN`; routine statuses, comments, and workflow dispatch keep the built-in workflow token.
    The implementation preflight verifies the publisher token's owner identity, intended repository access, and reported push authorization before inference.

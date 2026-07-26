@@ -694,6 +694,10 @@ Recorded correction on 2026-07-25:
 The earlier requirement to introspect every fine-grained personal-token permission before model spend was replaced with the strongest non-mutating checks GitHub exposes plus a fresh production-path publisher canary.
 GitHub documents endpoint permission requirements but provides repository-selection inspection only to organization administration through a GitHub App, not to a personal token inspecting itself.
 
+Recorded correction on 2026-07-26:
+Fresh issue 72 proved that writing bounded repair feedback inside the isolated candidate checkout can fail with `EACCES` and skip the intended repair.
+The candidate checkout remains read-only, while only a separate credential-free feedback mount is writable and copied into the bounded repair artifact.
+
 ### 6. Let Review And no-mistakes Babysit The Pull Request
 
 The independent reviewer checks the exact head against the sealed intent and records actionable findings in one shared ledger.
