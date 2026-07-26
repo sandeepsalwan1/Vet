@@ -775,8 +775,8 @@ Structured proof:
 ${markdownJsonBlock(result)}`;
 }
 
-export function proofLabelChanges(config, status) {
-  if (status === "blocked" || status === "failed") {
+export function proofLabelChanges(config, status, { repairing = false } = {}) {
+  if ((status === "blocked" || status === "failed") && !repairing) {
     return { add: [config.labels.blocked], remove: [config.labels.automerge] };
   }
   // A shared blocked label may belong to triage, review, no-mistakes, or a human.
@@ -789,6 +789,33 @@ export function isProofHeadFresh(expectedSha, currentSha) {
 
 export function mayMutateProofTarget(requestSha, currentSha, statusSha) {
   return isProofHeadFresh(requestSha, currentSha) && isProofHeadFresh(statusSha, requestSha);
+}
+
+export function proofRepairEligible(request, result, mayMutateTarget = true) {
+  if (
+    !mayMutateTarget ||
+    request?.kind !== "pr" ||
+    request?.requested !== true ||
+    result?.status !== "failed" ||
+    !request?.behaviorContract ||
+    !result?.behaviorReport
+  ) {
+    return false;
+  }
+  try {
+    const report = validateBehaviorReport(
+      result.behaviorReport,
+      request.behaviorContract,
+    );
+    return (
+      report.overall_behavior === "violates_contract" &&
+      report.target.access ===
+        `pull request #${request.number} head ${request.sha}` &&
+      report.checks.some((check) => check.status === "fail")
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function legacyMain(args = parseArgs(), config = loadConfig()) {
@@ -1413,7 +1440,13 @@ async function executeRemoteMain(args, config) {
   setGitHubOutput({
     outcome_b64: encodeJson(outcome),
     terminal: outcome.terminal,
-    needs_local: outcome.needsLocal
+    needs_local: outcome.needsLocal,
+    proof_passed:
+      outcome.terminal === true &&
+      outcome.result?.status === "passed" &&
+      (!request.behaviorContract ||
+        outcome.result?.behaviorReport?.overall_behavior ===
+          "satisfies_contract"),
   });
   finish({ ok: true, message: "remote proof orchestration completed", outcome }, Boolean(args.json));
 }
@@ -1889,6 +1922,11 @@ async function finalizeMain(args, config) {
     }
   }
 
+  const repairEligible = proofRepairEligible(
+    request,
+    result,
+    mayMutateTarget,
+  );
   let comment = null;
   let labels = { added: [], removed: [] };
   if (request.requested && mayMutateTarget) {
@@ -1898,7 +1936,9 @@ async function finalizeMain(args, config) {
       marker: config.comments.proof,
       body: proofBody(result, request.routes, timingRecord)
     });
-    const changes = proofLabelChanges(config, result.status);
+    const changes = proofLabelChanges(config, result.status, {
+      repairing: repairEligible,
+    });
     labels = {
       added: addLabels(config, request.number, changes.add),
       removed: removeLabels(config, request.number, changes.remove)
@@ -1909,6 +1949,7 @@ async function finalizeMain(args, config) {
   if (args["cost-outcome-file"]) {
     writeJsonFile(args["cost-outcome-file"], terminalOutcome(result, timingRecord));
   }
+  setGitHubOutput({ "repair-eligible": repairEligible });
   const ok = result.status === "passed" || result.status === "skipped";
   finish(
     {

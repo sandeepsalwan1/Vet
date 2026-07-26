@@ -244,6 +244,9 @@ For GIF proof, recording starts before browser navigation or user action so tran
 The lane checks each affected route, desktop health, actual provider, lease, route-bound media, every acceptance clause, intermediate assertions, final assertions, and anti-cheat observations.
 The managed GitHub comment links the downloadable Actions artifact and keeps runner-only paths in a collapsed diagnostic section.
 Visual proof fails closed when the proof plan is incomplete, behavior assertions fail, a clause is missing, or no reviewable artifact URL is published.
+An actionable exact-head behavior failure automatically returns its failed clauses to the shared bounded reviewer repair loop.
+The failed proof remains merge-blocking, and unchanged or unsafe findings stop instead of looping.
+Published-media verification runs only after the structured browser result passes, so artifact publication errors cannot hide the original behavior failure.
 This fallback spends GitHub Actions time only and does not require the user's laptop or a paid provider key.
 A missing Docker runtime, failed desktop bootstrap, or invalid artifact blocks required visual proof instead of silently replacing it with weaker evidence.
 

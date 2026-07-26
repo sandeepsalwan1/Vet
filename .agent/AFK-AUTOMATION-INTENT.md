@@ -744,6 +744,11 @@ Fresh issue 74 proved that generic missing-plan feedback could lead the one boun
 Repair prompts now receive the trusted browser-clause allowlist, excluded clause IDs, and explicit sealed route bindings.
 
 Recorded correction on 2026-07-25:
+Fresh issue 75 and pull request 76 proved that CI, review, and no-mistakes can pass while source-blind GIF proof finds a requested loading state that never becomes observable.
+Actionable failed clauses from trusted exact-head behavior proof now enter the same bounded semantic repair loop automatically, while the failed proof remains merge-blocking.
+Published-media verification now starts only after the structured browser result passes, so a real behavior failure remains the primary diagnosis.
+
+Recorded correction on 2026-07-25:
 Replaying an older exact merge during post-merge recovery could roll Render back after newer merges.
 Recovery first observes the selected `main` revision and otherwise requests Render's latest configured branch without a commit pin.
 The returned deployment must contain the merge, remain on current `main`, and descend from the prior live revision.

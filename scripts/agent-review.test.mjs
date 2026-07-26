@@ -27,6 +27,7 @@ import {
   reviewPolicyOutcome,
   reviewReplayNextGate,
   summarizeRequiredChecks,
+  trustedProofFailureContext,
   validateReviewRemoteRecord,
   waitForRequiredChecks,
   validateReviewResult
@@ -45,7 +46,10 @@ const config = {
   automerge: { requiredChecks: ["quality", "build"] },
   cost: { status: "agent-cost" },
   crabbox: { nonVisualProviders: ["vercel-sandbox", "hetzner"] },
-  comments: { review: "<!-- agent-review:v1 -->" }
+  comments: {
+    proof: "<!-- agent-proof:v1 -->",
+    review: "<!-- agent-review:v1 -->"
+  }
 };
 
 function review(overrides = {}) {
@@ -73,6 +77,55 @@ ${JSON.stringify({
   issueSnapshotSha256: "a".repeat(64)
 })}
 \`\`\``;
+}
+
+const behaviorContract = {
+  target: { kind: "web", proofKind: "GIF" },
+  checks: [
+    {
+      id: "AC1",
+      statement: "The loading state is visible before sign-in.",
+      evidenceLanes: ["browser"]
+    }
+  ]
+};
+
+function failedProofComment(headSha, overrides = {}) {
+  const behaviorReport = {
+    overall_behavior: "violates_contract",
+    overall_confidence: 0.99,
+    target: {
+      type: "web app",
+      access: `pull request #76 head ${headSha}`
+    },
+    checks: [
+      {
+        contract_clause: "AC1: The loading state is visible before sign-in.",
+        status: "fail",
+        severity: "high",
+        evidence: "The loading selector never appeared.",
+        reproduction_steps: ["Open / before navigation.", "Wait for sign-in."],
+        confidence: 0.99
+      }
+    ],
+    anti_cheat_probes: [
+      {
+        probe: "Exact revision binding",
+        result: `Observed pull request #76 head ${headSha}.`
+      }
+    ],
+    blockers: []
+  };
+  return {
+    user: { login: "github-actions[bot]" },
+    updated_at: "2026-07-25T23:00:00Z",
+    body: `${config.comments.proof}
+Structured proof:
+\`\`\`json
+${JSON.stringify({ status: "failed", behaviorReport })}
+\`\`\``,
+    ...overrides
+  };
 }
 
 test("cached passing review resumes the correct final gate", () => {
@@ -113,6 +166,78 @@ test("cached passing review resumes the correct final gate", () => {
       sourceLabels: [],
     }),
     "",
+  );
+  assert.equal(
+    reviewReplayNextGate({
+      config,
+      evaluation: { outcome: "ready" },
+      metadata,
+      pullLabels: [],
+      sourceLabels: [],
+      proofFindings: [{ id: "AC1" }],
+    }),
+    "",
+  );
+});
+
+test("trusted exact-head failed behavior proof becomes stable repair input", () => {
+  const headSha = "a".repeat(40);
+  const accepted = trustedProofFailureContext({
+    comments: [failedProofComment(headSha)],
+    marker: config.comments.proof,
+    repoOwner: config.repo.owner,
+    contract: behaviorContract,
+    prNumber: 76,
+    headSha
+  });
+
+  assert.equal(accepted.findings.length, 1);
+  assert.equal(accepted.findings[0].id, "AC1");
+  assert.equal(accepted.findings[0].action, "auto-fix");
+  assert.match(accepted.findings[0].summary, /loading selector never appeared/);
+  assert.equal(accepted.proofFailure.failedChecks.length, 1);
+
+  assert.deepEqual(
+    trustedProofFailureContext({
+      comments: [failedProofComment("b".repeat(40))],
+      marker: config.comments.proof,
+      repoOwner: config.repo.owner,
+      contract: behaviorContract,
+      prNumber: 76,
+      headSha
+    }),
+    { findings: [], proofFailure: null }
+  );
+  assert.deepEqual(
+    trustedProofFailureContext({
+      comments: [
+        failedProofComment(headSha, {
+          user: { login: "untrusted-contributor" }
+        })
+      ],
+      marker: config.comments.proof,
+      repoOwner: config.repo.owner,
+      contract: behaviorContract,
+      prNumber: 76,
+      headSha
+    }),
+    { findings: [], proofFailure: null }
+  );
+  assert.deepEqual(
+    trustedProofFailureContext({
+      comments: [
+        {
+          ...failedProofComment(headSha),
+          body: `${config.comments.proof}\nStructured proof:\n\`\`\`json\nnot-json\n\`\`\``
+        }
+      ],
+      marker: config.comments.proof,
+      repoOwner: config.repo.owner,
+      contract: behaviorContract,
+      prNumber: 76,
+      headSha
+    }),
+    { findings: [], proofFailure: null }
   );
 });
 
@@ -170,6 +295,20 @@ test("review prompt contains sealed intent, addendum, CI state, and complete dif
     intentCapsule,
     implementationAddendum,
     repairLedger: emptyRepairLedger(intentCapsule.intentDigest),
+    proofFailure: {
+      target: {
+        type: "web app",
+        access: `pull request #8 head ${"c".repeat(40)}`
+      },
+      overallBehavior: "violates_contract",
+      failedChecks: [
+        {
+          contract_clause: "AC1: Loading appears.",
+          status: "fail",
+          evidence: "The loading selector never appeared."
+        }
+      ]
+    },
     ciChecks: [
       { name: "quality", state: "success", detailsUrl: "https://github.com/sandeepsalwan1/Vet/actions/runs/1" },
       { name: "build", state: "failure", detailsUrl: "https://github.com/sandeepsalwan1/Vet/actions/runs/2" }
@@ -183,6 +322,8 @@ test("review prompt contains sealed intent, addendum, CI state, and complete dif
   assert.match(prompt, /quality: success/);
   assert.match(prompt, /build: failure/);
   assert.match(prompt, /build: `npm run build`/);
+  assert.match(prompt, /## Trusted Failed Behavior Proof/);
+  assert.match(prompt, /loading selector never appeared/);
   assert.ok(prompt.includes(diff));
 });
 
