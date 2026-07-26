@@ -45,7 +45,7 @@ export function AuthScreen({ audience, onAuth, onOpenPasscodeBoard }: Props) {
   const { Icon } = copy;
 
   return (
-    <div className="authShell">
+    <div className="authShell" data-agent-proof="signin" data-agent-proof-state="complete">
       <div className="authBrandPanel">
         <div className="authBrandContent">
           <div className="authBrandHeader">

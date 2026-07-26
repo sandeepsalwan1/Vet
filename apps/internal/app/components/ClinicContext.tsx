@@ -10,6 +10,26 @@ import {
 
 const ClinicContext = createContext<ClinicBrand>(defaultClinicBrand);
 
+export function ClinicLoadingPanel({ failed = false }: { failed?: boolean }) {
+  return (
+    <main
+      className="entryShell"
+      data-agent-proof={failed ? "failed" : "opening"}
+      data-agent-proof-state={failed ? "failed" : "loading"}
+    >
+      <section className="entryPanel clinicResolutionPanel">
+        <PawPrint aria-hidden="true" />
+        <h1>{failed ? "Clinic unavailable" : "Opening your clinic…"}</h1>
+        <p>
+          {failed
+            ? "This domain is not connected to a hospital."
+            : "Loading the hospital workspace."}
+        </p>
+      </section>
+    </main>
+  );
+}
+
 function shortClinicName(name: string) {
   return name
     .replace(/\bHospital\b/gi, "")
@@ -43,19 +63,7 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
   }, []);
 
   if (!brand) {
-    return (
-      <main className="entryShell">
-        <section className="entryPanel clinicResolutionPanel">
-          <PawPrint aria-hidden="true" />
-          <h1>{failed ? "Clinic unavailable" : "Opening clinic"}</h1>
-          <p>
-            {failed
-              ? "This domain is not connected to a hospital."
-              : "Loading the hospital workspace."}
-          </p>
-        </section>
-      </main>
-    );
+    return <ClinicLoadingPanel failed={failed} />;
   }
 
   return <ClinicContext.Provider value={brand}>{children}</ClinicContext.Provider>;
