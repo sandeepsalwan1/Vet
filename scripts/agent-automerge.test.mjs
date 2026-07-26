@@ -328,6 +328,61 @@ test("trivial label added after implementation cannot bypass no-mistakes", () =>
   assert.ok(result.blockers.includes("no-mistakes status missing"));
 });
 
+test("pending gates are a successful no-op without a blocker comment", () => {
+  const value = fixture();
+  value.combined.statuses = [];
+  const decision = evaluate(value);
+  const events = [];
+
+  const outcome = settleAutomerge(
+    { config, prNumber: 18, pull: value.pull, decision },
+    {
+      runCommand: (...args) => events.push(["command", ...args]),
+      upsertManagedComment: (input) => {
+        events.push(["comment", input]);
+        return { ok: true };
+      }
+    }
+  );
+
+  assert.equal(decision.waiting, true);
+  assert.deepEqual(decision.waitingGateBlockers, [
+    "agent-review status missing",
+    "no-mistakes status missing"
+  ]);
+  assert.deepEqual(decision.terminalGateBlockers, []);
+  assert.equal(outcome.code, 0);
+  assert.equal(outcome.result.message, "automerge waiting for PR #18");
+  assert.equal(outcome.result.comment, null);
+  assert.deepEqual(events, []);
+});
+
+test("failed gate remains a terminal automerge blocker", () => {
+  const value = fixture();
+  value.combined.statuses = [
+    status("agent-review", "success", 1),
+    status("no-mistakes", "failure", 2)
+  ];
+  const decision = evaluate(value);
+  const comments = [];
+
+  const outcome = settleAutomerge(
+    { config, prNumber: 18, pull: value.pull, decision },
+    {
+      upsertManagedComment: (input) => {
+        comments.push(input);
+        return { ok: true };
+      }
+    }
+  );
+
+  assert.equal(decision.waiting, false);
+  assert.deepEqual(decision.waitingGateBlockers, []);
+  assert.deepEqual(decision.terminalGateBlockers, ["no-mistakes status failure"]);
+  assert.equal(outcome.code, 1);
+  assert.equal(comments.length, 1);
+});
+
 test("eligible PR is merged immediately after making a draft ready", () => {
   const value = fixture();
   value.pull.draft = true;

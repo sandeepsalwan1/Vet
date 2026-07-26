@@ -537,9 +537,19 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
   const sourceLabels = issueLabels(sourceIssue ?? {});
   const policyBlockers = [];
   const gateBlockers = [];
+  const waitingGateBlockers = [];
+  const terminalGateBlockers = [];
   let metadata = null;
   let triage = null;
   let trustedPull = false;
+  const addGateBlocker = (message, state = "failure") => {
+    gateBlockers.push(message);
+    if (["missing", "pending", "queued", "in_progress", "requested", "waiting", "unknown"].includes(state)) {
+      waitingGateBlockers.push(message);
+    } else {
+      terminalGateBlockers.push(message);
+    }
+  };
 
   try {
     metadata = implementationMetadata(pull.body);
@@ -660,7 +670,7 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
   }
 
   if (Array.isArray(files) && files.length === 0 && pull.changed_files === 0) {
-    gateBlockers.push("agent PR has no effective changes");
+    addGateBlocker("agent PR has no effective changes");
   }
 
   const skipNoMistakesForCostLane = skipsNoMistakesForCost(config, {
@@ -675,12 +685,14 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
       config
     ) === "success";
   const skipNoMistakes = skipNoMistakesForCostLane || skipNoMistakesForOwner;
-  if (combined?.sha !== pull.head?.sha) gateBlockers.push("commit statuses are not for the current PR head");
+  if (combined?.sha !== pull.head?.sha) {
+    addGateBlocker("commit statuses are not for the current PR head");
+  }
   for (const context of config.automerge.requiredStatuses.filter(
     (name) => !(skipNoMistakes && name === "no-mistakes")
   )) {
     const state = statusState(combined?.statuses ?? [], context, config);
-    if (state !== "success") gateBlockers.push(`${context} status ${state}`);
+    if (state !== "success") addGateBlocker(`${context} status ${state}`, state);
   }
 
   const proofRequested =
@@ -691,19 +703,27 @@ export function evaluate({ config, pull, pullIssue, sourceIssue, sourceComments,
     triage?.proofNeeded === "service";
   if (proofRequested) {
     const state = statusState(combined?.statuses ?? [], config.automerge.proofStatus, config);
-    if (state !== "success") gateBlockers.push(`${config.automerge.proofStatus} status ${state}`);
+    if (state !== "success") {
+      addGateBlocker(`${config.automerge.proofStatus} status ${state}`, state);
+    }
   }
   for (const name of config.automerge.requiredChecks) {
     const state = checkState(checks?.check_runs ?? [], name, pull.head?.sha, config);
-    if (state !== "success") gateBlockers.push(`${name} check ${state}`);
+    if (state !== "success") addGateBlocker(`${name} check ${state}`, state);
   }
 
   const blockers = [...new Set([...policyBlockers, ...gateBlockers])];
   return {
     allowed: blockers.length === 0,
+    waiting:
+      policyBlockers.length === 0 &&
+      terminalGateBlockers.length === 0 &&
+      waitingGateBlockers.length > 0,
     staleRecoveryAllowed: trustedPull && policyBlockers.length === 0,
     trustedPull,
     blockers,
+    waitingGateBlockers: [...new Set(waitingGateBlockers)],
+    terminalGateBlockers: [...new Set(terminalGateBlockers)],
     metadata,
     triage,
     skipNoMistakes,
@@ -1007,6 +1027,18 @@ export function settleAutomerge(
       { config, prNumber, pull, dryRun },
       { runCommand: execute }
     );
+    if (decision.waiting) {
+      return {
+        code: 0,
+        result: {
+          ok: true,
+          message: `automerge waiting for PR #${prNumber}`,
+          decision,
+          nativeAutomerge,
+          comment: null
+        }
+      };
+    }
     const comment = upsert({
       config,
       number: prNumber,
