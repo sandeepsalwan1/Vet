@@ -580,6 +580,15 @@ test("fresh finalizer trusts job conclusion, not a forged local success outcome"
 });
 
 test("service proof requires both disposable checks and trusted Blueprint validation", () => {
+  const agentConfig = JSON.parse(
+    readFileSync(new URL("../.agent/config.json", import.meta.url), "utf8")
+  );
+  assert.deepEqual(agentConfig.commands.serviceProof.slice(0, 3), [
+    "npm ci --ignore-scripts --no-audit --no-fund",
+    "npm run db:migrate",
+    "AGENT_DISPOSABLE_DATABASE=1 npm run db:proof"
+  ]);
+
   const request = {
     kind: "pr",
     number: 12,

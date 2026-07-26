@@ -20,6 +20,7 @@
     "opensrc:check": "node scripts/opensrc-sync.mjs --check",
     "opensrc:install-schedule": "node scripts/install-opensrc-sync.mjs",
     "db:migrate": "node packages/db/scripts/migrate.mjs",
+    "db:proof": "node --import tsx packages/db/scripts/tenantIsolationProof.ts",
     "clinic:provision": "node scripts/provision-clinic.mjs",
     "smoke:local": "node scripts/with-root-env.mjs node scripts/smoke-local.mjs",
     "smoke:agent-email": "node scripts/with-root-env.mjs node scripts/agent-email-smoke.mjs",

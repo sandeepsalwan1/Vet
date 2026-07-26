@@ -31,6 +31,7 @@
     "serviceProof": [
       "npm ci --ignore-scripts --no-audit --no-fund",
       "npm run db:migrate",
+      "AGENT_DISPOSABLE_DATABASE=1 npm run db:proof",
       "npm run build",
       "npm run test:scenarios"
     ],
