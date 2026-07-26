@@ -327,6 +327,7 @@ Read the newest managed agent comment, answer the decision, or use the exact-hea
 It verifies current-main required checks, the read-only branch summary, required secret presence by name, trusted publisher identity and intended-repository push access, deterministic agent tests, production dependency audit, the preferred Vercel Sandbox or configured Hetzner remote lifecycle, credential-free local-container fallback lifecycle, and trusted Render tenant health.
 Render CLI jobs select the scoped workspace from the masked `RENDER_WORKSPACE_ID` repository secret before reading services, deploys, logs, or validating a Blueprint.
 Push-triggered readiness waits up to 15 minutes for the same main SHA's baseline checks before publishing, so it cannot race CI and strand preflight on a false early failure.
+It accepts baseline jobs only from the CI run named for that same main SHA, so exact-candidate CI dispatched from the `main` workflow ref cannot replace a passing baseline with unrelated in-progress jobs.
 The scheduled token never calls administration-only repository settings APIs.
 Workflow permission safety is enforced by explicit job permissions and deterministic workflow tests; exact-head automerge separately enforces base freshness.
 It publishes the exact-head `agent-readiness` check and reconciles one actionable drift issue.

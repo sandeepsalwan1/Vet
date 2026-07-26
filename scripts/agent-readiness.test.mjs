@@ -22,6 +22,7 @@ const config = {
   readiness: {
     status: "agent-readiness",
     workflow: "agent-readiness.yml",
+    baselineWorkflow: "ci.yml",
     maxAgeHours: 26,
     baselineChecks: ["quality", "build", "scenarios", "audit"],
     primaryProvider: "vercel-sandbox",
@@ -48,6 +49,7 @@ function snapshot() {
   return {
     headSha,
     checks: config.readiness.baselineChecks.map((name) => check(name)),
+    baselineRunIds: [12],
     branch: {
       protected: true,
       protection: {
@@ -212,7 +214,18 @@ test("readiness collection uses only workflow-token-readable repository APIs", (
       if (path.startsWith(`commits/${headSha}/check-runs`)) {
         return { check_runs: [] };
       }
-      if (path.startsWith("actions/workflows/")) {
+      if (path.startsWith("actions/workflows/ci.yml/")) {
+        return {
+          workflow_runs: [{
+            id: 12,
+            name: `CI ${headSha}`,
+            display_title: `CI ${headSha}`,
+            head_branch: "main",
+            head_sha: headSha
+          }]
+        };
+      }
+      if (path.startsWith("actions/workflows/agent-readiness.yml/")) {
         return { workflow_runs: [] };
       }
       if (path === "branches/main") return snapshot().branch;
@@ -223,6 +236,7 @@ test("readiness collection uses only workflow-token-readable repository APIs", (
   assert.deepEqual(calls, [
     "commits/main",
     `commits/${headSha}/check-runs?per_page=100`,
+    `actions/workflows/ci.yml/runs?branch=main&head_sha=${headSha}&per_page=100`,
     "actions/workflows/agent-readiness.yml/runs?branch=main&per_page=20",
     "branches/main",
   ]);
@@ -331,6 +345,29 @@ test("baseline ignores forged or stale check runs", () => {
   );
   assert.equal(
     exactHeadCheckState([check("quality", "success", { head_sha: "b".repeat(40) })], "quality", headSha, config),
+    "missing"
+  );
+});
+
+test("baseline ignores candidate CI jobs attached to the main workflow ref", () => {
+  const baseline = check("quality", "success", {
+    id: 1,
+    details_url: "https://github.com/owner/repo/actions/runs/12/job/34",
+    started_at: "2026-07-24T10:00:00Z"
+  });
+  const candidate = check("quality", null, {
+    id: 2,
+    status: "in_progress",
+    details_url: "https://github.com/owner/repo/actions/runs/99/job/35",
+    started_at: "2026-07-24T10:01:00Z"
+  });
+
+  assert.equal(
+    exactHeadCheckState([baseline, candidate], "quality", headSha, config, [12]),
+    "success"
+  );
+  assert.equal(
+    exactHeadCheckState([baseline, candidate], "quality", headSha, config, []),
     "missing"
   );
 });
