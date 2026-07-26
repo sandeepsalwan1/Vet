@@ -600,6 +600,99 @@ test("isolated validation binds patch, output, base, and result tree", (t) => {
   );
 });
 
+test("prepared validation exposes an existing static proof route without an unrelated page edit", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "vet-agent-existing-route-test-"));
+  const cwd = join(root, "repo");
+  const candidateDir = join(root, "candidate");
+  mkdirSync(join(cwd, "apps", "internal", "app", "staff"), {
+    recursive: true
+  });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, { cwd, encoding: "utf8" });
+  const intent = createIntentCapsule({
+    issue: {
+      number: 42,
+      title: "Show a settings save animation",
+      body: `### Outcome
+Show a settings save animation.
+
+### Acceptance criteria
+- Saving a changed setting visibly celebrates success.`,
+      labels: [{ name: "agent:implement" }, { name: "agent:automerge" }]
+    },
+    decision: {
+      value: "medium",
+      priority: "medium",
+      risk: "medium",
+      alignment: "yes",
+      implementationScope: "Show and prove the settings save animation.",
+      proofNeeded: "GIF",
+      automationDecision: "implement",
+      humanQuestion: ""
+    }
+  });
+  const implementationResult = JSON.parse(implementationOutput());
+  implementationResult.intentAddendum.proofPlan = {
+    version: 1,
+    tasks: [
+      {
+        clauseIds: [],
+        route: "/staff",
+        session: "demo-admin",
+        actions: [{ type: "navigate", path: "/staff" }],
+        intermediateAssertions: [
+          { type: "visible", selector: "[data-agent-proof-state='saving']" }
+        ],
+        finalAssertions: [
+          { type: "visible", selector: "[data-agent-proof-state='saved']" }
+        ]
+      }
+    ]
+  };
+
+  git("init", "-q", "-b", "main");
+  git("config", "user.name", "Test");
+  git("config", "user.email", "test@example.test");
+  writeFileSync(
+    join(cwd, "apps", "internal", "app", "staff", "page.tsx"),
+    "export default function Page() { return null; }\n"
+  );
+  writeFileSync(join(cwd, "feature.ts"), "before\n");
+  git("add", ".");
+  git("commit", "-qm", "initial");
+  git("update-ref", "refs/remotes/origin/main", "HEAD");
+  writeFileSync(join(cwd, "feature.ts"), "after\n");
+  const patchPath = join(cwd, "change.patch");
+  writeFileSync(patchPath, git("diff", "--binary", "HEAD", "--", "feature.ts"));
+  git("restore", "feature.ts");
+  const outputPath = join(cwd, "implementation.md");
+  writeFileSync(outputPath, JSON.stringify(implementationResult));
+  writeFileSync(
+    join(cwd, "implementation-intent.json"),
+    `${JSON.stringify(intent)}\n`
+  );
+
+  preparePatchValidation(
+    config,
+    42,
+    patchPath,
+    outputPath,
+    join(root, "prepared.json"),
+    candidateDir,
+    cwd
+  );
+
+  assert.deepEqual(
+    JSON.parse(
+      readFileSync(
+        join(candidateDir, ".agent-output", "implementation-validation.json"),
+        "utf8"
+      )
+    ).routes,
+    ["/staff"]
+  );
+});
+
 test("final validation seal rejects changes to the prepared host tree", (t) => {
   const root = mkdtempSync(join(tmpdir(), "vet-agent-seal-test-"));
   const cwd = join(root, "repo");

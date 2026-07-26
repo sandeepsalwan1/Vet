@@ -44,7 +44,8 @@ import {
   deriveAffectedRoutes,
   validateBrowserProofPlan,
   validateImplementationResult,
-  validateIntentCapsule
+  validateIntentCapsule,
+  validateProofPlan
 } from "./agent-intent.mjs";
 
 const IMPLEMENTATION_PROOF_PLAN_CHECK =
@@ -688,6 +689,18 @@ function stagedChangedPaths(cwd) {
     .sort();
 }
 
+function existingApplicationRoutes(cwd) {
+  const files = gitOutput(
+    ["ls-files", "--cached", "--", "apps/internal/app"],
+    { cwd }
+  )
+    .split("\n")
+    .map((filename) => filename.trim())
+    .filter(Boolean)
+    .map((filename) => ({ filename, status: "modified" }));
+  return new Set(deriveAffectedRoutes(files));
+}
+
 function pathWithin(parent, candidate) {
   const path = relative(resolve(parent), resolve(candidate));
   return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
@@ -733,9 +746,16 @@ export function preparePatchValidation(
   const unstaged = runCommand("git", ["diff", "--no-renames", "--name-only"], { cwd }).stdout.trim();
   if (unstaged) throw new AgentError("patch preparation produced unstaged changes", 1);
   const resultTree = gitOutput(["write-tree"], { cwd });
+  const knownRoutes = existingApplicationRoutes(cwd);
+  const plannedRoutes = validateProofPlan(
+    implementationResult.intentAddendum.proofPlan
+  ).tasks
+    .map((task) => task.route)
+    .filter((route) => knownRoutes.has(route));
   const proofRoutes = [
     ...new Set([
       ...(intent.behaviorContract?.routes ?? []),
+      ...plannedRoutes,
       ...deriveAffectedRoutes(
         changed.map((filename) => ({ filename, status: "modified" }))
       )

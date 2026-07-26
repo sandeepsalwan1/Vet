@@ -265,7 +265,7 @@ function riskBearingConstraints(value) {
     .filter(Boolean)
     .filter(
       (line) =>
-        !/^(?:(?:do not|don't|must not|should not|may not|cannot|can't|never)\b|no\b.*\b(?:access|changes?|modifications?|use|work|write)\b|(?:keep|leave)\b.*\b(?:alone|out of scope|unchanged)\b|unchanged\b)/i.test(
+        !/^(?:(?:do not|don't|must not|should not|may not|cannot|can't|never)\b|no\b.*\b(?:access|changes?|modifications?|use|work|write)\b|no\b.*\bproof\b.*\b(?:needed|required)\b|(?:keep|leave)\b.*\b(?:alone|out of scope|unchanged)\b|unchanged\b)/i.test(
           line
         )
     )
@@ -390,7 +390,7 @@ export function lightweightTriageDecision(config, issue) {
     labels.includes(config.labels.priorityLow) ||
     labels.includes(config.labels.priorityTrivial);
   const lowWork =
-    /\b(?:readme|documentation|docs|copy|wording|typo|test coverage|dead code|cleanup|lint)\b/i.test(
+    /\b(?:readme|documentation|docs|copy|wording|typo|test coverage|dead code|clean(?:\s+|-)?up|lint)\b/i.test(
       workRequestText
     );
   const documentationOnlyScope = hasDocumentationOnlyScope(sections);
@@ -433,8 +433,16 @@ export function lightweightTriageDecision(config, issue) {
     /\brole\s*=\s*(?:"[^"\r\n]*"|'[^'\r\n]*')/gi,
     ""
   );
+  const broadArchitectureRisk =
+    /\b(?:replace(?:ment)?|redesign|rebuild|overhaul|replatform(?:ing)?|migrat(?:e|ion))\b[\s\S]{0,50}\barchitectur(?:e|al)\b/i.test(
+      riskClassificationText
+    ) ||
+    /\barchitectur(?:e|al)\b[\s\S]{0,50}\b(?:replace(?:ment)?|redesign|rebuild|overhaul|replatform(?:ing)?|migrat(?:e|ion)|across|system-wide|application-wide|runtime packages?)\b/i.test(
+      riskClassificationText
+    );
   const highRisk =
-    /\b(?:auth(?:entication|orization)?|security|secret|credential|billing|payment|migration|production data|destructive|delete production|external integration|webhook|broad refactor|architecture|tenant isolation|permission|role)\b/i.test(
+    broadArchitectureRisk ||
+    /\b(?:auth(?:entication|orization)?|security|secret|credential|billing|payment|migration|deployment|production data|destructive|delete production|external integration|webhook|broad refactor|tenant isolation|permission|role)\b/i.test(
       riskClassificationText
     );
   const narrowUi =

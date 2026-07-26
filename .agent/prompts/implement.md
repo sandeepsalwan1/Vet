@@ -35,6 +35,13 @@ Rules:
   When browser capture is required only as an overall artifact, use an empty `clauseIds` list and direct rendered assertions.
   Map browser-assigned sealed clause IDs to user actions plus deterministic visible assertions.
   Use stable accessible or `data-agent-proof` selectors, local routes, non-secret test values, and the fewest steps that exercise the real behavior.
+  Set every browser task `session` explicitly.
+  Use `demo-admin`, `demo-staff`, `demo-veterinarian`, or `demo-customer` only when the protected behavior needs that visible demo login; otherwise use `none`.
+  Use CSS selectors for `click` and `fill`.
+  Use `clickText` with a CSS element selector plus visible text instead of Playwright-only selectors such as `:has-text(...)`.
+  Before clicking a save or submit control, include the actual form-control change that enables the action.
+  A proof-plan route may use any existing static app page, so never modify an unrelated page merely to make that route appear changed.
+  When a protected data-backed screen cannot run without external state, add a localhost-only proof harness that exercises the same user-visible component behavior with deterministic non-secret fixtures.
   Every route and navigation path must be pathname-only, begin with exactly one `/`, and contain no host, protocol, query, or fragment.
   For GIF proof, include an observable intermediate assertion and a final assertion.
   For non-browser work, return an empty task list.

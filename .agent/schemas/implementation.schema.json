@@ -63,6 +63,7 @@
                 "required": [
                   "clauseIds",
                   "route",
+                  "session",
                   "actions",
                   "intermediateAssertions",
                   "finalAssertions"
@@ -78,6 +79,16 @@
                     "type": "string",
                     "pattern": "^/[A-Za-z0-9/_-]*$",
                     "maxLength": 1000
+                  },
+                  "session": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "demo-admin",
+                      "demo-staff",
+                      "demo-veterinarian",
+                      "demo-customer"
+                    ]
                   },
                   "actions": {
                     "type": "array",
@@ -126,6 +137,16 @@
           "properties": {
             "type": { "type": "string", "const": "click" },
             "selector": { "type": "string", "minLength": 1, "maxLength": 1000 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "selector", "value"],
+          "properties": {
+            "type": { "type": "string", "const": "clickText" },
+            "selector": { "type": "string", "minLength": 1, "maxLength": 1000 },
+            "value": { "type": "string", "minLength": 1, "maxLength": 1000 }
           }
         },
         {

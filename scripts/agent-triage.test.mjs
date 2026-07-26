@@ -348,6 +348,77 @@ The tenant-scoped migration is safe to deploy.
   assert.equal(result.automationDecision, "implement");
 });
 
+test("bounded architecture cleanup can automerge while broad architecture replacement stays high risk", () => {
+  const cleanup = lightweightTriageDecision(config, {
+    number: 83,
+    title: "Clean up code architecture",
+    body: `### Outcome
+
+Clean up code architecture
+
+### Acceptance criteria
+
+Clean up code architecture
+
+### Proof
+
+Automated tests and checks`,
+    labels: []
+  });
+  const replacement = lightweightTriageDecision(config, {
+    number: 84,
+    title: "Replace the application architecture",
+    body: `### Outcome
+
+Replace the application architecture.
+
+### Acceptance criteria
+
+The architecture changes across runtime packages.`,
+    labels: []
+  });
+
+  assert.equal(cleanup.priority, "low");
+  assert.equal(cleanup.risk, "low");
+  assert.equal(cleanup.automationDecision, "implement");
+  assert.ok(
+    triageLabelChanges(config, cleanup).add.includes(config.labels.automerge)
+  );
+  assert.equal(replacement.risk, "high");
+  assert.ok(
+    triageLabelChanges(config, replacement).remove.includes(
+      config.labels.automerge
+    )
+  );
+  for (const title of [
+    "Architecture replacement",
+    "Architecture overhaul",
+    "Migration of the architecture",
+    "System-wide architectural redesign"
+  ]) {
+    const broadChange = lightweightTriageDecision(config, {
+      number: 84,
+      title,
+      body: `### Outcome
+
+${title}.
+
+### Acceptance criteria
+
+The broad change is complete.`,
+      labels: []
+    });
+
+    assert.equal(broadChange.risk, "high", title);
+    assert.ok(
+      triageLabelChanges(config, broadChange).remove.includes(
+        config.labels.automerge
+      ),
+      title
+    );
+  }
+});
+
 test("lightweight triage distinguishes UI rendering from the Render service", () => {
   const ui = lightweightTriageDecision(config, {
     number: 37,

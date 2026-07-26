@@ -1307,7 +1307,7 @@ export function recordedBrowserLaunchScript({
     "--output",
     videoPath,
     "--duration",
-    "10s",
+    "15s",
     "--fps",
     "30",
     "--contact-sheet-output",

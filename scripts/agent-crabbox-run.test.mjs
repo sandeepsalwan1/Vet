@@ -494,7 +494,7 @@ test("GIF capture starts before the browser navigates and encodes that recording
 
   assert.ok(script.indexOf("'artifacts' 'video'") < script.indexOf("'desktop' 'launch'"));
   assert.ok(script.indexOf("sleep 1") < script.indexOf("'desktop' 'launch'"));
-  assert.match(script, /'--duration' '10s'/);
+  assert.match(script, /'--duration' '15s'/);
   assert.match(script, /'--fps' '30'/);
   assert.match(script, /http:\/\/127\.0\.0\.1:3000\/request/);
   assert.deepEqual(

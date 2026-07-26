@@ -13,6 +13,7 @@ import {
   parseImplementationAddendum,
   parseIssueSections,
   parseManagedTriageDecision,
+  validateBrowserProofPlan,
   validateImplementationResult,
   validateIntentCapsule,
   validateProofPlan
@@ -399,6 +400,25 @@ ${JSON.stringify(envelope)}
       ),
     /digest does not match/
   );
+  const legacyEnvelope = {
+    version: 1,
+    intentAddendum: result.intentAddendum,
+    digest: createHash("sha256")
+      .update(JSON.stringify(result.intentAddendum))
+      .digest("hex")
+  };
+  const legacyBody = `${IMPLEMENTATION_ADDENDUM_MARKER}
+Implementation intent addendum:
+\`\`\`json
+${JSON.stringify(legacyEnvelope)}
+\`\`\``;
+  const normalizedLegacy = parseImplementationAddendum(legacyBody);
+
+  assert.equal(normalizedLegacy.digest, legacyEnvelope.digest);
+  assert.equal(
+    normalizedLegacy.intentAddendum.proofPlan.tasks[0].session,
+    "none"
+  );
 });
 
 test("proof plan rejects unsafe routes and unbounded waits", () => {
@@ -415,7 +435,10 @@ test("proof plan rejects unsafe routes and unbounded waits", () => {
     ]
   };
 
-  assert.deepEqual(validateProofPlan(base), base);
+  assert.deepEqual(validateProofPlan(base), {
+    ...base,
+    tasks: [{ ...base.tasks[0], session: "none" }]
+  });
   assert.deepEqual(
     validateProofPlan({
       version: 1,
@@ -468,5 +491,145 @@ test("proof plan rejects unsafe routes and unbounded waits", () => {
         ]
       }),
     /proof wait is invalid/
+  );
+});
+
+test("browser proof plans declare protected sessions and executable interactions", () => {
+  const behaviorContract = {
+    target: { kind: "web" },
+    captureBeforeAction: true,
+    checks: [
+      {
+        id: "AC1",
+        statement: "Saving settings shows sparkles.",
+        evidenceLanes: ["browser"]
+      }
+    ]
+  };
+  const task = {
+    clauseIds: ["AC1"],
+    route: "/staff",
+    session: "demo-admin",
+    actions: [
+      { type: "navigate", path: "/staff" },
+      { type: "clickText", selector: "button", value: "Notifications" },
+      {
+        type: "click",
+        selector: "button[role='switch'][aria-label='Appointment confirmation']"
+      },
+      { type: "clickText", selector: "button", value: "Save changes" }
+    ],
+    intermediateAssertions: [
+      { type: "visible", selector: ".miniConfetti" }
+    ],
+    finalAssertions: [
+      { type: "text", selector: "[aria-live='polite']", value: "All changes saved." }
+    ]
+  };
+
+  assert.deepEqual(
+    validateBrowserProofPlan({
+      proofKind: "GIF",
+      routes: ["/staff"],
+      behaviorContract,
+      proofPlan: { version: 1, tasks: [task] }
+    }).tasks[0],
+    task
+  );
+  assert.throws(
+    () =>
+      validateBrowserProofPlan({
+        proofKind: "GIF",
+        routes: ["/staff"],
+        behaviorContract,
+        proofPlan: {
+          version: 1,
+          tasks: [{ ...task, session: "none" }]
+        }
+      }),
+    /must declare a demo staff session/
+  );
+  assert.throws(
+    () =>
+      validateBrowserProofPlan({
+        proofKind: "GIF",
+        routes: ["/staff"],
+        behaviorContract,
+        proofPlan: {
+          version: 1,
+          tasks: [
+            {
+              ...task,
+              actions: [
+                { type: "navigate", path: "/staff" },
+                { type: "clickText", selector: "button", value: "Save changes" }
+              ]
+            }
+          ]
+        }
+      }),
+    /without first changing a form control/
+  );
+  for (const selector of [
+    "button:has-text('Notifications')",
+    "button:text('Notifications')",
+    "button:text-is('Notifications')",
+    "button:contains('Notifications')",
+    "text=Notifications",
+    "xpath=//button",
+    "//button",
+    "button >> nth=0"
+  ]) {
+    assert.throws(
+      () =>
+        validateProofPlan({
+          version: 1,
+          tasks: [
+            {
+              ...task,
+              actions: [{ type: "click", selector }]
+            }
+          ]
+        }),
+      /must be CSS/,
+      selector
+    );
+  }
+  assert.throws(
+    () =>
+      validateProofPlan({
+        version: 1,
+        tasks: [
+          {
+            ...task,
+            actions: [
+              {
+                type: "clickText",
+                selector: "button",
+                value: ""
+              }
+            ]
+          }
+        ]
+      }),
+    /proof value is invalid/
+  );
+  assert.throws(
+    () =>
+      validateProofPlan({
+        version: 1,
+        tasks: [
+          {
+            ...task,
+            finalAssertions: [
+              {
+                type: "visible",
+                selector: "button:has-text('Saved')"
+              }
+            ]
+          }
+        ]
+      }),
+    /must be CSS/
   );
 });

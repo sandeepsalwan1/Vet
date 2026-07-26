@@ -3,6 +3,24 @@
 import { fileURLToPath } from "node:url";
 
 export const BROWSER_BEHAVIOR_MARKER = "AGENT_BROWSER_BEHAVIOR_V1 ";
+export const DEMO_SESSION_CREDENTIALS = Object.freeze({
+  "demo-admin": Object.freeze({
+    email: "admin@clinic.demo",
+    password: "admin1234"
+  }),
+  "demo-staff": Object.freeze({
+    email: "staff@clinic.demo",
+    password: "staff1234"
+  }),
+  "demo-veterinarian": Object.freeze({
+    email: "vet@clinic.demo",
+    password: "vet1234"
+  }),
+  "demo-customer": Object.freeze({
+    email: "maya@example.com",
+    password: "demo1234"
+  })
+});
 
 function parseArgs(argv = process.argv.slice(2)) {
   const result = {};
@@ -36,6 +54,11 @@ export function validateBrowserPayload(payload) {
         !Array.isArray(task.actions) ||
         !Array.isArray(task.intermediateAssertions) ||
         !Array.isArray(task.finalAssertions) ||
+        (
+          task.session !== undefined &&
+          task.session !== "none" &&
+          !Object.hasOwn(DEMO_SESSION_CREDENTIALS, task.session)
+        ) ||
         task.finalAssertions.length === 0
     )
   ) {
@@ -167,6 +190,15 @@ async function evaluate(client, expression) {
   return result.result?.value;
 }
 
+async function waitForEvaluation(client, expression, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    if (await evaluate(client, expression)) return true;
+    await sleep(50);
+  } while (Date.now() < deadline);
+  return false;
+}
+
 async function assertionResults(client, assertions) {
   const values = [];
   for (const assertion of assertions) {
@@ -199,7 +231,7 @@ async function navigate(client, baseUrl, path) {
   await client.send("Page.navigate", { url: `${baseUrl}${path}` });
 }
 
-async function runAction(client, baseUrl, action) {
+export async function runAction(client, baseUrl, action) {
   if (action.type === "navigate") {
     await navigate(client, baseUrl, action.path);
     return `Navigate to ${action.path}`;
@@ -221,15 +253,34 @@ async function runAction(client, baseUrl, action) {
   }
   const selector = JSON.stringify(action.selector);
   if (action.type === "click") {
-    const clicked = await evaluate(
+    const clicked = await waitForEvaluation(
       client,
-      `(element => { if (!element) return false; element.click(); return true; })(document.querySelector(${selector}))`
+      `(element => { ` +
+        `if (!element || element.disabled || !element.getClientRects().length) return false; ` +
+        `element.click(); return true; ` +
+        `})(document.querySelector(${selector}))`
     );
     if (!clicked) fail(`browser action target was not found: ${action.selector}`);
     return `Click ${action.selector}`;
   }
+  if (action.type === "clickText") {
+    const clicked = await waitForEvaluation(
+      client,
+      `(elements => { ` +
+        `const value = ${JSON.stringify(action.value)}; ` +
+        `const element = Array.from(elements).find(candidate => ` +
+        `!candidate.disabled && candidate.getClientRects().length && ` +
+        `String(candidate.textContent ?? "").includes(value)); ` +
+        `if (!element) return false; element.click(); return true; ` +
+        `})(document.querySelectorAll(${selector}))`
+    );
+    if (!clicked) {
+      fail(`browser action text was not found: ${action.selector} ${JSON.stringify(action.value)}`);
+    }
+    return `Click ${action.selector} containing ${JSON.stringify(action.value)}`;
+  }
   if (action.type === "fill") {
-    const filled = await evaluate(
+    const filled = await waitForEvaluation(
       client,
       `(element => { if (!element) return false; ` +
         `const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; ` +
@@ -244,32 +295,119 @@ async function runAction(client, baseUrl, action) {
   fail(`unsupported browser action: ${action.type}`);
 }
 
-async function runTask(client, payload, task) {
+export async function establishDemoSession(
+  client,
+  session,
+  baseUrl,
+  route
+) {
+  if (!session || session === "none") return "";
+  const credentials = DEMO_SESSION_CREDENTIALS[session];
+  if (!credentials) fail(`unsupported browser demo session: ${session}`);
+  const expectedRole = session.replace(/^demo-/, "");
+  const hasExpectedRole =
+    `(value => { try { return JSON.parse(value ?? "null")?.role === ` +
+    `${JSON.stringify(expectedRole)}; } catch { return false; } })` +
+    `(localStorage.getItem("central-vet-session"))`;
+  await evaluate(
+    client,
+    `localStorage.removeItem("central-vet-session"); true`
+  );
+  const loginRoute = session === "demo-customer" ? "/" : "/staff";
+  await navigate(client, baseUrl, loginRoute);
+  const emailVisible = await waitForEvaluation(
+    client,
+    `Boolean(document.querySelector("input[type='email']"))`,
+    8_000
+  );
+  if (!emailVisible) fail(`browser demo sign-in form was not found for ${session}`);
+  await runAction(client, "", {
+    type: "fill",
+    selector: "input[type='email']",
+    value: credentials.email
+  });
+  await runAction(client, "", {
+    type: "fill",
+    selector: "input[type='password']",
+    value: credentials.password
+  });
+  await runAction(client, "", {
+    type: "click",
+    selector: "form button[type='submit']"
+  });
+  const signedIn = await waitForEvaluation(
+    client,
+    hasExpectedRole,
+    8_000
+  );
+  if (!signedIn) fail(`browser demo sign-in did not complete for ${session}`);
+  if (route !== loginRoute) await navigate(client, baseUrl, route);
+  return `Sign in with the visible ${session} account`;
+}
+
+export function intermediateAssertionTimeout(actionCount, actionIndex) {
+  return actionIndex === actionCount - 1 ? 4_000 : 250;
+}
+
+export async function runTask(client, payload, task) {
   const reproductionSteps = [];
   let intermediate = [];
   const actions = task.actions.length
     ? task.actions
     : [{ type: "navigate", path: task.route }];
-  for (const action of actions) {
-    reproductionSteps.push(await runAction(client, payload.baseUrl, action));
-    if (
-      task.intermediateAssertions.length &&
-      ["navigate", "click", "press"].includes(action.type)
-    ) {
-      const observed = await waitForAssertions(
-        client,
-        task.intermediateAssertions,
-        4_000
-      );
-      intermediate = intermediate.length
-        ? intermediate.map((prior, index) => ({
-            ...prior,
-            passed: prior.passed || observed[index]?.passed
-          }))
-        : observed;
+  try {
+    const sessionStep = await establishDemoSession(
+      client,
+      task.session ?? "none",
+      payload.baseUrl,
+      task.route
+    );
+    if (sessionStep) reproductionSteps.push(sessionStep);
+    for (const [actionIndex, action] of actions.entries()) {
+      reproductionSteps.push(await runAction(client, payload.baseUrl, action));
+      if (
+        task.intermediateAssertions.length &&
+        ["navigate", "click", "clickText", "press"].includes(action.type)
+      ) {
+        const observed = await waitForAssertions(
+          client,
+          task.intermediateAssertions,
+          intermediateAssertionTimeout(actions.length, actionIndex)
+        );
+        intermediate = intermediate.length
+          ? intermediate.map((prior, index) => ({
+              ...prior,
+              passed: prior.passed || observed[index]?.passed
+            }))
+          : observed;
+      }
     }
+  } catch (error) {
+    return {
+      clauseIds: task.clauseIds,
+      route: task.route,
+      status: "fail",
+      evidence: `Browser interaction failed: ${error?.message ?? String(error)}`,
+      reproductionSteps,
+      assertions: []
+    };
   }
-  const final = await waitForAssertions(client, task.finalAssertions, 8_000);
+  let final;
+  try {
+    final = await waitForAssertions(client, task.finalAssertions, 8_000);
+  } catch (error) {
+    return {
+      clauseIds: task.clauseIds,
+      route: task.route,
+      status: "fail",
+      evidence: `Browser assertion failed: ${error?.message ?? String(error)}`,
+      reproductionSteps,
+      assertions: intermediate.map((result) => ({
+        phase: "intermediate",
+        ...result
+      }))
+    };
+  }
   const assertions = [
     ...intermediate.map((result) => ({ phase: "intermediate", ...result })),
     ...final.map((result) => ({ phase: "final", ...result }))
