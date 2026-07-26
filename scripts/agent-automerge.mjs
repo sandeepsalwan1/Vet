@@ -999,6 +999,26 @@ export function revokeNativeAutomerge(
   return "disabled";
 }
 
+function reconcileSuccessfulAutomergeComment(
+  { config, prNumber, headSha, mergeSha },
+  dependencies = {}
+) {
+  const upsert = dependencies.upsertManagedComment ?? upsertManagedComment;
+  try {
+    const comment = upsert({
+      config,
+      number: prNumber,
+      marker: `${config.comments.gate}\n<!-- agent-gate-automerge:v1 -->`,
+      body: `Automerge completed.\n\n- exact head: \`${headSha}\`\n- merge commit: \`${mergeSha}\``
+    });
+    return comment?.ok === true
+      ? comment
+      : { ok: false, error: "managed automerge status update failed" };
+  } catch {
+    return { ok: false, error: "managed automerge status update failed" };
+  }
+}
+
 export function settleAutomerge(
   { config, prNumber, pull, decision, baseState, dryRun = false },
   dependencies = {}
@@ -1147,6 +1167,31 @@ export function settleAutomerge(
       }
     };
   }
+  const comment = dryRun
+    ? null
+    : reconcileSuccessfulAutomergeComment(
+        {
+          config,
+          prNumber,
+          headSha: pull.head.sha,
+          mergeSha: postMerge.mergeSha
+        },
+        { upsertManagedComment: upsert }
+      );
+  if (comment && !comment.ok) {
+    return {
+      code: 1,
+      result: {
+        ok: false,
+        merged: true,
+        message: `merged PR #${prNumber}, but automerge status reconciliation failed`,
+        decision,
+        postMerge,
+        cleanup,
+        comment
+      }
+    };
+  }
   return {
     code: 0,
     result: {
@@ -1154,7 +1199,8 @@ export function settleAutomerge(
       message: `${dryRun ? "would merge" : "merged"} PR #${prNumber}`,
       decision,
       postMerge,
-      cleanup
+      cleanup,
+      comment
     }
   };
 }
@@ -1182,7 +1228,19 @@ export function reconcileMergedAgentPull(
     { config, prNumber, decision: { metadata }, dryRun },
     { runCommand: dependencies.runCommand, getIssue: dependencies.getIssue }
   );
-  const ok = postMerge.ok && cleanup.ok;
+  const comment =
+    !dryRun && postMerge.ok && cleanup.ok
+      ? reconcileSuccessfulAutomergeComment(
+          {
+            config,
+            prNumber,
+            headSha: pull.head.sha,
+            mergeSha: pull.merge_commit_sha
+          },
+          dependencies
+        )
+      : null;
+  const ok = postMerge.ok && cleanup.ok && (!comment || comment.ok);
   return {
     code: ok ? 0 : 1,
     result: {
@@ -1191,7 +1249,8 @@ export function reconcileMergedAgentPull(
         ? `${dryRun ? "would reconcile" : "reconciled"} merged PR #${prNumber}`
         : `merged PR #${prNumber} still has reconciliation failures`,
       postMerge,
-      cleanup
+      cleanup,
+      comment
     }
   };
 }

@@ -150,6 +150,7 @@ The final configured provider retries acquisition once when no lease timing or r
 Automerge waits for every configured gate, updates a stale branch from `main` with the repository-scoped owner credential, reruns head-bound CI and review, and lets successful review dispatch proof once.
 This avoids approval-required runs from the built-in workflow identity and avoids duplicate proof dispatch.
 An early automerge trigger that finds normal gates still pending exits successfully without posting a blocker; only terminal gate or policy failures create a red run.
+After a successful exact-head merge or merged-loop recovery, automation replaces any earlier managed blocker comment with the exact merged head and merge commit.
 It then merges, dispatches baseline CI, CodeQL, and trusted Render verification for the exact merge commit, closes the source issue, and removes workflow labels.
 If GitHub reports a stale-branch merge conflict, trusted automation creates a merge commit that preserves `main` in conflicting hunks, then sends the linked issue back through implementation, CI, review, proof when required, and no-mistakes so the issue behavior must be restored and verified before merge.
 Implementation advances a conflict-recovered zero-diff branch to its validated base only when the branch tree exactly matches the common-base tree, then applies the validated patch without discarding divergent work.

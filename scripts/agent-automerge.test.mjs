@@ -207,12 +207,18 @@ function expectedCleanupCommands() {
 
 function cleanupHarness(decision, { failLabel = "", failWorkflow = "" } = {}) {
   const commands = [];
+  const comments = [];
   const state = new Map([
     [18, { number: 18, state: "open", labels: [...decision.prLabels] }],
     [17, { number: 17, state: "open", labels: [...decision.sourceLabels] }]
   ]);
   return {
     commands,
+    comments,
+    upsertManagedComment(input) {
+      comments.push(input);
+      return { ok: true, action: "updated" };
+    },
     getPull() {
       return {
         number: 18,
@@ -403,6 +409,9 @@ test("eligible PR is merged immediately after making a draft ready", () => {
     ...expectedCleanupCommands()
   ]);
   assert.equal(outcome.result.postMerge.mergeSha, mergeSha);
+  assert.equal(harness.comments.length, 1);
+  assert.match(harness.comments[0].body, new RegExp(`exact head: \\\`${sha}\\\``));
+  assert.match(harness.comments[0].body, new RegExp(`merge commit: \\\`${mergeSha}\\\``));
 });
 
 test("eligible PR revokes stale native automerge before immediate merge", () => {
@@ -422,6 +431,7 @@ test("eligible PR revokes stale native automerge before immediate merge", () => 
     ...postMergeDispatchArgs(config, mergeSha, postMergeTarget).map((args) => ["gh", args]),
     ...expectedCleanupCommands()
   ]);
+  assert.equal(harness.comments.length, 1);
 });
 
 test("post-merge checks are dispatched against the exact merge commit", () => {

@@ -33,44 +33,32 @@ Do not ask the user to perform routine debugging, polling, approvals, reruns, or
 
 This snapshot was refreshed on 2026-07-26 and must be reverified where state can drift.
 
-- The verified implementation baseline through `e86cb2a` is on `main`.
-  Preserve unrelated work and inspect the complete diff before editing.
-- The implementation uses Crabbox-only model lanes, a reviewed project skill bundle, structural skill discovery, and scoped credential handoffs.
-- Intent capsule v5 seals acceptance clauses, refined per-clause evidence lanes, proof routes and interactions, anti-cheat probes, and a digest-bound behavior contract while remaining compatible with existing v1 through v4 issue seals.
-- Review and no-mistakes share one three-revision semantic ledger.
-  Replayed unchanged evaluations, infrastructure retries, malformed-output retries, and active-run reattachment do not spend a revision.
-- Every model lane emits bounded per-call usage.
-  Trusted cost accounting adds provider timing, versioned Vercel and conservative Hetzner price snapshots, GitHub Actions usage when available, fixed-service separation, and explicit human-comparison assumptions.
-- UI and GIF proof execute a bounded source-blind browser plan, assert intermediate and final rendered behavior, cover every browser-assigned sealed clause, hash artifacts, and fail closed on semantic mismatch.
-  Trusted finalization combines that browser evidence with required deterministic or service evidence for the remaining clauses.
-- Trusted post-merge verification selects an exact deployed `main` revision that contains the merge, checks bounded logs and all configured public tenant hostnames, and reopens or recloses the source issue through one owned failure marker.
-  When that revision is absent, it requests the latest configured `main` branch without pinning an old SHA, pins the returned deployment, and proves both merge ancestry and non-rollback ancestry before passing.
-- Daily zero-model readiness now checks exact-main baseline, repository policy, credential presence, deterministic tests, dependency audit, the preferred Vercel or configured Hetzner remote lifecycle, the credential-free fallback lifecycle, and Render health before model spend.
-  It also verifies the trusted publisher's owner identity, intended repository access, and reported push authorization without exposing the token.
-  Push readiness waits for baseline checks on its exact main SHA before publishing.
-- Provider acquisition retries may select the next configured provider only before the remote command starts.
-- The full local automation suite, including 367 deterministic agent tests, typecheck, lint, dead-code, and duplicate-code gates passed after these changes.
-  Rerun them after final documentation and live-canary changes.
-- A redacted zero-model Vercel Sandbox lifecycle and exact project-local skill discovery passed during bootstrap.
-- Local Codex is signed in through ChatGPT.
-  `CODEX_ACCESS_TOKEN` is not configured and its setup is deliberately deferred.
-  The existing scoped API-key lane remains the non-interactive fallback and must not block the core reliability work.
-- Proofless issue 63 and pull request 64 passed the production GitHub path without workflow approval and merged automatically as `f700d291`.
-- Proof-required issue 66 and pull request 67 reached repaired exact head `a1169b5f`.
-  Exact-head CI and CodeQL passed without workflow approval.
-  The next review stopped on exhausted OpenAI API project quota before UI proof, no-mistakes, merge, and source-blind final validation.
-  `agent-review` and `agent-cost` now report terminal failures instead of leaving an ambiguous pending check.
+- The production implementation is on `main` and uses Crabbox-only model lanes, scoped credential handoffs, structural project-skill discovery, sealed intent capsule v5, and backward-compatible v1 through v4 reconstruction.
+- Review and no-mistakes share one three-revision semantic ledger, and every model lane publishes bounded per-call usage plus provider and issue-level cost accounting.
+- Source-blind UI and GIF proof binds browser actions, intermediate and final assertions, acceptance clauses, routes, exact heads, artifact digests, media validity, and anti-cheat probes.
+- Proof-required issue 75 and pull request 76 passed exact-head CI, CodeQL, review, no-mistakes, playable GIF verification, automatic merge, issue closure, branch deletion, and exact-merge post-merge health.
+- Pull request 76 merged final head `c1cae4983f68dfc2e1bca3dc81e7b68df0bfa2e5` as `ed771873ba1edfee2e6d7cb366b74445c9ccfa4d`.
+- Its exact-head proof run 30197246421 and artifact 8630518524 visibly showed the real opening state followed by the sign-in state.
+- High-priority issue 78 and pull request 79 passed CI, CodeQL, review, no-mistakes, cost finalization, mixed deterministic and browser evidence, and published playable GIF verification on exact head `bf9d60c384d072c1ae2edc86d9459be11381be8c`.
+- Proof run 30197979262 and artifact 8630749701 visibly showed `Opening your clinic…` followed by `Welcome back`, while verifying `role="status"` and `aria-live="polite"`.
+- Pull request 79 remains draft, open, and unmerged because `priority:high` requires the final human decision.
+- Fresh proofless issue 80 produced one branch and pull request 81, correctly classified explicit no-GIF and no-video wording as CI-only, created no proof lease, and merged final head `23b188b5e4abaddef9a3851625bbed9b21203f08`.
+- Pull request 81 merged automatically as `612cfb65c56a2d9b39ce7b6493c048c538192e90`, closed issue 80, deleted its branch, and passed exact-merge CI run 30198870065, CodeQL run 30198870641, readiness run 30198871160, and Render post-merge run 30198871652.
+- Pull request runs created by the repository-owner publisher started automatically without any `action_required` state or maintainer workflow approval.
+- Near-concurrent issues 77 and 78 produced exactly one implementation run each, serialized their costly generation slots, and allowed cheap validation work to overlap.
+- Issue 77 exposed a negated-proof triage defect, was not counted, and was repeated successfully from fresh issue 80 after the deterministic fix.
 - Recovery canary run 30185784286 was deliberately cancelled before provider acquisition and resumed as attempt 2 under the same run ID.
-  It passed with one primary lease and one fallback lease, both stopped, without model work, branches, pull requests, proof leases, or comments.
+  It passed with one primary lease and one fallback lease, both stopped, without duplicate model work, branches, pull requests, proof leases, or comments.
 - The data capability check applied all 28 migrations to disposable PostgreSQL 17, performed a real tenant-scoped write, proved the same-tenant read, and blocked the cross-tenant read.
-- The deployment capability check observed a live main deployment, summarized 130 bounded application logs with zero errors, and passed all three configured tenant health checks.
+- The deployment capability checks observed live main deployments, bounded logs with zero errors, and all three configured tenant health checks.
 - Policy issue 68 blocked once before model spend with one actionable question and created no branch or pull request.
-- Near-concurrent proofless and proof-required issue canaries remain acceptance work and must wait until the model quota blocker is cleared.
+- Readiness run 30198624961 passed the exact-main CI baseline, scoped publisher identity and push access, production dependency audit, Vercel Sandbox lifecycle, credential-free local-container lifecycle, Render logs, and tenant health while candidate CI overlapped.
+- Main merge readiness run 30198871160 passed again after pull request 81 merged.
+- The scoped GitHub owner credential is present and proved approval-free branch publication, stale-base updates, exact-head workflow dispatch, merge, branch deletion, and issue closure without exposing its value.
+- The full local closeout passed: 384 deterministic agent tests, typecheck, lint, dead-code, duplicate-code, scenarios, build, production dependency audit, documentation inventory, and diff validation.
 - Subscription-token migration remains a deferred cost optimization.
-- Final proof-required completion, concurrency evidence, source-blind validation, and closeout documentation remain acceptance work.
 
-Do not claim completion from this snapshot.
-It exists to prevent duplicated investigation and accidental loss of working progress.
+Reverify provider, credential, repository-policy, dependency, and deployment claims when they can drift.
 
 ## Original User Request
 
@@ -771,6 +759,10 @@ Automerge now treats missing or active gates as a successful waiting state witho
 Recorded correction on 2026-07-26:
 Main readiness run 30198394360 first observed a passing exact-main CI baseline, then falsely failed after pull request 81 dispatched candidate CI from the `main` workflow ref and GitHub attached those newer jobs to the main SHA.
 Readiness now accepts baseline jobs only from the CI run named for the exact main SHA, so candidate validation cannot overwrite baseline health.
+
+Recorded correction on 2026-07-26:
+After pull request 81 merged successfully, its managed automerge comment still showed obsolete pending-gate blockers from an earlier head.
+Successful merge and merged-loop recovery now replace that managed comment with the exact merged head and merge commit.
 
 Recorded correction on 2026-07-25:
 Pull request 76 proved that a model-generated `h1` locator can reject visibly correct acceptance text rendered in an `h2`.
