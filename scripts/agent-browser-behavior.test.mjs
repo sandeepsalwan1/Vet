@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  assertionLabel,
   assertionExpression,
   validateBrowserPayload
 } from "./agent-browser-behavior.mjs";
@@ -54,4 +55,29 @@ test("browser assertion expression treats selectors and values as data", () => {
   assert.match(expression, /document\.querySelector/);
   assert.ok(expression.includes(JSON.stringify("[data-value=\"');process.exit()//\"]")));
   assert.ok(expression.includes(JSON.stringify("expected');throw new Error()//")));
+});
+
+test("heading text proof accepts the visible text across semantic heading levels", () => {
+  const heading = assertionExpression({
+    type: "text",
+    selector: "h1",
+    value: "Welcome back"
+  });
+  const exactElement = assertionExpression({
+    type: "text",
+    selector: "[data-agent-proof='signin']",
+    value: "Welcome back"
+  });
+
+  assert.match(heading, /document\.querySelector\\?\("h1"\\?\)/);
+  assert.match(
+    heading,
+    /document\.querySelectorAll\("h1,h2,h3,h4,h5,h6"\)/
+  );
+  assert.match(heading, /getComputedStyle/);
+  assert.doesNotMatch(exactElement, /querySelectorAll/);
+  assert.notEqual(
+    assertionLabel({ type: "text", selector: "h1", value: "Welcome back" }),
+    assertionLabel({ type: "text", selector: "h2", value: "Opening your clinic" })
+  );
 });

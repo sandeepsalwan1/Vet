@@ -749,6 +749,14 @@ Actionable failed clauses from trusted exact-head behavior proof now enter the s
 Published-media verification now starts only after the structured browser result passes, so a real behavior failure remains the primary diagnosis.
 
 Recorded correction on 2026-07-25:
+Pull request 76 proved that a model-generated `h1` locator can reject visibly correct acceptance text rendered in an `h2`.
+For text assertions whose generated selector is one heading level, source-blind proof now requires the same text on a visible `h1` through `h6`; the sealed route and text remain exact.
+
+Recorded correction on 2026-07-25:
+Stale-base recovery on pull request 76 used GitHub's built-in workflow identity, which produced redundant approval-required pull-request runs, and both recovery and review dispatched the same proof.
+Stale branch mutation now uses the repository-scoped owner credential, while recovery dispatches exact-head CI and review only and lets the successful reviewer start proof once.
+
+Recorded correction on 2026-07-25:
 Replaying an older exact merge during post-merge recovery could roll Render back after newer merges.
 Recovery first observes the selected `main` revision and otherwise requests Render's latest configured branch without a commit pin.
 The returned deployment must contain the merge, remain on current `main`, and descend from the prior live revision.

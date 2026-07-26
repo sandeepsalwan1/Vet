@@ -111,6 +111,10 @@ function selectorExpression(selector) {
   return `document.querySelector(${JSON.stringify(selector)})`;
 }
 
+function isHeadingSelector(selector) {
+  return /^h[1-6]$/i.test(String(selector ?? "").trim());
+}
+
 export function assertionExpression(assertion) {
   if (assertion.type === "url") {
     return `location.pathname === ${JSON.stringify(assertion.path)}`;
@@ -122,7 +126,17 @@ export function assertionExpression(assertion) {
   if (assertion.type === "visible") return `${visible}(${element})`;
   if (assertion.type === "hidden") return `!${visible}(${element})`;
   if (assertion.type === "text") {
-    return `(element => Boolean(element && String(element.textContent ?? "").includes(${JSON.stringify(assertion.value)})))(${element})`;
+    const matches =
+      `(element => Boolean(element && ${visible}(element) && ` +
+      `String(element.textContent ?? "").includes(${JSON.stringify(assertion.value)})))`;
+    if (isHeadingSelector(assertion.selector)) {
+      return (
+        `(${matches}(${element}) || ` +
+        `Array.from(document.querySelectorAll("h1,h2,h3,h4,h5,h6")).some(` +
+        `(element) => ${matches}(element)))`
+      );
+    }
+    return `${matches}(${element})`;
   }
   if (assertion.type === "attribute") {
     return `(element => Boolean(element && element.getAttribute(${JSON.stringify(assertion.name)}) === ${JSON.stringify(assertion.value)}))(${element})`;
@@ -130,9 +144,13 @@ export function assertionExpression(assertion) {
   fail(`unsupported browser assertion: ${assertion.type}`);
 }
 
-function assertionLabel(assertion) {
+export function assertionLabel(assertion) {
   if (assertion.type === "url") return `URL is ${assertion.path}`;
-  if (assertion.type === "text") return `${assertion.selector} contains expected text`;
+  if (assertion.type === "text") {
+    return isHeadingSelector(assertion.selector)
+      ? `visible heading contains ${JSON.stringify(assertion.value)}`
+      : `${assertion.selector} contains expected text`;
+  }
   if (assertion.type === "attribute") {
     return `${assertion.selector} has expected ${assertion.name} attribute`;
   }
@@ -161,16 +179,20 @@ async function assertionResults(client, assertions) {
 }
 
 async function waitForAssertions(client, assertions, timeoutMs) {
-  const observed = new Map(assertions.map((assertion) => [assertionLabel(assertion), false]));
+  const observed = assertions.map(() => false);
   const deadline = Date.now() + timeoutMs;
   do {
-    for (const result of await assertionResults(client, assertions)) {
-      if (result.passed) observed.set(result.assertion, true);
+    const results = await assertionResults(client, assertions);
+    for (const [index, result] of results.entries()) {
+      if (result.passed) observed[index] = true;
     }
-    if ([...observed.values()].every(Boolean)) break;
+    if (observed.every(Boolean)) break;
     await sleep(50);
   } while (Date.now() < deadline);
-  return [...observed].map(([assertion, passed]) => ({ assertion, passed }));
+  return assertions.map((assertion, index) => ({
+    assertion: assertionLabel(assertion),
+    passed: observed[index]
+  }));
 }
 
 async function navigate(client, baseUrl, path) {
