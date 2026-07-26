@@ -145,7 +145,9 @@ Every native fix is published through the sealed exact-head handoff, then exact-
 Actionable findings left after native repair return to exact-head reviewer repair within the same three-revision ledger.
 Provider acquisition may move to the next configured Crabbox provider only when the remote command never started, which prevents duplicate model work.
 The final configured provider retries acquisition once when no lease timing or remote-command marker exists.
-Automerge waits for every configured gate, updates a stale branch from `main`, reruns head-bound gates, merges, dispatches baseline CI, CodeQL, and trusted Render verification for the exact merge commit, closes the source issue, and removes workflow labels.
+Automerge waits for every configured gate, updates a stale branch from `main` with the repository-scoped owner credential, reruns head-bound CI and review, and lets successful review dispatch proof once.
+This avoids approval-required runs from the built-in workflow identity and avoids duplicate proof dispatch.
+It then merges, dispatches baseline CI, CodeQL, and trusted Render verification for the exact merge commit, closes the source issue, and removes workflow labels.
 If GitHub reports a stale-branch merge conflict, trusted automation creates a merge commit that preserves `main` in conflicting hunks, then sends the linked issue back through implementation, CI, review, proof when required, and no-mistakes so the issue behavior must be restored and verified before merge.
 Implementation advances a conflict-recovered zero-diff branch to its validated base only when the branch tree exactly matches the common-base tree, then applies the validated patch without discarding divergent work.
 
@@ -239,6 +241,8 @@ Without one, Crabbox uses its credential-free `local-container` provider on the 
 The trusted behavior contract comes from the sealed issue and implementation addendum.
 The browser driver receives only routes, actions, selectors, and assertions, not source code.
 When an acceptance clause explicitly names a sealed route, its proof task must exercise that route.
+For visible text assertions whose model-generated selector is one heading level, the driver accepts the same text on any visible `h1` through `h6`.
+The heading level is a locator preference; the sealed route and acceptance text remain exact.
 Bounded implementation repair receives a trusted browser-clause allowlist and may not move deterministic-only or service-only clauses into browser proof.
 For GIF proof, recording starts before browser navigation or user action so transient states are captured instead of only the settled page.
 The lane checks each affected route, desktop health, actual provider, lease, route-bound media, every acceptance clause, intermediate assertions, final assertions, and anti-cheat observations.

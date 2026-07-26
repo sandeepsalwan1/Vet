@@ -10,6 +10,10 @@ on:
         required: false
         type: string
         default: ""
+    secrets:
+      AGENT_GITHUB_TOKEN:
+        description: Repository-scoped owner credential for stale branch updates
+        required: true
   workflow_dispatch:
     inputs:
       pr-number:
@@ -78,6 +82,7 @@ jobs:
       - name: Evaluate automerge
         env:
           GH_TOKEN: ${{ github.token }}
+          AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.resolve.outputs.pr-number }}
           EXPECTED_HEAD_SHA: ${{ inputs.expected-head-sha }}
         run: |

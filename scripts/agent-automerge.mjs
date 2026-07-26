@@ -20,6 +20,7 @@ import {
   parseImplementationMetadata,
   parseArgs,
   privilegedCandidatePaths,
+  publisherEnvironment,
   runCommand,
   skipsNoMistakesForCost,
   upsertManagedComment
@@ -164,7 +165,7 @@ export function trustedConflictRecoveryCommands(config, headRef, oldHead, baseHe
   ];
 }
 
-export function recoveryDispatchArgs(prNumber, config, headSha, proofRequested = false) {
+export function recoveryDispatchArgs(prNumber, config, headSha) {
   const repo = repoSlug(config);
   const common = ["--repo", repo, "--ref", config.repo.defaultBranch];
   const dispatches = [
@@ -189,20 +190,6 @@ export function recoveryDispatchArgs(prNumber, config, headSha, proofRequested =
       `expected-head-sha=${headSha}`
     ]
   ];
-  if (proofRequested) {
-    dispatches.push([
-      "workflow",
-      "run",
-      "agent-proof.yml",
-      ...common,
-      "-f",
-      "target-kind=pr",
-      "-f",
-      `target-number=${prNumber}`,
-      "-f",
-      `expected-head-sha=${headSha}`
-    ]);
-  }
   return dispatches;
 }
 
@@ -415,6 +402,9 @@ export async function recoverStaleBase(
     };
   }
 
+  const publisherOptions = {
+    env: dependencies.publisherEnv ?? publisherEnvironment(),
+  };
   const getPull = dependencies.getPull ?? (() => getPullRequest(config, prNumber));
   const hasAncestor =
     dependencies.hasAncestor ??
@@ -432,12 +422,16 @@ export async function recoverStaleBase(
 
   let updateStrategy = "github-update";
   try {
-    execute("gh", updateBranchArgs(prNumber, config, oldHead));
+    execute(
+      "gh",
+      updateBranchArgs(prNumber, config, oldHead),
+      publisherOptions,
+    );
   } catch (error) {
     if (!isUpdateBranchMergeConflict(error)) throw error;
     updateStrategy = "trusted-base-preferred-merge";
     for (const [command, args] of trustedConflictRecoveryCommands(config, headRef, oldHead, baseHead)) {
-      execute(command, args);
+      execute(command, args, publisherOptions);
     }
   }
 
@@ -471,7 +465,7 @@ export async function recoverStaleBase(
 
   const dispatches = updateStrategy === "trusted-base-preferred-merge"
     ? [conflictRecoveryDispatchArgs(decision.metadata?.sourceIssue, config)]
-    : recoveryDispatchArgs(prNumber, config, newHead, decision.proofRequested);
+    : recoveryDispatchArgs(prNumber, config, newHead);
   const dispatchErrors = [];
   for (const args of dispatches) {
     try {
@@ -1267,7 +1261,14 @@ async function main() {
     : null;
   const outcome =
     decision.staleRecoveryAllowed && baseState.stale
-      ? await recoverStaleBase({ config, prNumber, pull, decision, baseState, dryRun })
+      ? await recoverStaleBase(
+          { config, prNumber, pull, decision, baseState, dryRun },
+          {
+            publisherEnv: dryRun
+              ? null
+              : publisherEnvironment(),
+          },
+        )
       : settleAutomerge({ config, prNumber, pull, decision, baseState, dryRun });
   finish(outcome.result, Boolean(args.json), outcome.code);
 }

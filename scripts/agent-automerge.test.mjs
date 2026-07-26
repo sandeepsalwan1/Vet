@@ -44,6 +44,7 @@ const baseSha = "b".repeat(40);
 const updatedSha = "c".repeat(40);
 const mergeSha = "d".repeat(40);
 const postMergeTarget = { prNumber: 18, sourceIssue: 17 };
+const publisherEnv = { GH_TOKEN: "owner-scoped-token" };
 const config = {
   repo: { owner: "sandeepsalwan1", name: "Vet", defaultBranch: "main" },
   labels: {
@@ -520,6 +521,7 @@ test("stale base recovery uses the authorized head and reruns head-bound gates",
   const value = fixture();
   value.pull.mergeable_state = "behind";
   const commands = [];
+  const commandOptions = [];
   const ancestorChecks = [];
   const refreshed = {
     ...value.pull,
@@ -535,7 +537,11 @@ test("stale base recovery uses the authorized head and reruns head-bound gates",
       baseState: { stale: true, baseHead: baseSha }
     },
     {
-      runCommand: (command, args) => commands.push([command, args]),
+      runCommand: (command, args, options) => {
+        commands.push([command, args]);
+        commandOptions.push(options);
+      },
+      publisherEnv,
       getPull: () => refreshed,
       hasAncestor: (ancestor, descendant) => {
         ancestorChecks.push([ancestor, descendant]);
@@ -557,6 +563,8 @@ test("stale base recovery uses the authorized head and reruns head-bound gates",
     [sha, updatedSha],
     [baseSha, updatedSha]
   ]);
+  assert.deepEqual(commandOptions[0], { env: publisherEnv });
+  assert.equal(commandOptions.slice(1).every((options) => options === undefined), true);
   assert.equal(commands.some(([, args]) => args[0] === "pr" && args[1] === "merge"), false);
 });
 
@@ -579,6 +587,7 @@ test("stale conflict recovery prefers trusted base hunks and reruns implementati
       baseState: { stale: true, baseHead: baseSha }
     },
     {
+      publisherEnv,
       runCommand: (command, args) => {
         commands.push([command, args]);
         if (command === "gh" && args[1]?.includes("/update-branch")) throw mergeConflict;
@@ -623,6 +632,7 @@ test("stale base recovery replaces failed old-head gates only for a policy-eligi
       baseState: { stale: true, baseHead: baseSha }
     },
     {
+      publisherEnv,
       runCommand: (command, args) => commands.push([command, args]),
       getPull: () => ({ ...value.pull, head: { ...value.pull.head, sha: updatedSha } }),
       hasAncestor: (ancestor, descendant) =>
@@ -676,6 +686,7 @@ test("stale base recovery fails closed when the updated head lacks authorized an
         baseState: { stale: true, baseHead: baseSha }
       },
       {
+        publisherEnv,
         runCommand: (command, args) => commands.push([command, args]),
         getPull: () => ({ ...value.pull, head: { ...value.pull.head, sha: updatedSha } }),
         hasAncestor: (ancestor, descendant) => ancestor === sha && descendant === updatedSha,
@@ -705,16 +716,21 @@ test("base ancestry is authoritative even when mergeable_state is stale or unkno
   assert.equal(current.stale, false);
 });
 
-test("proof-required recovery dispatches every gate against the new exact head", () => {
-  const dispatches = recoveryDispatchArgs(18, config, updatedSha, true);
+test("stale recovery lets exact-head review dispatch proof once", () => {
+  const dispatches = recoveryDispatchArgs(18, config, updatedSha);
 
-  assert.equal(dispatches.length, 3);
+  assert.equal(dispatches.length, 2);
   for (const args of dispatches) {
     assert.ok(args.includes("--ref"));
     assert.ok(args.includes("main"));
     assert.ok(args.includes(`expected-head-sha=${updatedSha}`));
   }
-  assert.ok(dispatches.some((args) => args.includes("agent-proof.yml")));
+  assert.ok(dispatches.some((args) => args.includes("ci.yml")));
+  assert.ok(dispatches.some((args) => args.includes("agent-review.yml")));
+  assert.equal(
+    dispatches.some((args) => args.includes("agent-proof.yml")),
+    false
+  );
 });
 
 test("trusted workflows reject mutable dispatch targets and publish exact-head CI", () => {
@@ -739,6 +755,10 @@ test("trusted workflows reject mutable dispatch targets and publish exact-head C
   assert.match(proof, /test "\$sha" = "\$REQUESTED_HEAD_SHA"/);
   assert.match(noMistakes, /"\$head_sha" != "\$REQUESTED_HEAD_SHA"/);
   assert.match(automerge, /--expected-head "\$EXPECTED_HEAD_SHA"/);
+  assert.match(
+    automerge,
+    /AGENT_GITHUB_TOKEN: \$\{\{ secrets\.AGENT_GITHUB_TOKEN \}\}/
+  );
   assert.match(
     readiness,
     /run-name: Agent Readiness \$\{\{ inputs\.expected-head-sha \|\| github\.sha \}\}/
@@ -831,6 +851,7 @@ test("stale base recovery never reuses gates when the authorized head does not a
         baseState: { stale: true, baseHead: baseSha }
       },
       {
+        publisherEnv,
         runCommand: (command, args) => commands.push([command, args]),
         getPull: () => value.pull,
         hasAncestor: () => false,
