@@ -54,6 +54,15 @@ jobs:
           else
             jq -n '{ok: false}' > .agent-output/readiness-audit.json
           fi
+      - name: Verify trusted publisher access
+        continue-on-error: true
+        env:
+          AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
+        run: >-
+          node scripts/agent-readiness.mjs
+          --verify-publisher
+          --output-file .agent-output/readiness-publisher.json
+          --json
       - name: Wait for exact-head baseline checks
         id: baseline
         continue-on-error: true
@@ -114,11 +123,13 @@ jobs:
           GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           READINESS_EXPECTED_HEAD: ${{ inputs.expected-head-sha || github.sha }}
           AGENT_AUTH_PRESENT: ${{ secrets.OPENAI_API_KEY != '' }}
+          PUBLISHER_AUTH_PRESENT: ${{ secrets.AGENT_GITHUB_TOKEN != '' }}
           PRIMARY_PROVIDER_AUTH_PRESENT: ${{ (vars.CRABBOX_VERCEL_READY == 'true' && (secrets.VERCEL_TOKEN != '' || secrets.VERCEL_OIDC_TOKEN != '')) || (vars.CRABBOX_HETZNER_READY == 'true' && (secrets.HCLOUD_TOKEN != '' || secrets.HETZNER_TOKEN != '' || secrets.HETZNER_API_TOKEN != '')) }}
           RENDER_AUTH_PRESENT: ${{ secrets.RENDER_API_KEY != '' && secrets.RENDER_WORKSPACE_ID != '' }}
           STATIC_AGENT_TESTS_PASSED: ${{ steps.static-tests.outcome == 'success' }}
         run: >-
           node scripts/agent-readiness.mjs
+          --publisher-record .agent-output/readiness-publisher.json
           --provider-record .agent-output/readiness-provider.json
           --fallback-provider-record .agent-output/readiness-fallback-provider.json
           --render-record .agent-output/readiness-render.json
@@ -131,6 +142,7 @@ jobs:
           name: agent-readiness-${{ inputs.expected-head-sha || github.sha }}
           path: |
             .agent-output/readiness-audit.json
+            .agent-output/readiness-publisher.json
             .agent-output/readiness-provider.json
             .agent-output/readiness-fallback-provider.json
             .agent-output/readiness-render.json

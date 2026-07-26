@@ -145,7 +145,7 @@ test("Codex adapter applies config defaults and scopes its auth name", () => {
     "--config",
     'model_reasoning_effort="medium"',
     "--config",
-    'shell_environment_policy.exclude=["OPENAI_API_KEY","CODEX_API_KEY","CODEX_HOME","GITHUB_TOKEN","GH_TOKEN","AGENT_PAT","CRABBOX_COORDINATOR_TOKEN"]',
+    'shell_environment_policy.exclude=["OPENAI_API_KEY","CODEX_API_KEY","CODEX_HOME","GITHUB_TOKEN","GH_TOKEN","AGENT_GITHUB_TOKEN","AGENT_PAT","CRABBOX_COORDINATOR_TOKEN"]',
     "--output-schema",
     "schema.json",
     "--output-last-message",

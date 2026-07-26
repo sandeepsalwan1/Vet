@@ -19,9 +19,11 @@ import {
   implementationCommitMessage,
   issueSnapshotSha256,
   isTransientGitHubReadError,
+  isTrustedAgentPublisher,
   newestManagedComment,
   parseImplementationMetadata,
   privilegedCandidatePaths,
+  publisherEnvironment,
   resolveAgentTargetRoot,
   runCommand,
   skipsNoMistakesForCost,
@@ -37,6 +39,29 @@ test("trusted harness accepts only absolute candidate roots", () => {
   assert.throws(
     () => resolveAgentTargetRoot("target"),
     /AGENT_TARGET_ROOT must be an absolute path/
+  );
+});
+
+test("publisher authentication stays process-scoped and validates its secret", () => {
+  const source = {
+    PATH: process.env.PATH,
+    GH_TOKEN: "workflow-token",
+    GITHUB_TOKEN: "workflow-token",
+    AGENT_GITHUB_TOKEN: "publisher-token-1234567890"
+  };
+  const env = publisherEnvironment(source);
+
+  assert.equal(env.GH_TOKEN, "publisher-token-1234567890");
+  assert.equal(env.GITHUB_TOKEN, "publisher-token-1234567890");
+  assert.equal(env.PATH, source.PATH);
+  assert.equal(Object.hasOwn(env, "AGENT_GITHUB_TOKEN"), false);
+  assert.equal(source.GH_TOKEN, "workflow-token");
+  assert.equal(isTrustedAgentPublisher("repo-owner", config), true);
+  assert.equal(isTrustedAgentPublisher("github-actions[bot]", config), true);
+  assert.equal(isTrustedAgentPublisher("contributor", config), false);
+  assert.throws(
+    () => publisherEnvironment({ AGENT_GITHUB_TOKEN: "short" }),
+    /missing or invalid AGENT_GITHUB_TOKEN/
   );
 });
 
@@ -764,7 +789,7 @@ test("privileged candidate policy covers nested instructions, agent roots, packa
   ]);
 });
 
-test("trusted agent pull requires exact bot-authored implementation provenance", () => {
+test("trusted agent pull requires exact trusted-publisher implementation provenance", () => {
   const sourceIssue = { number: 42, state: "open", title: "Fix flow", body: "Do the work" };
   const metadata = {
     sourceIssue: 42,
@@ -801,6 +826,15 @@ test("trusted agent pull requires exact bot-authored implementation provenance",
   );
   assert.deepEqual(parseImplementationMetadata(pull.body), metadata);
   assert.deepEqual(parseImplementationMetadata(commitMessage), metadata);
+  assert.deepEqual(
+    assertTrustedAgentPull(
+      { ...pull, user: { login: "repo-owner" } },
+      trustConfig,
+      { files: [{ filename: "src/safe.ts" }], sourceIssue },
+      { ghApiJson: () => [{ commit: { message: commitMessage } }] }
+    ),
+    { metadata, sourceIssue: 42 }
+  );
   assert.deepEqual(
     assertTrustedAgentPull(
       {
@@ -842,7 +876,7 @@ test("trusted agent pull requires exact bot-authored implementation provenance",
   );
   assert.throws(
     () => assertTrustedAgentPull({ ...pull, user: { login: "contributor" } }, trustConfig),
-    /author must be github-actions\[bot\]/
+    /author must be a trusted publisher/
   );
   assert.throws(
     () =>

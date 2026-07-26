@@ -103,6 +103,31 @@ export function requireValue(value, name) {
   return value;
 }
 
+export function publisherEnvironment(source = process.env) {
+  const token = String(source.AGENT_GITHUB_TOKEN ?? "");
+  if (
+    token !== token.trim() ||
+    !/^[\x21-\x7e]{20,1024}$/.test(token)
+  ) {
+    throw new AgentError("missing or invalid AGENT_GITHUB_TOKEN", 2);
+  }
+  const env = {
+    ...source,
+    GH_TOKEN: token,
+    GITHUB_TOKEN: token
+  };
+  delete env.AGENT_GITHUB_TOKEN;
+  return env;
+}
+
+export function isTrustedAgentPublisher(login, config) {
+  const normalized = String(login ?? "").toLowerCase();
+  return (
+    normalized === "github-actions[bot]" ||
+    normalized === String(config?.repo?.owner ?? "").toLowerCase()
+  );
+}
+
 export function runCommand(command, args = [], options = {}) {
   const dryRun = Boolean(options.dryRun);
   const display = [command, ...args].join(" ");
@@ -393,8 +418,8 @@ export function assertTrustedAgentPull(pull, config, options = {}, dependencies 
   if (pull?.base?.ref !== config.repo.defaultBranch) {
     throw new AgentError(`agent PR base must be ${config.repo.defaultBranch}`, 1);
   }
-  if (String(pull?.user?.login ?? "").toLowerCase() !== "github-actions[bot]") {
-    throw new AgentError("agent PR author must be github-actions[bot]", 1);
+  if (!isTrustedAgentPublisher(pull?.user?.login, config)) {
+    throw new AgentError("agent PR author must be a trusted publisher", 1);
   }
   if (!/^[a-f0-9]{40}$/.test(String(pull?.head?.sha ?? ""))) {
     throw new AgentError("agent PR head SHA is invalid", 1);

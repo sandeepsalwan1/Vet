@@ -28,6 +28,7 @@ import {
   parseImplementationMetadata,
   parseArgs,
   privilegedCandidatePaths,
+  publisherEnvironment,
   removeLabels,
   runCommand,
   setCommitStatus,
@@ -1216,13 +1217,19 @@ export function applyNativeFixPatch(
       dryRun: true,
     };
   }
-  execute("gh", ["auth", "setup-git", "--hostname", "github.com"]);
+  const publishEnv =
+    (dependencies.publisherEnvironment ?? publisherEnvironment)(
+      dependencies.env ?? process.env,
+    );
+  execute("gh", ["auth", "setup-git", "--hostname", "github.com"], {
+    env: publishEnv,
+  });
   execute("git", [
     "fetch",
     "--no-tags",
     "origin",
     `+refs/heads/${headRef}:refs/remotes/origin/${headRef}`,
-  ]);
+  ], { env: publishEnv });
   const fetchedHead = execute("git", ["rev-parse", `refs/remotes/origin/${headRef}^{commit}`]).stdout.trim();
   if (fetchedHead !== expectedHead) {
     throw new AgentError("remote PR head changed before native no-mistakes fix application", 1);
@@ -1274,8 +1281,12 @@ export function applyNativeFixPatch(
     "origin",
     `HEAD:refs/heads/${headRef}`,
     `--force-with-lease=refs/heads/${headRef}:${expectedHead}`,
-  ]);
-  const remoteHead = execute("git", ["ls-remote", "origin", `refs/heads/${headRef}`]).stdout
+  ], { env: publishEnv });
+  const remoteHead = execute(
+    "git",
+    ["ls-remote", "origin", `refs/heads/${headRef}`],
+    { env: publishEnv },
+  ).stdout
     .trim()
     .split(/\s+/)[0];
   if (remoteHead !== nextHead) {
@@ -1443,6 +1454,7 @@ function recordTerminal({
 export function gateEnvironment(source = process.env) {
   const env = { ...source };
   for (const name of [
+    "AGENT_GITHUB_TOKEN",
     "AGENT_PAT",
     "GATE_INTENT",
     "GITHUB_TOKEN",

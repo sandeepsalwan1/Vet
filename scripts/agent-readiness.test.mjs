@@ -8,6 +8,7 @@ import {
   exactHeadCheckState,
   publishReadiness,
   readinessSummary,
+  verifyPublisherAccess,
   waitForBaselineChecks,
   waitForPreflightReadiness
 } from "./agent-readiness.mjs";
@@ -56,7 +57,19 @@ function snapshot() {
         }
       }
     },
-    credentials: { agentAuth: true, primaryProvider: true, render: true },
+    credentials: {
+      agentAuth: true,
+      publisher: true,
+      primaryProvider: true,
+      render: true
+    },
+    publisherRecord: {
+      version: 1,
+      ok: true,
+      login: "owner",
+      repository: "owner/repo",
+      push: true
+    },
     providerRecord: {
       ok: true,
       attempted: true,
@@ -140,6 +153,7 @@ test("scheduled readiness requires exact baseline, policy, credentials, audit, a
   broken.branch.protection.required_status_checks.contexts = ["quality"];
   broken.providerRecord.leaseId = "";
   broken.fallbackProviderRecord.ok = false;
+  broken.publisherRecord.push = false;
   broken.renderRecord.health[0].passed = false;
   const failed = evaluateReadiness(config, broken, {
     mode: "scheduled",
@@ -151,7 +165,42 @@ test("scheduled readiness requires exact baseline, policy, credentials, audit, a
   assert.ok(failed.findings.some((item) => item.code === "branch-check-build"));
   assert.ok(failed.findings.some((item) => item.code === "primary-lifecycle"));
   assert.ok(failed.findings.some((item) => item.code === "fallback-lifecycle"));
+  assert.ok(failed.findings.some((item) => item.code === "publisher-access"));
   assert.ok(failed.findings.some((item) => item.code === "render-health"));
+});
+
+test("publisher verification uses only the scoped token environment", () => {
+  const calls = [];
+  const result = verifyPublisherAccess(config, {
+    env: {
+      GH_TOKEN: "workflow-token",
+      AGENT_GITHUB_TOKEN: "publisher-token-1234567890"
+    },
+    ghJson(args, options) {
+      calls.push({ args, env: options.env });
+      if (args.at(-1) === "user") return { login: "owner" };
+      return {
+        full_name: "owner/repo",
+        permissions: { push: true }
+      };
+    }
+  });
+
+  assert.deepEqual(result, {
+    version: 1,
+    ok: true,
+    login: "owner",
+    repository: "owner/repo",
+    push: true
+  });
+  assert.deepEqual(
+    calls.map(({ args }) => args),
+    [["api", "user"], ["api", "repos/owner/repo"]]
+  );
+  for (const call of calls) {
+    assert.equal(call.env.GH_TOKEN, "publisher-token-1234567890");
+    assert.equal(Object.hasOwn(call.env, "AGENT_GITHUB_TOKEN"), false);
+  }
 });
 
 test("readiness collection uses only workflow-token-readable repository APIs", () => {
@@ -342,6 +391,10 @@ test("readiness workflow is scheduled, zero-model, pinned, and publishes even af
       workflow.indexOf("--lane readinessRemote")
   );
   assert.match(workflow, /--lane fallbackReadinessRemote/);
+  assert.match(workflow, /--verify-publisher/);
+  assert.match(workflow, /AGENT_GITHUB_TOKEN: \$\{\{ secrets\.AGENT_GITHUB_TOKEN \}\}/);
+  assert.match(workflow, /--publisher-record \.agent-output\/readiness-publisher\.json/);
+  assert.match(workflow, /PUBLISHER_AUTH_PRESENT: \$\{\{ secrets\.AGENT_GITHUB_TOKEN != '' \}\}/);
   assert.match(workflow, /HCLOUD_TOKEN: \$\{\{ secrets\.HCLOUD_TOKEN \}\}/);
   assert.match(workflow, /HETZNER_TOKEN: \$\{\{ secrets\.HETZNER_TOKEN \}\}/);
   assert.match(workflow, /CRABBOX_HETZNER_READY: \$\{\{ vars\.CRABBOX_HETZNER_READY \}\}/);
@@ -364,7 +417,9 @@ test("implementation preflight blocks before any model-authenticated job", () =>
   const workflow = readFileSync(new URL("../.github/workflows/agent-implement.yml", import.meta.url), "utf8");
   const prepare = workflow.match(/\n  prepare-prompt:\n([\s\S]*?)\n  generate-patch-remote:/)?.[1] ?? "";
 
-  assert.match(prepare, /--preflight\n\s+--wait-seconds 900\n\s+--json/);
+  assert.match(prepare, /--verify-publisher \\\n\s+--json/);
+  assert.match(prepare, /--preflight \\\n\s+--wait-seconds 900 \\\n\s+--json/);
+  assert.match(prepare, /AGENT_GITHUB_TOKEN: \$\{\{ secrets\.AGENT_GITHUB_TOKEN \}\}/);
   assert.match(prepare, /checks: read/);
   assert.match(prepare, /actions: read/);
   assert.doesNotMatch(prepare, /CODEX_API_KEY|openai\/codex-action/);

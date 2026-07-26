@@ -24,6 +24,7 @@ import {
   parseImplementationMetadata,
   parseArgs,
   privilegedCandidatePaths,
+  publisherEnvironment,
   readAgentJson,
   readText,
   removeLabels,
@@ -904,8 +905,13 @@ function applyReview(
           implementationCommitMessage(`fix: address agent review for #${prNumber}`, metadata),
         ]);
         statusSha = gitOutput(["rev-parse", "HEAD"]);
-        runCommand("gh", ["auth", "setup-git", "--hostname", "github.com"]);
-        runCommand("git", ["push", "origin", `HEAD:${pull.head.ref}`]);
+        const publishEnv = publisherEnvironment();
+        runCommand("gh", ["auth", "setup-git", "--hostname", "github.com"], {
+          env: publishEnv
+        });
+        runCommand("git", ["push", "origin", `HEAD:${pull.head.ref}`], {
+          env: publishEnv
+        });
         patchApplied = true;
         ciDispatch = dispatchWorkflow(
           config,

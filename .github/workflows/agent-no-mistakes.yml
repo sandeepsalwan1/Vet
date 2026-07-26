@@ -26,17 +26,26 @@ on:
         type: number
         default: 0
     secrets:
+      AGENT_GITHUB_TOKEN:
+        description: Repository-scoped owner credential for sealed fix publication
+        required: true
       OPENAI_API_KEY:
+        description: Model credential for the isolated no-mistakes lane
         required: true
       VERCEL_TOKEN:
+        description: Optional Vercel credential for no-mistakes leases
         required: false
       VERCEL_OIDC_TOKEN:
+        description: Optional Vercel OIDC credential for no-mistakes leases
         required: false
       HCLOUD_TOKEN:
+        description: Optional Hetzner Cloud credential for no-mistakes leases
         required: false
       HETZNER_TOKEN:
+        description: Optional legacy Hetzner credential for no-mistakes leases
         required: false
       HETZNER_API_TOKEN:
+        description: Optional Hetzner API credential for no-mistakes leases
         required: false
   workflow_dispatch:
     inputs:
@@ -428,6 +437,7 @@ jobs:
         id: finalize
         env:
           GH_TOKEN: ${{ github.token }}
+          AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
           HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
         run: >-
           node scripts/agent-no-mistakes-gate.mjs

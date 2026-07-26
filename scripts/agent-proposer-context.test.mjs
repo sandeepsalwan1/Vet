@@ -193,6 +193,7 @@ test("GitHub health reads receive no model, provider, or write credential", () =
     GITHUB_TOKEN: "github-read",
     OPENAI_API_KEY: "model",
     CODEX_API_KEY: "model",
+    AGENT_GITHUB_TOKEN: "publisher",
     AGENT_PAT: "github-write",
     CRABBOX_COORDINATOR_TOKEN: "coordinator",
     HCLOUD_TOKEN: "provider",
@@ -209,6 +210,7 @@ test("GitHub health reads receive no model, provider, or write credential", () =
   for (const name of [
     "OPENAI_API_KEY",
     "CODEX_API_KEY",
+    "AGENT_GITHUB_TOKEN",
     "AGENT_PAT",
     "CRABBOX_COORDINATOR_TOKEN",
     "HCLOUD_TOKEN",

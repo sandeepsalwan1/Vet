@@ -783,6 +783,18 @@ test("merged cleanup accepts only the original trusted agent identity and snapsh
     }).sourceIssue,
     17
   );
+  assert.equal(
+    assertTrustedMergedAgentPull(
+      { ...merged, user: { login: config.repo.owner } },
+      config,
+      {
+        files,
+        sourceIssue: value.sourceIssue,
+        closingReferences: value.closingReferences
+      }
+    ).sourceIssue,
+    17
+  );
   assert.throws(
     () =>
       assertTrustedMergedAgentPull(
@@ -1051,7 +1063,7 @@ test("automerge reads creator provenance from the direct statuses endpoint", () 
   );
 });
 
-test("non-bot PR authors cannot authorize or mutate automerge", () => {
+test("untrusted PR authors cannot authorize or mutate automerge", () => {
   const value = fixture();
   value.pull.user.login = "contributor";
   value.pull.auto_merge = { merge_method: "merge" };
@@ -1065,7 +1077,7 @@ test("non-bot PR authors cannot authorize or mutate automerge", () => {
 
   assert.equal(decision.trustedPull, false);
   assert.equal(decision.staleRecoveryAllowed, false);
-  assert.ok(decision.blockers.includes("agent PR author must be github-actions[bot]"));
+  assert.ok(decision.blockers.includes("agent PR author must be a trusted publisher"));
   assert.equal(outcome.result.nativeAutomerge, "not-touched");
   assert.deepEqual(commands, []);
 });

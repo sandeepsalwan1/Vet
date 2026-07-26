@@ -15,17 +15,26 @@ on:
         type: number
         default: 0
     secrets:
+      AGENT_GITHUB_TOKEN:
+        description: Repository-scoped owner credential for reviewed repair publication
+        required: true
       OPENAI_API_KEY:
+        description: Model credential for the isolated review lane
         required: true
       VERCEL_TOKEN:
+        description: Optional Vercel credential for review leases
         required: false
       VERCEL_OIDC_TOKEN:
+        description: Optional Vercel OIDC credential for review leases
         required: false
       HCLOUD_TOKEN:
+        description: Optional Hetzner Cloud credential for review leases
         required: false
       HETZNER_TOKEN:
+        description: Optional legacy Hetzner credential for review leases
         required: false
       HETZNER_API_TOKEN:
+        description: Optional Hetzner API credential for review leases
         required: false
   workflow_dispatch:
     inputs:
@@ -319,6 +328,7 @@ jobs:
         id: apply
         env:
           GH_TOKEN: ${{ github.token }}
+          AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
           REVIEWED_HEAD_SHA: ${{ needs.prepare-review.outputs.reviewed-head-sha }}
         run: >-
           node scripts/agent-review.mjs

@@ -91,6 +91,7 @@ function codexArgs(args, config) {
         "OPENAI_API_KEY",
         "GITHUB_TOKEN",
         "GH_TOKEN",
+        "AGENT_GITHUB_TOKEN",
         "AGENT_PAT",
         "CRABBOX_COORDINATOR_TOKEN",
         ...(config.secrets?.crabboxProviders ?? []),

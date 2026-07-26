@@ -80,6 +80,7 @@ function implementationOutput(overrides = {}) {
 test("upsertPullRequest creates a draft PR through GraphQL", () => {
   let payload;
   let apiArgs;
+  let apiOptions;
   const result = upsertPullRequest(
     {
       config,
@@ -95,14 +96,17 @@ test("upsertPullRequest creates a draft PR through GraphQL", () => {
         return callback("/tmp/pr.json");
       },
       getRepositoryNodeId: () => "R_repo",
-      ghJson(args) {
+      publisherEnvironment: () => ({ GH_TOKEN: "publisher-token" }),
+      ghJson(args, options) {
         apiArgs = args;
+        apiOptions = options;
         return { data: { createPullRequest: { pullRequest: { number: 9, url: "https://example.test/pull/9" } } } };
       }
     }
   );
 
   assert.deepEqual(apiArgs, ["api", "graphql", "--input", "/tmp/pr.json"]);
+  assert.equal(apiOptions.env.GH_TOKEN, "publisher-token");
   assert.match(payload.query, /createPullRequest/);
   assert.equal(payload.variables.repositoryId, "R_repo");
   assert.equal(payload.variables.headRefName, "agent/issue-42-fix-duplicate-intake");
@@ -116,6 +120,7 @@ test("upsertPullRequest creates a draft PR through GraphQL", () => {
 test("upsertPullRequest updates an existing PR instead of creating a duplicate", () => {
   let payload;
   let apiArgs;
+  let apiOptions;
   const result = upsertPullRequest(
     {
       config,
@@ -130,14 +135,17 @@ test("upsertPullRequest updates an existing PR instead of creating a duplicate",
         payload = value;
         return callback("/tmp/pr.json");
       },
-      ghJson(args) {
+      publisherEnvironment: () => ({ GH_TOKEN: "publisher-token" }),
+      ghJson(args, options) {
         apiArgs = args;
+        apiOptions = options;
         return { data: { updatePullRequest: { pullRequest: { number: 9, url: "https://example.test/pull/9" } } } };
       }
     }
   );
 
   assert.deepEqual(apiArgs, ["api", "graphql", "--input", "/tmp/pr.json"]);
+  assert.equal(apiOptions.env.GH_TOKEN, "publisher-token");
   assert.match(payload.query, /updatePullRequest/);
   assert.deepEqual(payload.variables.id, "PR_9");
   assert.deepEqual(result, { action: "updated", number: 9, url: "https://example.test/pull/9" });
@@ -639,6 +647,9 @@ test("implementation workflow isolates candidate checks from credentials, artifa
   assert.ok(validation.indexOf("--run-validation-checks") < validation.indexOf("--finalize-validation"));
   assert.ok(validation.indexOf("--finalize-validation") < validation.indexOf("actions/upload-artifact"));
   assert.match(openPr, /if: always\(\) && needs\.validate-patch\.result == 'success'/);
+  assert.match(openPr, /AGENT_GITHUB_TOKEN: \$\{\{ secrets\.AGENT_GITHUB_TOKEN \}\}/);
+  assert.match(implementationScript, /publisherEnvironment/);
+  assert.match(implementationScript, /"AGENT_GITHUB_TOKEN"/);
 });
 
 test("applyPatchIdempotently applies once and recognizes the same committed intent on retry", (t) => {

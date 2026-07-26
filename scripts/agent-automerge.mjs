@@ -12,6 +12,7 @@ import {
   getPullSnapshot,
   ghApiJson,
   ghReadJson,
+  isTrustedAgentPublisher,
   issueSnapshotSha256,
   issueLabels,
   loadConfig,
@@ -764,7 +765,7 @@ export function assertTrustedMergedAgentPull(pull, config, { files, sourceIssue,
     String(pull?.head?.repo?.full_name ?? "").toLowerCase() !== expectedRepo ||
     String(pull?.base?.repo?.full_name ?? "").toLowerCase() !== expectedRepo ||
     pull?.base?.ref !== config.repo.defaultBranch ||
-    String(pull?.user?.login ?? "").toLowerCase() !== "github-actions[bot]" ||
+    !isTrustedAgentPublisher(pull?.user?.login, config) ||
     String(pull?.merged_by?.login ?? "").toLowerCase() !== "github-actions[bot]" ||
     !/^[a-f0-9]{40}$/.test(String(pull?.head?.sha ?? "")) ||
     !/^[a-f0-9]{40}$/.test(String(pull?.merge_commit_sha ?? "")) ||

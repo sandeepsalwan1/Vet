@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,7 @@ import {
   ghJson,
   loadConfig,
   parseArgs,
+  publisherEnvironment,
   repoSlug,
   withTempJson
 } from "./agent-lib.mjs";
@@ -96,6 +97,9 @@ function credentialFindings(credentials) {
   if (!hasCredential(credentials, "agentAuth")) {
     findings.push(finding("credential", "agent-auth", "required model authentication secret is missing"));
   }
+  if (!hasCredential(credentials, "publisher")) {
+    findings.push(finding("credential", "publisher-auth", "required trusted publisher secret is missing"));
+  }
   if (!hasCredential(credentials, "primaryProvider")) {
     findings.push(finding("credential", "primary-provider", "required primary Crabbox provider secret is missing"));
   }
@@ -148,6 +152,23 @@ function scheduledFindings(config, snapshot) {
   }
   if (snapshot.audit?.ok !== true) {
     findings.push(finding("dependency", "production-audit", "production dependency audit failed"));
+  }
+  const publisher = snapshot.publisherRecord;
+  if (
+    publisher?.ok !== true ||
+    String(publisher?.login ?? "").toLowerCase() !==
+      String(config.repo.owner).toLowerCase() ||
+    String(publisher?.repository ?? "").toLowerCase() !==
+      repoSlug(config).toLowerCase() ||
+    publisher?.push !== true
+  ) {
+    findings.push(
+      finding(
+        "credential",
+        "publisher-access",
+        "trusted publisher identity or intended-repository push access failed"
+      )
+    );
   }
   const provider = snapshot.providerRecord;
   const acceptablePrimaryProviders = new Set(
@@ -244,6 +265,36 @@ function booleanEnvironment(name) {
   return String(process.env[name] ?? "").toLowerCase() === "true";
 }
 
+export function verifyPublisherAccess(config, dependencies = {}) {
+  const execute = dependencies.ghJson ?? ghJson;
+  const env = (dependencies.publisherEnvironment ?? publisherEnvironment)(
+    dependencies.env ?? process.env
+  );
+  const user = execute(["api", "user"], { env });
+  const repository = execute(
+    ["api", `repos/${config.repo.owner}/${config.repo.name}`],
+    { env }
+  );
+  const login = String(user?.login ?? "");
+  const repositoryName = String(repository?.full_name ?? "");
+  if (login.toLowerCase() !== String(config.repo.owner).toLowerCase()) {
+    throw new AgentError("trusted publisher is not the configured repository owner", 1);
+  }
+  if (repositoryName.toLowerCase() !== repoSlug(config).toLowerCase()) {
+    throw new AgentError("trusted publisher cannot access the intended repository", 1);
+  }
+  if (repository?.permissions?.push !== true) {
+    throw new AgentError("trusted publisher lacks intended-repository push access", 1);
+  }
+  return {
+    version: 1,
+    ok: true,
+    login,
+    repository: repositoryName,
+    push: true
+  };
+}
+
 function readJsonIfPresent(path, fallback) {
   if (!path) return fallback;
   try {
@@ -285,9 +336,11 @@ export function collectReadinessSnapshot(config, options = {}) {
     readinessRuns,
     credentials: {
       agentAuth: booleanEnvironment("AGENT_AUTH_PRESENT"),
+      publisher: booleanEnvironment("PUBLISHER_AUTH_PRESENT"),
       primaryProvider: booleanEnvironment("PRIMARY_PROVIDER_AUTH_PRESENT"),
       render: booleanEnvironment("RENDER_AUTH_PRESENT")
     },
+    publisherRecord: readJsonIfPresent(options.publisherRecord, null),
     providerRecord: readJsonIfPresent(options.providerRecord, null),
     fallbackProviderRecord: readJsonIfPresent(
       options.fallbackProviderRecord,
@@ -474,10 +527,29 @@ export async function main() {
     expectedHead:
       args["expected-head"] ?? process.env.READINESS_EXPECTED_HEAD ?? "",
     providerRecord: args["provider-record"],
+    publisherRecord: args["publisher-record"],
     fallbackProviderRecord: args["fallback-provider-record"],
     renderRecord: args["render-record"],
     auditRecord: args["audit-record"]
   };
+  if (args["verify-publisher"]) {
+    const publisher = verifyPublisherAccess(config);
+    if (args["output-file"]) {
+      writeFileSync(
+        resolve(args["output-file"]),
+        `${JSON.stringify(publisher, null, 2)}\n`
+      );
+    }
+    finish(
+      {
+        ok: true,
+        message: "trusted publisher access verified",
+        publisher
+      },
+      Boolean(args.json)
+    );
+    return;
+  }
   const waitSeconds = Number(args["wait-seconds"] ?? 0);
   if (
     !Number.isInteger(waitSeconds) ||

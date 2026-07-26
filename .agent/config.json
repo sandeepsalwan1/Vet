@@ -121,6 +121,7 @@
   "secrets": {
     "agentAuth": "OPENAI_API_KEY",
     "githubWrite": "GITHUB_TOKEN",
+    "githubPublisher": "AGENT_GITHUB_TOKEN",
     "githubPat": "AGENT_PAT",
     "crabboxCoordinator": "CRABBOX_COORDINATOR_TOKEN",
     "crabboxProviders": [

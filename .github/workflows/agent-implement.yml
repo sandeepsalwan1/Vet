@@ -7,6 +7,8 @@ on:
         required: true
         type: number
     secrets:
+      AGENT_GITHUB_TOKEN:
+        required: true
       OPENAI_API_KEY:
         required: true
       VERCEL_TOKEN:
@@ -69,14 +71,19 @@ jobs:
       - name: Require fresh zero-model readiness
         env:
           GH_TOKEN: ${{ github.token }}
+          AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
           AGENT_AUTH_PRESENT: ${{ secrets.OPENAI_API_KEY != '' }}
+          PUBLISHER_AUTH_PRESENT: ${{ secrets.AGENT_GITHUB_TOKEN != '' }}
           PRIMARY_PROVIDER_AUTH_PRESENT: ${{ (vars.CRABBOX_VERCEL_READY == 'true' && (secrets.VERCEL_TOKEN != '' || secrets.VERCEL_OIDC_TOKEN != '')) || (vars.CRABBOX_HETZNER_READY == 'true' && (secrets.HCLOUD_TOKEN != '' || secrets.HETZNER_TOKEN != '' || secrets.HETZNER_API_TOKEN != '')) }}
           RENDER_AUTH_PRESENT: ${{ secrets.RENDER_API_KEY != '' && secrets.RENDER_WORKSPACE_ID != '' }}
-        run: >-
-          node scripts/agent-readiness.mjs
-          --preflight
-          --wait-seconds 900
-          --json
+        run: |
+          node scripts/agent-readiness.mjs \
+            --verify-publisher \
+            --json
+          node scripts/agent-readiness.mjs \
+            --preflight \
+            --wait-seconds 900 \
+            --json
       - name: Build trusted implementation prompt
         env:
           GH_TOKEN: ${{ github.token }}
@@ -329,6 +336,7 @@ jobs:
         id: apply
         env:
           GH_TOKEN: ${{ github.token }}
+          AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
         run: >-
           node scripts/agent-implement.mjs
           --issue-number "${{ inputs.issue-number }}"

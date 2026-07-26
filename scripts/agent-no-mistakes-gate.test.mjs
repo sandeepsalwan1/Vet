@@ -641,7 +641,7 @@ test("trusted publication reapplies the sealed tree with an exact-head lease", (
   gitAt(fixture.root, "clone", fixture.origin, checkout);
   const commands = [];
   const execute = (command, args, options = {}) => {
-    commands.push([command, args]);
+    commands.push([command, args, options]);
     if (command === "gh") return { status: 0, stdout: "", stderr: "" };
     const result = spawnSync(command, args, {
       cwd: checkout,
@@ -669,7 +669,13 @@ test("trusted publication reapplies the sealed tree with an exact-head lease", (
       }),
       repairAttempt: 0,
     },
-    { runCommand: execute },
+    {
+      runCommand: execute,
+      publisherEnvironment: () => ({
+        GH_TOKEN: "publisher-token",
+        GITHUB_TOKEN: "publisher-token",
+      }),
+    },
   );
 
   const remoteTree = gitAt(
@@ -701,6 +707,14 @@ test("trusted publication reapplies the sealed tree with an exact-head lease", (
         ),
     ),
   );
+  for (const [command, args, options] of commands.filter(
+    ([command, args]) =>
+      command === "gh" ||
+      (command === "git" &&
+        ["fetch", "push", "ls-remote"].includes(args[0])),
+  )) {
+    assert.equal(options.env.GH_TOKEN, "publisher-token", `${command} ${args[0]}`);
+  }
 });
 
 test("native fix publication fails closed on publish errors", () => {
@@ -1003,6 +1017,7 @@ test("no-mistakes uses its own composite managed-comment marker", () => {
 test("authenticated gate child receives no GitHub or Actions credentials", () => {
   const env = gateEnvironment({
     CODEX_API_KEY: "model-key",
+    AGENT_GITHUB_TOKEN: "publisher-key",
     GH_TOKEN: "github-key",
     GITHUB_TOKEN: "github-key",
     ACTIONS_RUNTIME_TOKEN: "runtime-key",
@@ -1016,6 +1031,7 @@ test("authenticated gate child receives no GitHub or Actions credentials", () =>
   assert.equal(env.CODEX_API_KEY, "model-key");
   assert.equal(env.NM_TEST_START_DAEMON, "1");
   for (const name of [
+    "AGENT_GITHUB_TOKEN",
     "GH_TOKEN",
     "GITHUB_TOKEN",
     "ACTIONS_RUNTIME_TOKEN",
@@ -1696,10 +1712,10 @@ ${JSON.stringify(metadata)}
   assert.equal(commitReads, 1);
 });
 
-test("no-mistakes refuses non-bot agent PR authors", () => {
+test("no-mistakes refuses untrusted agent PR authors", () => {
   assert.throws(
     () => assertTrustedAgentPull({ ...trustedPull(), user: { login: "contributor" } }, config, safeFiles),
-    /author must be github-actions\[bot\]/,
+    /author must be a trusted publisher/,
   );
 });
 

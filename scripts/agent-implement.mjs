@@ -24,6 +24,7 @@ import {
   parseArgs,
   parseImplementationMetadata,
   privilegedCandidatePaths,
+  publisherEnvironment,
   readText,
   removeLabels,
   repoRoot,
@@ -318,6 +319,8 @@ export function applyPatchIdempotently(patchPath, cwd = repoRoot()) {
 
 export function upsertPullRequest({ config, issue, branch, codexOutput, metadata, existingPull }, dependencies = {}) {
   const apiJson = dependencies.ghJson ?? ghJson;
+  const publishEnv =
+    (dependencies.publisherEnvironment ?? publisherEnvironment)();
   const tempJson = dependencies.withTempJson ?? withTempJson;
   const repositoryNodeId = dependencies.getRepositoryNodeId ?? getRepositoryNodeId;
   const body = prBody(issue, codexOutput, metadata);
@@ -341,7 +344,7 @@ export function upsertPullRequest({ config, issue, branch, codexOutput, metadata
         }
       };
   const pull = tempJson(payload, (bodyPath) =>
-    apiJson(["api", "graphql", "--input", bodyPath])
+    apiJson(["api", "graphql", "--input", bodyPath], { env: publishEnv })
   );
   const result = existingPull
     ? pull?.data?.updatePullRequest?.pullRequest
@@ -383,6 +386,7 @@ function checkEnvironment() {
   for (const name of [
     "GH_TOKEN",
     "GITHUB_TOKEN",
+    "AGENT_GITHUB_TOKEN",
     "AGENT_PAT",
     "OPENAI_API_KEY",
     "CODEX_API_KEY",
@@ -804,7 +808,12 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
     repoOwner: config.repo.owner
   });
   const snapshotSha256 = capsule.issueSnapshotSha256;
-  if (!dryRun) runCommand("gh", ["auth", "setup-git", "--hostname", "github.com"]);
+  const publishEnv = dryRun ? null : publisherEnvironment();
+  if (!dryRun) {
+    runCommand("gh", ["auth", "setup-git", "--hostname", "github.com"], {
+      env: publishEnv
+    });
+  }
   const preferredBranch = preferredBranchName(issueNumber, issue.title);
   const existingPull = selectExistingPull(listPulls(config), config, issueNumber, preferredBranch);
   const remoteBranches = remoteAgentBranches(issueNumber);
@@ -899,10 +908,15 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
     committed = true;
   }
   if (committed || branchAlignment.action === "merged-validated-base" || !remoteExists) {
-    runCommand("git", ["push", "origin", `HEAD:refs/heads/${branch}`]);
+    runCommand("git", ["push", "origin", `HEAD:refs/heads/${branch}`], {
+      env: publishEnv
+    });
   }
   const candidateSha = gitOutput(["rev-parse", "HEAD"]);
-  const pull = upsertPullRequest({ config, issue, branch, codexOutput, metadata, existingPull });
+  const pull = upsertPullRequest(
+    { config, issue, branch, codexOutput, metadata, existingPull },
+    { publisherEnvironment: () => publishEnv }
+  );
   const prLabels = implementationPullLabels(config, sealedLabels);
   addLabels(config, pull.number, prLabels, false);
   if (unresolvedQuestion) {

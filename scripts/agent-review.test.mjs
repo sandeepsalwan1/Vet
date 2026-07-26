@@ -727,6 +727,7 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(prompt, /terminal newline is not an empty line/);
 
   assert.match(apply, /REVIEWED_HEAD_SHA: \$\{\{ needs\.prepare-review\.outputs\.reviewed-head-sha \}\}/);
+  assert.match(apply, /AGENT_GITHUB_TOKEN: \$\{\{ secrets\.AGENT_GITHUB_TOKEN \}\}/);
   assert.match(apply, /--apply-patch \.agent-output\/review\.patch/);
   assert.match(apply, /--remote-record \.agent-output\/review-remote\.json/);
   assert.match(apply, /--repair-attempt "\$\{\{ inputs\.repair-attempt \}\}"/);
@@ -734,6 +735,7 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(apply, /id: apply/);
   assert.match(apply, /checks: read/);
   assert.match(apply, /ref: main\n          fetch-depth: 0\n          persist-credentials: false/);
+  assert.match(reviewScript, /publisherEnvironment/);
   assert.match(noMistakes, /actions: write/);
   assert.match(noMistakes, /checks: read/);
   assert.match(noMistakes, /statuses: read/);
