@@ -56,6 +56,10 @@ import {
 } from "../staffJourneyClient";
 import { taskBoardActorQuery } from "../taskBoardClient";
 import type { TaskBoardSession } from "../taskBoardTypes";
+import {
+  SaveCelebration,
+  useSaveCelebration
+} from "./SaveCelebration";
 
 type AdminSession = AccountSession & { role: "admin" };
 type EditableSettings = Pick<
@@ -197,6 +201,7 @@ export function AdminNotificationsTab({ session }: { session: AdminSession }) {
   const [draft, setDraft] = useState<EditableSettings | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const saveCelebration = useSaveCelebration();
   const actor = useMemo<TaskBoardSession>(() => ({
     name: session.name,
     role: "admin",
@@ -234,6 +239,7 @@ export function AdminNotificationsTab({ session }: { session: AdminSession }) {
       setSnapshot((current) => current ? { ...current, settings: result.settings } : current);
       setDraft(editableSettings(result.settings));
       toast.success("Notification settings saved.");
+      saveCelebration.celebrate();
     } catch (saveError) {
       toast.error(saveError instanceof Error ? saveError.message : "Could not save notification settings.");
     } finally {
@@ -450,6 +456,11 @@ export function AdminNotificationsTab({ session }: { session: AdminSession }) {
             </Card>
           </div>
         </div>
+
+        <SaveCelebration
+          animationKey={saveCelebration.animationKey}
+          visible={saveCelebration.visible}
+        />
 
         <Card>
           <CardHeader>
