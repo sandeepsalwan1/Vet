@@ -21,7 +21,7 @@ Docs:
 - Run `npm run docs:list` to find maintained docs by purpose and task.
 - Start with [`docs/architecture.md`](docs/architecture.md) for system boundaries and [`docs/deployment.md`](docs/deployment.md) for operations.
 - [`docs/agent-automation.md`](docs/agent-automation.md): AFK operator guide for issue automation and recovery.
-- Coding-agent policy lives in `AGENTS.md`; scoped guides add only subtree-specific rules.
+- Coding-agent policy lives in [AGENTS.md](AGENTS.md); scoped guides add only subtree-specific rules.
 
 Local commands:
 
