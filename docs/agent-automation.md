@@ -115,6 +115,7 @@ https://github.com/sandeepsalwan1/Vet/issues/new?template=afk-implementation.yml
 ```
 
 The AFK form requires an outcome, acceptance criteria, proof level, and optional stable proof route or interaction.
+An unambiguous `No ... proof` line excludes the named media or service lanes, while positive requirements elsewhere in the issue still take precedence.
 Submission automatically adds `agent:implement`.
 
 CLI path:

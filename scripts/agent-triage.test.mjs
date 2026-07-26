@@ -434,6 +434,59 @@ No browser, media, deployment, or service proof is needed.`,
   assert.equal(result.proofNeeded, "CI");
 });
 
+test("an explicit media exclusion in the proof section stays proofless", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 77,
+    title: "Link the coding-agent policy",
+    body: `### Outcome
+
+README readers can open the coding-agent policy.
+
+### Plan or context
+
+Documentation-only change.
+
+### Acceptance criteria
+
+- [ ] README links AGENTS.md.
+- [ ] Documentation checks pass.
+
+### Proof
+
+CI and exact diff only.
+No browser, screenshot, GIF, video, service, or deployment proof.
+
+### Constraints
+
+Change only README.md.`,
+    labels: [{ name: config.labels.priorityLow }]
+  });
+
+  assert.equal(result.priority, "low");
+  assert.equal(result.proofNeeded, "CI");
+});
+
+test("a proof exclusion cannot suppress a positive visual requirement", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 79,
+    title: "Improve the clinic opening state",
+    body: `### Outcome
+
+Pet owners see a clearer opening state.
+
+### Acceptance criteria
+
+- [ ] The loading screen visibly shows clinic progress.
+
+### Proof
+
+No GIF or video proof is needed.`,
+    labels: [{ name: config.labels.priorityLow }]
+  });
+
+  assert.equal(result.proofNeeded, "UI");
+});
+
 test("documentation-only guide links do not become architecture or deployment work", () => {
   const result = lightweightTriageDecision(config, {
     number: 62,

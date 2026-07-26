@@ -272,6 +272,28 @@ function riskBearingConstraints(value) {
     .join("\n");
 }
 
+function requestedProofLines(value) {
+  return String(value ?? "")
+    .split("\n")
+    .filter((line) => {
+      const normalized = line
+        .trim()
+        .replace(/^[-*]\s+(?:\[[ xX]\]\s*)?/, "")
+        .trim();
+      const unambiguousExclusion =
+        /^no\b/i.test(normalized) &&
+        /\b(?:browser|visual|screenshots?|gifs?|videos?|screen recordings?|media|service|deployment)\b/i.test(
+          normalized
+        ) &&
+        /\bproof\b(?:\s+(?:is|are)\s+(?:needed|required))?[.!]?$/i.test(
+          normalized
+        ) &&
+        !/[;]|\b(?:but|however|instead)\b/i.test(normalized);
+      return !unambiguousExclusion;
+    })
+    .join("\n");
+}
+
 function hasDocumentationOnlyScope(sections) {
   return [
     sections["plan or context"],
@@ -345,7 +367,7 @@ export function lightweightTriageDecision(config, issue) {
           issue?.title,
           outcome,
           acceptance,
-          sections.proof,
+          requestedProofLines(sections.proof),
           sections["proof route"],
           sections["proof interaction"],
         ]

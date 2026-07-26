@@ -757,6 +757,10 @@ Pull request 76 then proved that the separate GitHub runner used to open the dow
 The publication verifier now installs the bounded media probe when absent and confirms it is callable before downloading and opening proof files.
 
 Recorded correction on 2026-07-25:
+Fresh proofless issue 77 explicitly excluded browser, screenshot, GIF, video, service, and deployment proof, but deterministic triage treated those negated words as a GIF request.
+Triage now removes only unambiguous negated proof lines without masking positive visual or service requirements elsewhere in the sealed request.
+
+Recorded correction on 2026-07-25:
 Pull request 76 proved that a model-generated `h1` locator can reject visibly correct acceptance text rendered in an `h2`.
 For text assertions whose generated selector is one heading level, source-blind proof now requires the same text on a visible `h1` through `h6`; the sealed route and text remain exact.
 
