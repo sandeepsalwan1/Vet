@@ -733,6 +733,7 @@ export function preparePatchValidation(
   };
   mkdirSync(candidateDir);
   runCommand("git", ["checkout-index", "--all", `--prefix=${candidateDir}/`], { cwd });
+  mkdirSync(join(candidateDir, "node_modules"));
   const validationContextPath = implementationValidationContextPath(candidateDir);
   mkdirSync(dirname(validationContextPath), { recursive: true });
   writeFileSync(

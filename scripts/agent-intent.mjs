@@ -303,6 +303,26 @@ function contractCheckEvidenceLanes(check, contract) {
       : ["deterministic"];
 }
 
+function contractCheckRoutes(check, contract) {
+  const allowed = new Set(contract?.routes ?? []);
+  const routes = [];
+  const statement = normalizedText(check?.statement);
+  const routePattern =
+    /(?:^|[\s(`'"\[])(\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\/?)(?=$|[\s`'".,;:)\]])/g;
+  for (const match of statement.matchAll(routePattern)) {
+    const candidate =
+      match[1].length > 1 ? match[1].replace(/\/+$/, "") : match[1];
+    if (allowed.has(candidate)) routes.push(candidate);
+  }
+  if (
+    allowed.has("/") &&
+    /(?:`\/`|'\/'|"\/")/.test(statement)
+  ) {
+    routes.push("/");
+  }
+  return [...new Set(routes)];
+}
+
 export function validateBrowserProofPlan({
   proofKind,
   routes,
@@ -318,20 +338,21 @@ export function validateBrowserProofPlan({
   if (!behaviorContract || behaviorContract.target?.kind !== "web") {
     throw new AgentError("visual proof has no sealed web behavior contract", 1);
   }
-  const expected = new Set(
-    behaviorContract.checks
-      .filter((check) =>
-        (
-          Array.isArray(check.evidenceLanes)
-            ? contractCheckEvidenceLanes(check, behaviorContract)
-            : ["UI", "GIF"].includes(proofKind)
-              ? ["browser"]
-              : contractCheckEvidenceLanes(check, behaviorContract)
-        ).includes("browser")
-      )
-      .map((check) => check.id)
+  const expectedChecks = behaviorContract.checks
+    .filter((check) =>
+      (
+        Array.isArray(check.evidenceLanes)
+          ? contractCheckEvidenceLanes(check, behaviorContract)
+          : ["UI", "GIF"].includes(proofKind)
+            ? ["browser"]
+            : contractCheckEvidenceLanes(check, behaviorContract)
+      ).includes("browser")
+    );
+  const expected = new Map(
+    expectedChecks.map((check) => [check.id, check])
   );
   const covered = new Set();
+  const coveredRoutes = new Set();
   if (!validatedPlan.tasks.length) {
     throw new AgentError("visual proof has no implementation browser plan", 1);
   }
@@ -355,15 +376,37 @@ export function validateBrowserProofPlan({
           1
         );
       }
+      const clauseRoutes = contractCheckRoutes(
+        expected.get(clauseId),
+        behaviorContract
+      );
+      if (clauseRoutes.length && !clauseRoutes.includes(task.route)) {
+        throw new AgentError(
+          `browser proof task for ${clauseId} uses ${task.route} instead of sealed route ${clauseRoutes.join(" or ")}`,
+          1
+        );
+      }
       covered.add(clauseId);
+      coveredRoutes.add(`${clauseId}\0${task.route}`);
     }
   }
   const missing = [...expected].filter(
-    (clauseId) => !covered.has(clauseId)
+    ([clauseId]) => !covered.has(clauseId)
+  ).map(([clauseId]) => clauseId);
+  const missingRoutes = expectedChecks.flatMap((check) =>
+    contractCheckRoutes(check, behaviorContract)
+      .filter((route) => !coveredRoutes.has(`${check.id}\0${route}`))
+      .map((route) => `${check.id}@${route}`)
   );
   if (missing.length) {
     throw new AgentError(
       `browser proof plan does not cover sealed clauses: ${missing.join(", ")}`,
+      1
+    );
+  }
+  if (missingRoutes.length) {
+    throw new AgentError(
+      `browser proof plan does not cover sealed clause routes: ${missingRoutes.join(", ")}`,
       1
     );
   }

@@ -238,6 +238,7 @@ UI or GIF proof prefers a credentialed Crabbox provider that passed a live smoke
 Without one, Crabbox uses its credential-free `local-container` provider on the GitHub runner with `--desktop` and `--browser`.
 The trusted behavior contract comes from the sealed issue and implementation addendum.
 The browser driver receives only routes, actions, selectors, and assertions, not source code.
+When an acceptance clause explicitly names a sealed route, its proof task must exercise that route.
 For GIF proof, recording starts before browser navigation or user action so transient states are captured instead of only the settled page.
 The lane checks each affected route, desktop health, actual provider, lease, route-bound media, every acceptance clause, intermediate assertions, final assertions, and anti-cheat observations.
 The managed GitHub comment links the downloadable Actions artifact and keeps runner-only paths in a collapsed diagnostic section.

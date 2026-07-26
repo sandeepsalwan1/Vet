@@ -272,6 +272,105 @@ test("visual behavior plan covers every sealed clause and GIF transition", () =>
   );
 });
 
+test("browser clauses that name a sealed route cannot use another page", () => {
+  const behaviorContract = {
+    target: { kind: "web" },
+    captureBeforeAction: true,
+    routes: ["/", "/proof/loading"],
+    checks: [
+      {
+        id: "AC1",
+        statement: "Normal `/` navigation keeps its current timing."
+      }
+    ]
+  };
+  const task = {
+    clauseIds: ["AC1"],
+    route: "/proof/loading",
+    actions: [{ type: "navigate", path: "/proof/loading" }],
+    intermediateAssertions: [{ type: "visible", selector: "main" }],
+    finalAssertions: [{ type: "visible", selector: "main" }]
+  };
+
+  assert.throws(
+    () =>
+      validateVisualBehaviorPlan({
+        proofKind: "GIF",
+        routes: ["/", "/proof/loading"],
+        behaviorContract,
+        proofPlan: { version: 1, tasks: [task] }
+      }),
+    /AC1 uses \/proof\/loading instead of sealed route \//
+  );
+  assert.equal(
+    validateVisualBehaviorPlan({
+      proofKind: "GIF",
+      routes: ["/", "/proof/loading"],
+      behaviorContract,
+      proofPlan: {
+        version: 1,
+        tasks: [
+          {
+            ...task,
+            route: "/",
+            actions: [{ type: "navigate", path: "/" }]
+          }
+        ]
+      }
+    }).tasks[0].route,
+    "/"
+  );
+
+  assert.throws(
+    () =>
+      validateVisualBehaviorPlan({
+        proofKind: "GIF",
+        routes: ["/proof/loading", "/settings"],
+        behaviorContract: {
+          ...behaviorContract,
+          routes: ["/proof/loading", "/settings"],
+          checks: [
+            {
+              id: "AC1",
+              statement: "The `/settings/` page keeps its current timing."
+            }
+          ]
+        },
+        proofPlan: { version: 1, tasks: [task] }
+      }),
+    /AC1 uses \/proof\/loading instead of sealed route \/settings/
+  );
+
+  assert.equal(
+    validateVisualBehaviorPlan({
+      proofKind: "GIF",
+      routes: ["/", "/experiment"],
+      behaviorContract: {
+        ...behaviorContract,
+        routes: ["/", "/experiment"],
+        checks: [
+          {
+            id: "AC1",
+            statement:
+              "An A / B test calls `/api/tasks` and renders on `/experiment`."
+          }
+        ]
+      },
+      proofPlan: {
+        version: 1,
+        tasks: [
+          {
+            ...task,
+            route: "/experiment",
+            actions: [{ type: "navigate", path: "/experiment" }]
+          }
+        ]
+      }
+    }).tasks[0].route,
+    "/experiment"
+  );
+});
+
 test("browser plans cover browser clauses while final proof combines deterministic clauses", () => {
   const behaviorContract = {
     version: 2,

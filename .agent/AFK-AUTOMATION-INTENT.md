@@ -736,6 +736,10 @@ Proof-required canary 66 correctly failed instead of pretending its browser plan
 Capsule v5 refines that classification, keeps v1 through v4 reconstruction, and requires a fresh canary because an existing sealed contract must not be rewritten after implementation.
 
 Recorded correction on 2026-07-25:
+Fresh issue 73 assigned a normal `/` timing clause to `/proof/loading`, which would have let a different page stand in for the requested behavior.
+Trusted proof-plan validation now requires each acceptance clause that explicitly names a sealed route to be exercised on that route.
+
+Recorded correction on 2026-07-25:
 Replaying an older exact merge during post-merge recovery could roll Render back after newer merges.
 Recovery first observes the selected `main` revision and otherwise requests Render's latest configured branch without a commit pin.
 The returned deployment must contain the merge, remain on current `main`, and descend from the prior live revision.

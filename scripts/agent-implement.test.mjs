@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -551,6 +558,7 @@ test("isolated validation binds patch, output, base, and result tree", (t) => {
 
   assert.equal(prepared.baseSha, git("rev-parse", "HEAD").trim());
   assert.equal(readFileSync(join(candidateDir, "file.txt"), "utf8"), "after\n");
+  assert.equal(statSync(join(candidateDir, "node_modules")).isDirectory(), true);
   assert.deepEqual(
     JSON.parse(
       readFileSync(
