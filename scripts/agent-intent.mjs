@@ -323,6 +323,24 @@ function contractCheckRoutes(check, contract) {
   return [...new Set(routes)];
 }
 
+export function browserProofRequirements({ proofKind, behaviorContract }) {
+  if (!behaviorContract || behaviorContract.target?.kind !== "web") return [];
+  return behaviorContract.checks
+    .filter((check) =>
+      (
+        Array.isArray(check.evidenceLanes)
+          ? contractCheckEvidenceLanes(check, behaviorContract)
+          : ["UI", "GIF"].includes(proofKind)
+            ? ["browser"]
+            : contractCheckEvidenceLanes(check, behaviorContract)
+      ).includes("browser")
+    )
+    .map((check) => ({
+      clauseId: check.id,
+      requiredRoutes: contractCheckRoutes(check, behaviorContract)
+    }));
+}
+
 export function validateBrowserProofPlan({
   proofKind,
   routes,
@@ -338,23 +356,32 @@ export function validateBrowserProofPlan({
   if (!behaviorContract || behaviorContract.target?.kind !== "web") {
     throw new AgentError("visual proof has no sealed web behavior contract", 1);
   }
-  const expectedChecks = behaviorContract.checks
-    .filter((check) =>
-      (
-        Array.isArray(check.evidenceLanes)
-          ? contractCheckEvidenceLanes(check, behaviorContract)
-          : ["UI", "GIF"].includes(proofKind)
-            ? ["browser"]
-            : contractCheckEvidenceLanes(check, behaviorContract)
-      ).includes("browser")
-    );
+  const requirements = browserProofRequirements({
+    proofKind,
+    behaviorContract
+  });
   const expected = new Map(
-    expectedChecks.map((check) => [check.id, check])
+    requirements.map((requirement) => [
+      requirement.clauseId,
+      requirement
+    ])
   );
   const covered = new Set();
   const coveredRoutes = new Set();
   if (!validatedPlan.tasks.length) {
-    throw new AgentError("visual proof has no implementation browser plan", 1);
+    const expectedSummary = requirements.length
+      ? requirements
+          .map(({ clauseId, requiredRoutes }) =>
+            requiredRoutes.length
+              ? `${clauseId}@${requiredRoutes.join("|")}`
+              : clauseId
+          )
+          .join(", ")
+      : "one route-bound artifact task";
+    throw new AgentError(
+      `visual proof has no implementation browser plan; expected browser clauses: ${expectedSummary}`,
+      1
+    );
   }
   for (const task of validatedPlan.tasks) {
     if (!routes.includes(task.route)) {
@@ -372,14 +399,11 @@ export function validateBrowserProofPlan({
     for (const clauseId of task.clauseIds) {
       if (!expected.has(clauseId)) {
         throw new AgentError(
-          `browser proof task references unknown or non-browser clause ${clauseId}`,
+          `browser proof task references unknown or non-browser clause ${clauseId}; allowed browser clauses: ${[...expected.keys()].join(", ") || "none"}`,
           1
         );
       }
-      const clauseRoutes = contractCheckRoutes(
-        expected.get(clauseId),
-        behaviorContract
-      );
+      const clauseRoutes = expected.get(clauseId).requiredRoutes;
       if (clauseRoutes.length && !clauseRoutes.includes(task.route)) {
         throw new AgentError(
           `browser proof task for ${clauseId} uses ${task.route} instead of sealed route ${clauseRoutes.join(" or ")}`,
@@ -393,10 +417,13 @@ export function validateBrowserProofPlan({
   const missing = [...expected].filter(
     ([clauseId]) => !covered.has(clauseId)
   ).map(([clauseId]) => clauseId);
-  const missingRoutes = expectedChecks.flatMap((check) =>
-    contractCheckRoutes(check, behaviorContract)
-      .filter((route) => !coveredRoutes.has(`${check.id}\0${route}`))
-      .map((route) => `${check.id}@${route}`)
+  const missingRoutes = requirements.flatMap((requirement) =>
+    requirement.requiredRoutes
+      .filter(
+        (route) =>
+          !coveredRoutes.has(`${requirement.clauseId}\0${route}`)
+      )
+      .map((route) => `${requirement.clauseId}@${route}`)
   );
   if (missing.length) {
     throw new AgentError(

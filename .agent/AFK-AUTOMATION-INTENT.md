@@ -740,6 +740,10 @@ Fresh issue 73 assigned a normal `/` timing clause to `/proof/loading`, which wo
 Trusted proof-plan validation now requires each acceptance clause that explicitly names a sealed route to be exercised on that route.
 
 Recorded correction on 2026-07-25:
+Fresh issue 74 proved that generic missing-plan feedback could lead the one bounded repair to add a deterministic-only clause to browser proof.
+Repair prompts now receive the trusted browser-clause allowlist, excluded clause IDs, and explicit sealed route bindings.
+
+Recorded correction on 2026-07-25:
 Replaying an older exact merge during post-merge recovery could roll Render back after newer merges.
 Recovery first observes the selected `main` revision and otherwise requests Render's latest configured branch without a commit pin.
 The returned deployment must contain the merge, remain on current `main`, and descend from the prior live revision.

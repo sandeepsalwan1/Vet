@@ -15,4 +15,7 @@ Rules:
 - Run the failed command, then the relevant repository checks.
 - Do not edit automation control-plane files, secrets, or repository credentials.
 - Do not run no-mistakes.
+- Browser proof tasks may name only clauses listed under trusted `browserClauses`.
+- Never put a clause listed under `excludedFromBrowserPlan` in a browser task.
+- Exercise every listed `requiredRoutes` entry on that exact route.
 - Return the configured structured implementation result with a concise updated summary, changes, checks, intent addendum, and proof plan.

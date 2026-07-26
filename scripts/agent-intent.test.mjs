@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   IMPLEMENTATION_ADDENDUM_MARKER,
+  browserProofRequirements,
   clauseEvidenceLanes,
   createIntentCapsule,
   createIntentCapsuleVersion,
@@ -155,6 +156,44 @@ test("acceptance clauses select direct evidence without forcing every UI clause 
       2
     ),
     ["deterministic", "browser"]
+  );
+});
+
+test("browser proof requirements expose only allowed clauses and sealed routes", () => {
+  const capsule = createIntentCapsule({
+    issue: issue({
+      body: `### Outcome
+Show the real clinic-opening transition.
+
+### Acceptance criteria
+
+- [ ] Show the real opening panel.
+- [ ] \`/proof/loading\` reaches the sign-in screen.
+- [ ] The proof route returns not found unless the host is localhost.
+- [ ] Normal \`/\` navigation keeps its current timing.
+- [ ] Repository tests pass.
+
+### Proof route
+
+/
+/proof/loading`
+    }),
+    decision: decision({ proofNeeded: "GIF" })
+  });
+
+  assert.deepEqual(
+    browserProofRequirements({
+      proofKind: "GIF",
+      behaviorContract: capsule.behaviorContract
+    }),
+    [
+      { clauseId: "AC1", requiredRoutes: [] },
+      {
+        clauseId: "AC2",
+        requiredRoutes: ["/proof/loading"]
+      },
+      { clauseId: "AC4", requiredRoutes: ["/"] }
+    ]
   );
 });
 

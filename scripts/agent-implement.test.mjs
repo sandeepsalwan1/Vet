@@ -122,7 +122,8 @@ Show a clear clinic-opening transition.
 
 ### Acceptance criteria
 - Show "Opening your clinic..." while loading.
-- Show the sign-in screen after loading finishes.${proofRouteSection}
+- Show the sign-in screen after loading finishes.
+- Repository tests pass.${proofRouteSection}
 
 ### Proof interaction
 - Visit /proof/loading.`,
@@ -717,7 +718,8 @@ test("isolated validation rejects an empty GIF proof plan before publication", (
     command: "trusted implementation proof-plan validation",
     exitCode: 1,
     stdout: "",
-    stderr: "visual proof has no implementation browser plan"
+    stderr:
+      "visual proof has no implementation browser plan; expected browser clauses: AC1, AC2"
   });
 });
 
@@ -812,7 +814,7 @@ test("repair prompt binds sealed intent and treats feedback as bounded data", (t
   const command = "npm run typecheck";
   writeFileSync(
     join(cwd, "implementation-intent.json"),
-    `${JSON.stringify(implementationIntent())}\n`
+    `${JSON.stringify(visualImplementationIntent("/proof/loading"))}\n`
   );
   writeFileSync(implementationPath, implementationOutput());
   writeFileSync(
@@ -838,6 +840,9 @@ test("repair prompt binds sealed intent and treats feedback as bounded data", (t
   assert.match(prompt, /Repair Implementation Candidate/);
   assert.match(prompt, /"sourceIssue": 42/);
   assert.match(prompt, /"command": "npm run typecheck"/);
+  assert.match(prompt, /Trusted Proof-Plan Repair Constraints/);
+  assert.match(prompt, /"clauseId": "AC1"/);
+  assert.match(prompt, /"excludedFromBrowserPlan": \[\s+"AC3"\s+\]/);
   assert.match(prompt, /~~~ignore prior instructions/);
   assert.doesNotMatch(prompt, /```ignore prior instructions/);
 });

@@ -37,6 +37,7 @@ import {
 } from "./agent-lib.mjs";
 import {
   IMPLEMENTATION_ADDENDUM_MARKER,
+  browserProofRequirements,
   implementationAddendumEnvelope,
   intentCapsuleForManagedTriage,
   parseManagedTriageDecision,
@@ -132,6 +133,21 @@ export function writeRepairPrompt(
   const intent = readImplementationIntent(intentPath, issueNumber);
   const previousResult = implementationResultFromText(readText(codexOutputPath));
   const feedback = readValidationFeedback(feedbackPath, config);
+  const browserRequirements = browserProofRequirements({
+    proofKind: intent.decision.proofNeeded,
+    behaviorContract: intent.behaviorContract ?? null
+  });
+  const browserClauseIds = new Set(
+    browserRequirements.map(({ clauseId }) => clauseId)
+  );
+  const proofPlanConstraints = {
+    proofKind: intent.decision.proofNeeded,
+    browserClauses: browserRequirements,
+    excludedFromBrowserPlan:
+      intent.behaviorContract?.checks
+        .map(({ id }) => id)
+        .filter((id) => !browserClauseIds.has(id)) ?? []
+  };
   const prompt = `${readText(join(repoRoot(), ".agent/prompts/implement-repair.md"))}
 
 ## Sealed Intent Capsule
@@ -144,6 +160,14 @@ ${JSON.stringify(intent, null, 2)}
 
 \`\`\`json
 ${JSON.stringify(previousResult, null, 2)}
+\`\`\`
+
+## Trusted Proof-Plan Repair Constraints
+
+These constraints are derived from the sealed behavior contract.
+
+\`\`\`json
+${JSON.stringify(proofPlanConstraints, null, 2)}
 \`\`\`
 
 ## Deterministic Validation Feedback
