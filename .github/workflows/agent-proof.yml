@@ -176,6 +176,7 @@ jobs:
     outputs:
       outcome_b64: ${{ steps.remote.outputs.outcome_b64 }}
       needs_local: ${{ steps.remote.outputs.needs_local }}
+      proof_passed: ${{ steps.remote.outputs.proof_passed }}
       artifact_url: ${{ steps.artifact.outputs.artifact-url }}
     steps:
       - uses: actions/checkout@v5
@@ -231,7 +232,8 @@ jobs:
       always() &&
       needs.prepare.outputs.requested == 'true' &&
       needs.prepare.outputs.needs_browser == 'true' &&
-      needs.remote.result == 'success'
+      needs.remote.result == 'success' &&
+      needs.remote.outputs.proof_passed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -564,6 +566,32 @@ jobs:
             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           echo "state=$state" >> "$GITHUB_OUTPUT"
           echo "proof_status=$proof_status" >> "$GITHUB_OUTPUT"
+      - name: Repair failed exact-head behavior
+        if: >-
+          always() &&
+          inputs.target-kind == 'pr' &&
+          steps.finalize.outputs.repair-eligible == 'true' &&
+          steps.terminal.outputs.proof_status == 'failed'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.target-number }}
+          STATUS_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          set -euo pipefail
+          current_sha="$(
+            gh pr view "$PR_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json headRefOid \
+              --jq .headRefOid
+          )"
+          [[ "$STATUS_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$current_sha" = "$STATUS_SHA"
+          gh workflow run agent-review.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f pr-number="$PR_NUMBER" \
+            -f expected-head-sha="$STATUS_SHA" \
+            -f repair-attempt=1
       - name: Record proof provider cost
         if: inputs.target-kind == 'pr' && steps.terminal.outputs.proof_status == 'passed'
         env:

@@ -8,6 +8,7 @@ import {
   addLabels,
   assertTrustedAgentPull,
   dispatchWorkflow,
+  extractJson,
   fail,
   finish,
   getIssueComments,
@@ -35,6 +36,7 @@ import {
   skipsNoMistakesForCost,
   upsertManagedComment
 } from "./agent-lib.mjs";
+import { validateBehaviorReport } from "./agent-behavior-report.mjs";
 import {
   PROOF_KINDS,
   intentCapsuleForManagedTriage,
@@ -61,8 +63,9 @@ export function reviewReplayNextGate({
   metadata,
   pullLabels,
   sourceLabels,
+  proofFindings = [],
 }) {
-  if (evaluation?.outcome !== "ready") return "";
+  if (evaluation?.outcome !== "ready" || proofFindings.length) return "";
   return skipsNoMistakesForCost(config, {
     metadata,
     pullLabels,
@@ -225,6 +228,7 @@ export function buildReviewPrompt({
   intentCapsule,
   implementationAddendum,
   repairLedger,
+  proofFailure = null,
   ciChecks = [],
   diff
 }) {
@@ -257,6 +261,12 @@ ${JSON.stringify(implementationAddendum, null, 2)}
 ${JSON.stringify(repairLedger, null, 2)}
 \`\`\`
 
+## Trusted Failed Behavior Proof
+
+${proofFailure?.failedChecks?.length ? `\`\`\`json
+${JSON.stringify(proofFailure, null, 2)}
+\`\`\`` : "- none"}
+
 ## Exact-Head CI
 
 ${ciChecks.map((check) => `- ${check.name}: ${check.state}${check.detailsUrl ? ` (${check.detailsUrl})` : ""}`).join("\n") || "- unavailable"}
@@ -271,6 +281,55 @@ ${ciReproductionCommands(pull, ciChecks).join("\n") || "- none"}
 ${diff}
 \`\`\`
 `;
+}
+
+export function trustedProofFailureContext({
+  comments,
+  marker,
+  repoOwner,
+  contract,
+  prNumber,
+  headSha,
+}) {
+  const empty = { findings: [], proofFailure: null };
+  const comment = newestManagedComment(comments, marker, repoOwner);
+  if (!comment) return empty;
+  const body = String(comment.body ?? "");
+  const afterMarker = body.slice(body.indexOf(marker) + marker.length);
+  const match = afterMarker.match(
+    /(?:^|\n)Structured proof:\s*```json\s*([\s\S]*?)```/i,
+  );
+  if (!match) return empty;
+  try {
+    const result = extractJson(match[1]);
+    if (result?.status !== "failed" || !result.behaviorReport) return empty;
+    const report = validateBehaviorReport(result.behaviorReport, contract);
+    const expectedAccess = `pull request #${prNumber} head ${headSha}`;
+    if (
+      report.overall_behavior !== "violates_contract" ||
+      report.target.access !== expectedAccess
+    ) {
+      return empty;
+    }
+    const failedChecks = report.checks.filter((check) => check.status === "fail");
+    if (!failedChecks.length) return empty;
+    return {
+      findings: failedChecks.map((check) => ({
+        id: check.contract_clause.match(/^([^:]+):/)?.[1]?.trim() ?? "",
+        severity: check.severity ?? "high",
+        file: "",
+        action: "auto-fix",
+        summary: `${check.contract_clause}: ${check.evidence}`,
+      })),
+      proofFailure: {
+        target: report.target,
+        overallBehavior: report.overall_behavior,
+        failedChecks,
+      },
+    };
+  } catch {
+    return empty;
+  }
 }
 
 export function requireManagedTriageComment(comments, marker, sourceIssueNumber, repoOwner) {
@@ -298,6 +357,7 @@ function fetchTrustedReviewContext(
   ]);
   const sourceIssueNumber = resolveSourceIssueNumber(pull, closing?.closingIssuesReferences, config);
   const sourceIssue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${sourceIssueNumber}`);
+  const sourceComments = getIssueComments(config, sourceIssueNumber);
   assertTrustedAgentPull(pull, config, {
     files,
     sourceIssue,
@@ -310,7 +370,8 @@ function fetchTrustedReviewContext(
     comments,
     files,
     sourceIssueNumber,
-    sourceIssue
+    sourceIssue,
+    sourceComments,
   };
 }
 
@@ -320,14 +381,14 @@ function writePrompt(config, prNumber, outputPath, expectedHeadSha, dependencies
     issue,
     comments,
     sourceIssueNumber,
-    sourceIssue
+    sourceIssue,
+    sourceComments,
   } = fetchTrustedReviewContext(
     config,
     prNumber,
     expectedHeadSha,
     dependencies
   );
-  const sourceComments = getIssueComments(config, sourceIssueNumber);
   const triageComment = requireManagedTriageComment(
     sourceComments,
     config.comments.triage,
@@ -359,13 +420,24 @@ function writePrompt(config, prNumber, outputPath, expectedHeadSha, dependencies
     capsule.intentDigest,
     config.repo.owner,
   );
+  const { findings: proofFindings, proofFailure } = trustedProofFailureContext({
+    comments,
+    marker: config.comments.proof,
+    repoOwner: config.repo.owner,
+    contract: capsule.behaviorContract,
+    prNumber,
+    headSha: pull.head.sha,
+  });
   const inputDigest = semanticInputDigest({
     lane: "review",
     head: pull.head.sha,
     intentDigest: capsule.intentDigest,
-    findings: openRepairFindings(repairLedger).filter(
-      (finding) => finding.lane !== "review",
-    ),
+    findings: [
+      ...openRepairFindings(repairLedger).filter(
+        (finding) => finding.lane !== "review",
+      ),
+      ...proofFindings,
+    ],
     checks: ciChecks,
   });
   const replayEvaluation = repairEvaluationFor(repairLedger, {
@@ -380,6 +452,7 @@ function writePrompt(config, prNumber, outputPath, expectedHeadSha, dependencies
     metadata,
     pullLabels: issueLabels(issue),
     sourceLabels: issueLabels(sourceIssue),
+    proofFindings,
   });
   const prompt = buildReviewPrompt({
     template: readText(join(repoRoot(), ".agent/prompts/review.md")),
@@ -388,6 +461,7 @@ function writePrompt(config, prNumber, outputPath, expectedHeadSha, dependencies
     intentCapsule: capsule,
     implementationAddendum,
     repairLedger,
+    proofFailure,
     ciChecks,
     diff
   });
@@ -1015,14 +1089,35 @@ function applyReview(
     pull,
     issue,
     comments,
-    sourceIssue
+    sourceIssue,
+    sourceIssueNumber,
+    sourceComments,
   } = fetchTrustedReviewContext(
     config,
     prNumber,
     expectedHeadSha,
     dependencies
   );
+  const triageComment = requireManagedTriageComment(
+    sourceComments,
+    config.comments.triage,
+    sourceIssueNumber,
+    config.repo.owner,
+  );
+  const { capsule } = intentCapsuleForManagedTriage({
+    issue: sourceIssue,
+    comments: sourceComments,
+    triageComment,
+    marker: config.comments.triage,
+    repoOwner: config.repo.owner,
+  });
   const metadata = implementationMetadata(pull.body);
+  if (metadata.intentDigest !== capsule.intentDigest) {
+    throw new AgentError(
+      "review application intent does not match immutable implementation metadata",
+      1,
+    );
+  }
   const sourceLabels = issueLabels(sourceIssue);
   const automergeEligible =
     metadata.automergeEligible === true &&
@@ -1043,11 +1138,19 @@ function applyReview(
   const priorOpenFindings = openRepairFindings(repairLedger).filter(
     (finding) => finding.lane !== "review",
   );
+  const { findings: proofFindings } = trustedProofFailureContext({
+    comments,
+    marker: config.comments.proof,
+    repoOwner: config.repo.owner,
+    contract: capsule.behaviorContract,
+    prNumber,
+    headSha: pull.head.sha,
+  });
   const inputDigest = semanticInputDigest({
     lane: "review",
     head: pull.head.sha,
     intentDigest: metadata.intentDigest,
-    findings: priorOpenFindings,
+    findings: [...priorOpenFindings, ...proofFindings],
     checks: ciChecks,
   });
   let review = readAgentJson(reviewPath);
@@ -1124,6 +1227,18 @@ function applyReview(
   }
 
   review = normalizeReviewPolicy(review);
+  if (
+    !patchApplied &&
+    proofFindings.length &&
+    review.mergeRecommendation === "ready"
+  ) {
+    review.bugsFound.push(
+      ...proofFindings
+        .map((finding) => finding.summary)
+        .filter((summary) => !review.bugsFound.includes(summary)),
+    );
+    review.mergeRecommendation = "blocked";
+  }
   if (
     !patchApplied &&
     !ciPassed &&

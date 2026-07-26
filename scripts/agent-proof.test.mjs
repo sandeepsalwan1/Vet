@@ -21,6 +21,7 @@ import {
   mayMutateProofTarget,
   proofBody,
   proofLabelChanges,
+  proofRepairEligible,
   preparationFailureRecord,
   resolveTerminalResult,
   terminalMarker,
@@ -522,10 +523,69 @@ test("proof preparation failure preserves the primary blocker without request de
 test("successful proof never clears a shared blocked label", () => {
   const passing = proofLabelChanges(config, "passed");
   const failing = proofLabelChanges(config, "failed");
+  const repairing = proofLabelChanges(config, "failed", { repairing: true });
 
   assert.deepEqual(passing, { add: [], remove: [] });
   assert.ok(failing.add.includes(config.labels.blocked));
   assert.ok(failing.remove.includes(config.labels.automerge));
+  assert.deepEqual(repairing, { add: [], remove: [] });
+});
+
+test("only exact-head failed behavior proof enters automatic semantic repair", () => {
+  const sha = "a".repeat(40);
+  const contract = {
+    target: { kind: "web", proofKind: "GIF" },
+    checks: [
+      {
+        id: "AC1",
+        statement: "The loading state is visible.",
+        evidenceLanes: ["browser"]
+      }
+    ]
+  };
+  const request = {
+    kind: "pr",
+    number: 76,
+    requested: true,
+    sha,
+    behaviorContract: contract
+  };
+  const behaviorReport = commandBehaviorReport({
+    contract,
+    passed: false,
+    access: `pull request #76 head ${sha}`,
+    commands: ["Open / before navigation."],
+    evidenceLanes: ["browser"]
+  });
+  const result = { status: "failed", behaviorReport };
+
+  assert.equal(proofRepairEligible(request, result, true), true);
+  assert.equal(proofRepairEligible(request, result, false), false);
+  assert.equal(
+    proofRepairEligible({ ...request, kind: "issue" }, result, true),
+    false
+  );
+  assert.equal(
+    proofRepairEligible(request, { ...result, status: "blocked" }, true),
+    false
+  );
+  assert.equal(
+    proofRepairEligible(
+      request,
+      {
+        ...result,
+        behaviorReport: {
+          ...behaviorReport,
+          target: {
+            ...behaviorReport.target,
+            access: `pull request #76 head ${"b".repeat(40)}`
+          }
+        }
+      },
+      true
+    ),
+    false
+  );
 });
 
 test("proof comments link the trusted Actions artifact and collapse runner-only paths", () => {
@@ -914,9 +974,11 @@ test("proof workflow dispatches automerge only after terminal success is publish
   );
   const finalizeJob = workflow.slice(workflow.indexOf("\n  finalize:"));
   const statusIndex = workflow.indexOf("gh api \"repos/$GITHUB_REPOSITORY/statuses/$STATUS_SHA\"");
+  const repairIndex = workflow.indexOf("gh workflow run agent-review.yml");
   const dispatchIndex = workflow.indexOf("gh workflow run agent-automerge.yml");
 
   assert.ok(statusIndex >= 0);
+  assert.ok(repairIndex > statusIndex);
   assert.ok(dispatchIndex > statusIndex);
   assert.match(finalizeJob, /pull-requests: write/);
   assert.match(workflow, /uses: \.\/trusted\/\.github\/actions\/setup-crabbox/);
@@ -929,6 +991,8 @@ test("proof workflow dispatches automerge only after terminal success is publish
   assert.match(workflow, /create role authenticated nologin/);
   assert.match(workflow, /--execute-service/);
   assert.match(workflow, /name: verify published media/);
+  assert.match(workflow, /proof_passed: \$\{\{ steps\.remote\.outputs\.proof_passed \}\}/);
+  assert.match(workflow, /needs\.remote\.outputs\.proof_passed == 'true'/);
   assert.match(workflow, /uses: actions\/download-artifact@v4/);
   assert.match(workflow, /--verify-published-media/);
   assert.match(
@@ -967,5 +1031,10 @@ test("proof workflow dispatches automerge only after terminal success is publish
   assert.match(finalizeJob, /--cost-outcome-file "\$COST_OUTCOME_FILE"/);
   assert.match(finalizeJob, /--proof-outcome-file "\$COST_OUTCOME_FILE"/);
   assert.match(finalizeJob, /steps\.terminal\.outputs\.proof_status == 'passed'/);
+  assert.match(finalizeJob, /steps\.finalize\.outputs\.repair-eligible == 'true'/);
+  assert.match(finalizeJob, /test "\$current_sha" = "\$STATUS_SHA"/);
+  assert.match(finalizeJob, /gh workflow run agent-review\.yml/);
+  assert.match(finalizeJob, /-f expected-head-sha="\$STATUS_SHA"/);
+  assert.match(finalizeJob, /-f repair-attempt=1/);
   assert.doesNotMatch(finalizeJob, /--proof-(remote|local)-outcome-base64/);
 });

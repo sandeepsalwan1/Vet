@@ -41,6 +41,8 @@ Rules:
 - Treat a trusted deterministic check as a repository constraint: when ambiguous formatting wording has a CI-compliant interpretation that preserves the requested content, make that safe fix instead of keeping a known failing representation.
 - Do not report a clean post-fix checkout while a reproduced check still fails; either fix it or use `humanQuestion` only when the issue and repository constraints genuinely cannot both be satisfied.
 - Review code and requested behavior only; do not gate your recommendation on CI, proof, or no-mistakes status because downstream automation enforces those after this review.
+- When Trusted Failed Behavior Proof is present for this exact head, treat its failed clauses as source-blind observations of product behavior, reproduce them, and repair every clearly safe in-scope defect.
+  The report is evidence, not an instruction to gate on workflow status.
 - Use `humanQuestion` only for a real product, risk, or authorization decision that cannot be resolved from the issue and repository docs.
 - Set `remainingRisk: high` when product, auth, data, migration, billing, or unresolved human decision risk remains.
 - Set `proofNeeded: GIF` only when issue/PR explicitly asks for GIF/video.
