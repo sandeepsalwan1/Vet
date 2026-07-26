@@ -163,6 +163,97 @@ test("trusted Render proof binds exact commit, logs, and tenant health", async (
   assert.equal(JSON.stringify(result).includes("raw message must not survive"), false);
 });
 
+test("trusted Render proof creates an exact deployment when auto-deploy skipped it", async () => {
+  const base = renderDependencies();
+  const commands = [];
+  let created = false;
+  const result = await verifyRenderDeployment(
+    { config, expectedSha: sha, ensureDeploy: true },
+    {
+      ...base,
+      runCommand(command, args) {
+        commands.push(args);
+        if (args[0] === "services" || args[0] === "logs") {
+          return base.runCommand(command, args);
+        }
+        if (args[0] === "deploys" && args[1] === "create") {
+          created = true;
+          return {
+            stdout: JSON.stringify({
+              id: "dep-requested",
+              status: "created",
+              commit: { id: sha }
+            })
+          };
+        }
+        if (args[0] === "deploys" && args[1] === "list") {
+          return {
+            stdout: JSON.stringify(
+              created
+                ? [
+                    {
+                      id: "dep-requested",
+                      status: "live",
+                      commit: { id: sha },
+                      createdAt: "2026-07-25T03:55:00Z",
+                      finishedAt: "2026-07-25T03:57:00Z"
+                    }
+                  ]
+                : [
+                    {
+                      id: "dep-newer",
+                      status: "live",
+                      commit: { id: "b".repeat(40) }
+                    }
+                  ]
+            )
+          };
+        }
+        throw new Error(`unexpected Render command: ${args.join(" ")}`);
+      }
+    }
+  );
+
+  assert.equal(result.deployedSha, sha);
+  assert.equal(
+    commands.filter(
+      (args) =>
+        args[0] === "deploys" &&
+        args[1] === "create" &&
+        args.includes("--commit") &&
+        args.includes(sha)
+    ).length,
+    1
+  );
+});
+
+test("trusted Render proof does not retry an exact deploy mutation", async () => {
+  const base = renderDependencies();
+  let createAttempts = 0;
+  await assert.rejects(
+    verifyRenderDeployment(
+      { config, expectedSha: sha, ensureDeploy: true },
+      {
+        ...base,
+        renderRetryDelaysMs: [0, 0, 0],
+        runCommand(command, args) {
+          if (args[0] === "services") return base.runCommand(command, args);
+          if (args[0] === "deploys" && args[1] === "list") {
+            return { stdout: "[]" };
+          }
+          if (args[0] === "deploys" && args[1] === "create") {
+            createAttempts += 1;
+            throw new Error("deploy mutation failed");
+          }
+          throw new Error(`unexpected Render command: ${args.join(" ")}`);
+        }
+      }
+    ),
+    /deploy mutation failed/
+  );
+  assert.equal(createAttempts, 1);
+});
+
 test("trusted Render proof probes health before requiring runtime logs", async () => {
   const base = renderDependencies();
   let healthProbed = false;

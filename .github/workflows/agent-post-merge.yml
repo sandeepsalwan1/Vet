@@ -83,6 +83,7 @@ jobs:
           render workspace set "$RENDER_WORKSPACE_ID" --confirm -o json >/dev/null
           node scripts/agent-render-proof.mjs \
             --expected-sha "$MERGE_SHA" \
+            --ensure-deploy \
             --output-file "$RUNNER_TEMP/agent-render-proof.json" \
             --json
       - uses: actions/upload-artifact@v4
