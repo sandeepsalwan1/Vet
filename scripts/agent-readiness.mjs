@@ -32,13 +32,21 @@ function actionsDetailsUrl(value, config) {
   return new RegExp(`^https://github\\.com/${repo}/actions/runs/\\d+(?:/job/\\d+)?$`, "i").test(String(value ?? ""));
 }
 
-export function exactHeadCheckState(checks, name, headSha, config) {
+function actionsRunId(value, config) {
+  if (!actionsDetailsUrl(value, config)) return "";
+  return String(value).match(/\/actions\/runs\/(\d+)(?:\/job\/\d+)?$/)?.[1] ?? "";
+}
+
+export function exactHeadCheckState(checks, name, headSha, config, allowedRunIds) {
+  const restrictRuns = Array.isArray(allowedRunIds);
+  const allowedRuns = new Set((allowedRunIds ?? []).map(String));
   const candidates = (checks ?? []).filter(
     (check) =>
       check?.name === name &&
       check?.head_sha === headSha &&
       check?.app?.slug === "github-actions" &&
-      actionsDetailsUrl(check?.details_url, config)
+      actionsDetailsUrl(check?.details_url, config) &&
+      (!restrictRuns || allowedRuns.has(actionsRunId(check?.details_url, config)))
   );
   const check = newest(candidates, ["started_at", "created_at", "completed_at"]);
   return check?.conclusion ?? check?.status ?? "missing";
@@ -84,7 +92,13 @@ function policyFindings(config, snapshot) {
 function baselineFindings(config, snapshot) {
   const findings = [];
   for (const name of config.readiness.baselineChecks) {
-    const state = exactHeadCheckState(snapshot.checks, name, snapshot.headSha, config);
+    const state = exactHeadCheckState(
+      snapshot.checks,
+      name,
+      snapshot.headSha,
+      config,
+      snapshot.baselineRunIds
+    );
     if (state !== "success") {
       findings.push(finding("baseline", `check-${name}`, `${name} on current main is ${state}`));
     }
@@ -323,6 +337,20 @@ export function collectReadinessSnapshot(config, options = {}) {
     readApi(`commits/${headSha}/check-runs?per_page=100`, {
       paginate: false
     })?.check_runs ?? [];
+  const baselineRuns =
+    readApi(
+      `actions/workflows/${config.readiness.baselineWorkflow}/runs?branch=${encodeURIComponent(config.repo.defaultBranch)}&head_sha=${headSha}&per_page=100`
+    )?.workflow_runs ?? [];
+  const baselineRunIds = baselineRuns
+    .filter(
+      (run) =>
+        run?.head_sha === headSha &&
+        run?.head_branch === config.repo.defaultBranch &&
+        (run?.name === `CI ${headSha}` ||
+          run?.display_title === `CI ${headSha}`)
+    )
+    .map((run) => Number(run.id))
+    .filter((id) => Number.isInteger(id) && id > 0);
   const readinessRuns =
     readApi(
       `actions/workflows/${config.readiness.workflow}/runs?branch=${encodeURIComponent(config.repo.defaultBranch)}&per_page=20`
@@ -330,6 +358,7 @@ export function collectReadinessSnapshot(config, options = {}) {
   return {
     headSha,
     checks,
+    baselineRunIds,
     // The branch summary exposes required checks to read-only workflow tokens.
     // Exact-head automerge independently enforces base freshness.
     branch: readApi(`branches/${config.repo.defaultBranch}`),
@@ -436,7 +465,13 @@ export async function waitForBaselineChecks(config, options = {}) {
     const states = Object.fromEntries(
       config.readiness.baselineChecks.map((name) => [
         name,
-        exactHeadCheckState(snapshot.checks, name, snapshot.headSha, config)
+        exactHeadCheckState(
+          snapshot.checks,
+          name,
+          snapshot.headSha,
+          config,
+          snapshot.baselineRunIds
+        )
       ])
     );
     const ready = Object.values(states).every((state) => state === "success");

@@ -173,6 +173,7 @@
   "readiness": {
     "status": "agent-readiness",
     "workflow": "agent-readiness.yml",
+    "baselineWorkflow": "ci.yml",
     "maxAgeHours": 26,
     "baselineChecks": [
       "quality",

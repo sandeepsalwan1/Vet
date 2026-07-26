@@ -768,6 +768,10 @@ Recorded correction on 2026-07-26:
 Fresh proofless pull request 81 showed a red automerge run while review, cost, and no-mistakes were normally still pending.
 Automerge now treats missing or active gates as a successful waiting state without a blocker comment, while terminal gate and policy failures remain red and merge-blocking.
 
+Recorded correction on 2026-07-26:
+Main readiness run 30198394360 first observed a passing exact-main CI baseline, then falsely failed after pull request 81 dispatched candidate CI from the `main` workflow ref and GitHub attached those newer jobs to the main SHA.
+Readiness now accepts baseline jobs only from the CI run named for the exact main SHA, so candidate validation cannot overwrite baseline health.
+
 Recorded correction on 2026-07-25:
 Pull request 76 proved that a model-generated `h1` locator can reject visibly correct acceptance text rendered in an `h2`.
 For text assertions whose generated selector is one heading level, source-blind proof now requires the same text on a visible `h1` through `h6`; the sealed route and text remain exact.
