@@ -43,7 +43,8 @@ This snapshot was refreshed on 2026-07-25 and must be reverified where state can
   Trusted cost accounting adds provider timing, versioned Vercel and conservative Hetzner price snapshots, GitHub Actions usage when available, fixed-service separation, and explicit human-comparison assumptions.
 - UI and GIF proof execute a bounded source-blind browser plan, assert intermediate and final rendered behavior, cover every browser-assigned sealed clause, hash artifacts, and fail closed on semantic mismatch.
   Trusted finalization combines that browser evidence with required deterministic or service evidence for the remaining clauses.
-- Trusted post-merge verification waits for the exact Render commit, checks bounded logs and all configured public tenant hostnames, and reopens or recloses the source issue through one owned failure marker.
+- Trusted post-merge verification selects an exact deployed `main` revision that contains the merge, checks bounded logs and all configured public tenant hostnames, and reopens or recloses the source issue through one owned failure marker.
+  It observes Render auto-deploy without creating deployments, so recovery cannot roll production back.
 - Daily zero-model readiness now checks exact-main baseline, repository policy, credential presence, deterministic tests, dependency audit, the preferred Vercel or configured Hetzner remote lifecycle, the credential-free fallback lifecycle, and Render health before model spend.
   It also verifies the trusted publisher's owner identity, intended repository access, and reported push authorization without exposing the token.
   Push readiness waits for baseline checks on its exact main SHA before publishing.
@@ -714,6 +715,10 @@ Proof must show the requested behavior, not merely that an artifact file exists.
 Recorded correction on 2026-07-25:
 The capsule version advanced from v3 to v4 because adding sealed per-clause evidence lanes changes the intent digest.
 Trusted reconstruction retains compatibility with v1 through v3 capsules.
+
+Recorded correction on 2026-07-25:
+Replaying an older exact merge during post-merge recovery could roll Render back after newer merges.
+Recovery now verifies an exact auto-deployed `main` descendant that contains the merge and never creates a deployment.
 
 ### 8. Finish Automatically
 

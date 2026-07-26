@@ -201,19 +201,6 @@ async function renderJson(args, dependencies = {}) {
   }, dependencies);
 }
 
-function renderMutationJson(args, dependencies = {}) {
-  const execute = dependencies.runCommand ?? runCommand;
-  const result = execute("render", [...args, "-o", "json", "--confirm"], {
-    env: dependencies.env ?? process.env,
-    maxBuffer: 8 * 1024 * 1024
-  });
-  try {
-    return JSON.parse(result.stdout);
-  } catch {
-    throw new AgentError("Render CLI returned invalid JSON", 1);
-  }
-}
-
 async function renderLogRecords(args, dependencies = {}) {
   const execute = dependencies.runCommand ?? runCommand;
   return withRenderReadRetry(() => {
@@ -267,7 +254,6 @@ export async function verifyRenderDeployment(
   {
     config,
     expectedSha = "",
-    ensureDeploy = false,
     timeoutSeconds = config.render.deployTimeoutSeconds,
     pollSeconds = config.render.pollSeconds
   },
@@ -288,35 +274,13 @@ export async function verifyRenderDeployment(
     await renderJson(["deploys", "list", service.id], dependencies),
     expectedSha
   );
-  let createdDeployId = "";
-  if (
-    expectedSha &&
-    ensureDeploy &&
-    (!deploy || FAILURE_STATUSES.has(deploy.status))
-  ) {
-    const created = normalizedDeploy(
-      renderMutationJson(
-        ["deploys", "create", service.id, "--commit", expectedSha],
-        dependencies
-      )
-    );
-    createdDeployId = String(created?.id ?? "");
-    if (!createdDeployId) {
-      throw new AgentError("Render did not identify the requested exact deployment", 1);
-    }
-    deploy = null;
-  }
   do {
     if (!deploy) {
       const inventory = await renderJson(
         ["deploys", "list", service.id],
         dependencies
       );
-      deploy = createdDeployId
-        ? inventory
-            .map(normalizedDeploy)
-            .find((candidate) => candidate?.id === createdDeployId) ?? null
-        : findRenderDeploy(inventory, expectedSha);
+      deploy = findRenderDeploy(inventory, expectedSha);
     }
     if (deploy?.status === "live" || FAILURE_STATUSES.has(deploy?.status)) break;
     if (now() >= deadline) break;
@@ -423,7 +387,6 @@ async function main(args = parseArgs()) {
     const result = await verifyRenderDeployment({
       config,
       expectedSha,
-      ensureDeploy: Boolean(args["ensure-deploy"]),
       timeoutSeconds: args["timeout-seconds"]
         ? Number(args["timeout-seconds"])
         : config.render.deployTimeoutSeconds,

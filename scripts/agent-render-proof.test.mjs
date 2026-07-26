@@ -163,12 +163,12 @@ test("trusted Render proof binds exact commit, logs, and tenant health", async (
   assert.equal(JSON.stringify(result).includes("raw message must not survive"), false);
 });
 
-test("trusted Render proof creates an exact deployment when auto-deploy skipped it", async () => {
+test("trusted Render proof waits for the exact auto-deployed revision", async () => {
   const base = renderDependencies();
   const commands = [];
-  let created = false;
+  let polls = 0;
   const result = await verifyRenderDeployment(
-    { config, expectedSha: sha, ensureDeploy: true },
+    { config, expectedSha: sha },
     {
       ...base,
       runCommand(command, args) {
@@ -176,23 +176,14 @@ test("trusted Render proof creates an exact deployment when auto-deploy skipped 
         if (args[0] === "services" || args[0] === "logs") {
           return base.runCommand(command, args);
         }
-        if (args[0] === "deploys" && args[1] === "create") {
-          created = true;
-          return {
-            stdout: JSON.stringify({
-              id: "dep-requested",
-              status: "created",
-              commit: { id: sha }
-            })
-          };
-        }
         if (args[0] === "deploys" && args[1] === "list") {
+          polls += 1;
           return {
             stdout: JSON.stringify(
-              created
+              polls >= 2
                 ? [
                     {
-                      id: "dep-requested",
+                      id: "dep-auto",
                       status: "live",
                       commit: { id: sha },
                       createdAt: "2026-07-25T03:55:00Z",
@@ -216,23 +207,18 @@ test("trusted Render proof creates an exact deployment when auto-deploy skipped 
 
   assert.equal(result.deployedSha, sha);
   assert.equal(
-    commands.filter(
-      (args) =>
-        args[0] === "deploys" &&
-        args[1] === "create" &&
-        args.includes("--commit") &&
-        args.includes(sha)
-    ).length,
-    1
+    commands.filter((args) => args[0] === "deploys" && args[1] === "create")
+      .length,
+    0
   );
 });
 
-test("trusted Render proof does not retry an exact deploy mutation", async () => {
+test("trusted Render proof never creates a deployment when the revision is absent", async () => {
   const base = renderDependencies();
   let createAttempts = 0;
   await assert.rejects(
     verifyRenderDeployment(
-      { config, expectedSha: sha, ensureDeploy: true },
+      { config, expectedSha: sha, timeoutSeconds: 0 },
       {
         ...base,
         renderRetryDelaysMs: [0, 0, 0],
@@ -243,15 +229,15 @@ test("trusted Render proof does not retry an exact deploy mutation", async () =>
           }
           if (args[0] === "deploys" && args[1] === "create") {
             createAttempts += 1;
-            throw new Error("deploy mutation failed");
+            throw new Error("deployment mutation must not run");
           }
           throw new Error(`unexpected Render command: ${args.join(" ")}`);
         }
       }
     ),
-    /deploy mutation failed/
+    /has not observed the exact merged commit/
   );
-  assert.equal(createAttempts, 1);
+  assert.equal(createAttempts, 0);
 });
 
 test("trusted Render proof probes health before requiring runtime logs", async () => {

@@ -19,13 +19,13 @@ import {
   upsertManagedComment
 } from "./agent-lib.mjs";
 
-export function validateRenderRecord(record, mergeSha) {
+export function validateRenderRecord(record, deploySha) {
   if (
     !record ||
     Array.isArray(record) ||
     record.version !== 1 ||
     !["passed", "failed"].includes(record.status) ||
-    record.expectedSha !== mergeSha ||
+    record.expectedSha !== deploySha ||
     typeof record.summary !== "string" ||
     !record.summary ||
     typeof record.blocker !== "string" ||
@@ -36,7 +36,7 @@ export function validateRenderRecord(record, mergeSha) {
   }
   if (
     record.status === "passed" &&
-    (record.deployedSha !== mergeSha ||
+    (record.deployedSha !== deploySha ||
       record.deployStatus !== "live" ||
       record.logs.count <= 0 ||
       record.health.length === 0 ||
@@ -45,6 +45,51 @@ export function validateRenderRecord(record, mergeSha) {
     throw new AgentError("post-merge Render success record is inconsistent", 1);
   }
   return record;
+}
+
+function comparisonProvesAncestor(comparison, ancestorSha) {
+  return (
+    comparison?.status === "ahead" &&
+    comparison?.merge_base_commit?.sha === ancestorSha &&
+    comparison?.behind_by === 0
+  );
+}
+
+export function validateDeploymentLineage({
+  mergeSha,
+  deploySha,
+  currentMainSha,
+  mergeToDeploy = null,
+  deployToMain = null
+}) {
+  for (const [label, sha] of Object.entries({
+    "merge SHA": mergeSha,
+    "deployment SHA": deploySha,
+    "current main SHA": currentMainSha
+  })) {
+    if (!/^[a-f0-9]{40}$/.test(String(sha ?? ""))) {
+      throw new AgentError(`post-merge ${label} is invalid`, 1);
+    }
+  }
+  if (
+    mergeSha !== deploySha &&
+    !comparisonProvesAncestor(mergeToDeploy, mergeSha)
+  ) {
+    throw new AgentError(
+      "selected Render revision does not contain the merged commit",
+      1
+    );
+  }
+  if (
+    deploySha !== currentMainSha &&
+    !comparisonProvesAncestor(deployToMain, deploySha)
+  ) {
+    throw new AgentError(
+      "selected Render revision is not on current main",
+      1
+    );
+  }
+  return { mergeSha, deploySha, currentMainSha };
 }
 
 export function postMergeLabelChanges(config, currentLabels, passed) {
@@ -77,6 +122,7 @@ export function postMergeBody(record, mergeSha, runUrl = "") {
 
 Status: ${record.status}
 Merge: \`${mergeSha}\`
+Deployed revision: ${record.deployedSha ? `\`${record.deployedSha}\`` : "unknown"}
 Deploy: ${record.deployStatus}
 Logs observed: ${record.logs.count}
 Error-level logs observed: ${record.logs.errorCount}
@@ -110,26 +156,57 @@ async function main(args = parseArgs()) {
   const sourceIssue = Number(args["source-issue"]);
   const prNumber = Number(args["pr-number"]);
   const mergeSha = String(args["merge-sha"] ?? "").toLowerCase();
+  const deploySha = String(args["deploy-sha"] ?? mergeSha).toLowerCase();
   if (
     !Number.isInteger(sourceIssue) ||
     sourceIssue <= 0 ||
     !Number.isInteger(prNumber) ||
     prNumber <= 0 ||
-    !/^[a-f0-9]{40}$/.test(mergeSha)
+    !/^[a-f0-9]{40}$/.test(mergeSha) ||
+    !/^[a-f0-9]{40}$/.test(deploySha)
   ) {
     throw new AgentError("post-merge target is invalid", 2);
+  }
+  let lineageError = "";
+  try {
+    const currentMainSha = String(
+      ghApiJson(
+        `repos/${config.repo.owner}/${config.repo.name}/commits/${config.repo.defaultBranch}`
+      )?.sha ?? ""
+    ).toLowerCase();
+    const mergeToDeploy =
+      mergeSha === deploySha
+        ? null
+        : ghApiJson(
+            `repos/${config.repo.owner}/${config.repo.name}/compare/${mergeSha}...${deploySha}`
+          );
+    const deployToMain =
+      deploySha === currentMainSha
+        ? null
+        : ghApiJson(
+            `repos/${config.repo.owner}/${config.repo.name}/compare/${deploySha}...${currentMainSha}`
+          );
+    validateDeploymentLineage({
+      mergeSha,
+      deploySha,
+      currentMainSha,
+      mergeToDeploy,
+      deployToMain
+    });
+  } catch (error) {
+    lineageError = error?.message ?? String(error);
   }
   let record;
   try {
     record = validateRenderRecord(
       JSON.parse(readFileSync(resolve(args["render-record"]), "utf8")),
-      mergeSha
+      deploySha
     );
   } catch (error) {
     record = {
       version: 1,
       status: "failed",
-      expectedSha: mergeSha,
+      expectedSha: deploySha,
       deployedSha: "",
       deployStatus: "unknown",
       logs: { count: 0, errorCount: 0 },
@@ -138,10 +215,23 @@ async function main(args = parseArgs()) {
       blocker: error?.message ?? String(error)
     };
   }
+  const renderPassed = record.status === "passed";
   const passed =
     args["verification-conclusion"] === "success" &&
-    record.status === "passed";
-  if (!passed) record.status = "failed";
+    renderPassed &&
+    !lineageError;
+  if (!passed) {
+    record.status = "failed";
+    if (lineageError && renderPassed) {
+      record.summary =
+        "Trusted post-merge verification rejected the deployment lineage.";
+      record.blocker = lineageError;
+    } else if (lineageError) {
+      record.blocker = [record.blocker, `Deployment lineage: ${lineageError}`]
+        .filter(Boolean)
+        .join(" ");
+    }
+  }
   const issue = ghApiJson(
     `repos/${config.repo.owner}/${config.repo.name}/issues/${sourceIssue}`
   );
@@ -171,7 +261,7 @@ async function main(args = parseArgs()) {
     state: passed ? "success" : "failure",
     context: "agent-post-merge",
     description: passed
-      ? "Render revision, logs, and tenant health passed"
+      ? "Render revision containing merge, logs, and health passed"
       : "trusted post-merge verification failed"
   });
   finish(

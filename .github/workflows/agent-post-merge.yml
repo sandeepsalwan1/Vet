@@ -40,6 +40,7 @@ jobs:
         with:
           node-version: "22"
       - name: Validate exact merged target
+        id: target
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pr-number }}
@@ -61,6 +62,18 @@ jobs:
           )"
           test "$actual_merge" = "$MERGE_SHA"
           test "$actual_source" = "$SOURCE_ISSUE"
+          deploy_sha="$(
+            gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha
+          )"
+          [[ "$deploy_sha" =~ ^[0-9a-f]{40}$ ]]
+          if [ "$deploy_sha" != "$MERGE_SHA" ]; then
+            comparison_status="$(
+              gh api "repos/$GITHUB_REPOSITORY/compare/$MERGE_SHA...$deploy_sha" \
+                --jq .status
+            )"
+            test "$comparison_status" = ahead
+          fi
+          echo "deploy-sha=$deploy_sha" >> "$GITHUB_OUTPUT"
           gh api "repos/$GITHUB_REPOSITORY/statuses/$MERGE_SHA" -X POST \
             -f state=pending \
             -f context=agent-post-merge \
@@ -76,14 +89,13 @@ jobs:
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
           RENDER_WORKSPACE_ID: ${{ secrets.RENDER_WORKSPACE_ID }}
-          MERGE_SHA: ${{ inputs.merge-sha }}
+          DEPLOY_SHA: ${{ steps.target.outputs.deploy-sha }}
         run: |
           set -euo pipefail
           [[ "$RENDER_WORKSPACE_ID" =~ ^[A-Za-z0-9_-]{3,128}$ ]]
           render workspace set "$RENDER_WORKSPACE_ID" --confirm -o json >/dev/null
           node scripts/agent-render-proof.mjs \
-            --expected-sha "$MERGE_SHA" \
-            --ensure-deploy \
+            --expected-sha "$DEPLOY_SHA" \
             --output-file "$RUNNER_TEMP/agent-render-proof.json" \
             --json
       - uses: actions/upload-artifact@v4
@@ -96,12 +108,18 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          DEPLOY_SHA: ${{ steps.target.outputs.deploy-sha }}
           VERIFY_CONCLUSION: ${{ steps.verify_render.outcome }}
         run: |
-          node scripts/agent-post-merge.mjs \
-            --pr-number "${{ inputs.pr-number }}" \
-            --source-issue "${{ inputs.source-issue }}" \
-            --merge-sha "${{ inputs.merge-sha }}" \
-            --render-record "$RUNNER_TEMP/agent-render-proof.json" \
-            --verification-conclusion "$VERIFY_CONCLUSION" \
+          args=(
+            --pr-number "${{ inputs.pr-number }}"
+            --source-issue "${{ inputs.source-issue }}"
+            --merge-sha "${{ inputs.merge-sha }}"
+            --render-record "$RUNNER_TEMP/agent-render-proof.json"
+            --verification-conclusion "$VERIFY_CONCLUSION"
             --json
+          )
+          if [ -n "$DEPLOY_SHA" ]; then
+            args+=(--deploy-sha "$DEPLOY_SHA")
+          fi
+          node scripts/agent-post-merge.mjs "${args[@]}"
