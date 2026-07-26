@@ -749,6 +749,10 @@ Actionable failed clauses from trusted exact-head behavior proof now enter the s
 Published-media verification now starts only after the structured browser result passes, so a real behavior failure remains the primary diagnosis.
 
 Recorded correction on 2026-07-25:
+Pull request 76 produced valid multi-route media whose two route bundles both contained `route-binding.json`, and published verification incorrectly treated the second basename as a duplicate match for the first exact relative path.
+Published verification now prefers the exact artifact-relative path and uses a basename fallback only when no exact path exists.
+
+Recorded correction on 2026-07-25:
 Pull request 76 proved that a model-generated `h1` locator can reject visibly correct acceptance text rendered in an `h2`.
 For text assertions whose generated selector is one heading level, source-blind proof now requires the same text on a visible `h1` through `h6`; the sealed route and text remain exact.
 

@@ -624,10 +624,18 @@ test("published GIF proof is downloaded, digest-bound, exact-head, and playable"
   const log = join(root, "crabbox-gifProof.log");
   const gif = join(bundle, "screen.trimmed.gif");
   const video = join(bundle, "screen.trimmed.mp4");
+  const firstRoute = join(root, "route-root");
+  const secondRoute = join(root, "route-proof-loading");
+  mkdirSync(firstRoute);
+  mkdirSync(secondRoute);
+  const firstBinding = join(firstRoute, "route-binding.json");
+  const secondBinding = join(secondRoute, "route-binding.json");
   const sha = "a".repeat(40);
   writeFileSync(log, `AGENT_PROOF_HEAD_OK ${sha}\n`);
   writeFileSync(gif, "GIF89a-reviewable");
   writeFileSync(video, Buffer.concat([Buffer.alloc(4), Buffer.from("ftypisom")]));
+  writeFileSync(firstBinding, '{"route":"/"}');
+  writeFileSync(secondBinding, '{"route":"/proof/loading"}');
   const digest = (path) =>
     createHash("sha256").update(readFileSync(path)).digest("hex");
   const behaviorContract = {
@@ -676,12 +684,17 @@ test("published GIF proof is downloaded, digest-bound, exact-head, and playable"
     proofKind: "GIF",
     status: "passed",
     commands: ["open /proof/loading"],
-    artifactPaths: [log, gif, video],
+    artifactPaths: [log, gif, video, firstBinding, secondBinding],
     artifactUrl: "",
     artifactDigests: [
       { name: "crabbox-gifProof.log", sha256: digest(log) },
       { name: "bundle/screen.trimmed.gif", sha256: digest(gif) },
-      { name: "bundle/screen.trimmed.mp4", sha256: digest(video) }
+      { name: "bundle/screen.trimmed.mp4", sha256: digest(video) },
+      { name: "route-root/route-binding.json", sha256: digest(firstBinding) },
+      {
+        name: "route-proof-loading/route-binding.json",
+        sha256: digest(secondBinding)
+      }
     ],
     provider: "test",
     leaseId: "test-lease",

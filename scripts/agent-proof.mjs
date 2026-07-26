@@ -511,11 +511,12 @@ export function validatePublishedMedia({
     return byBasename.length === 1 ? byBasename[0] : null;
   };
   for (const record of expected) {
-    const matches = files.filter(
-      (file) =>
-        file.name === record.name ||
-        basename(file.name) === basename(record.name)
-    );
+    const exact = files.filter((file) => file.name === record.name);
+    const matches = exact.length
+      ? exact
+      : files.filter(
+          (file) => basename(file.name) === basename(record.name)
+        );
     if (
       matches.length !== 1 ||
       matches[0].sha256 !== record.sha256

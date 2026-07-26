@@ -246,6 +246,7 @@ The heading level is a locator preference; the sealed route and acceptance text 
 Bounded implementation repair receives a trusted browser-clause allowlist and may not move deterministic-only or service-only clauses into browser proof.
 For GIF proof, recording starts before browser navigation or user action so transient states are captured instead of only the settled page.
 The lane checks each affected route, desktop health, actual provider, lease, route-bound media, every acceptance clause, intermediate assertions, final assertions, and anti-cheat observations.
+Published multi-route bundles bind digests by exact artifact-relative path before using a unique-basename fallback, so repeated route-local filenames do not conflict.
 The managed GitHub comment links the downloadable Actions artifact and keeps runner-only paths in a collapsed diagnostic section.
 Visual proof fails closed when the proof plan is incomplete, behavior assertions fail, a clause is missing, or no reviewable artifact URL is published.
 An actionable exact-head behavior failure automatically returns its failed clauses to the shared bounded reviewer repair loop.
