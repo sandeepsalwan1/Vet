@@ -47,7 +47,7 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
       <main className="entryShell">
         <section className="entryPanel clinicResolutionPanel">
           <PawPrint aria-hidden="true" />
-          <h1>{failed ? "Clinic unavailable" : "Opening clinic"}</h1>
+          <h1>{failed ? "Clinic unavailable" : "Opening your clinic…"}</h1>
           <p>
             {failed
               ? "This domain is not connected to a hospital."
