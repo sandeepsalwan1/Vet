@@ -397,6 +397,57 @@ Staff see a clear handoff confirmation.
   assert.equal(result.automationDecision, "implement");
 });
 
+test("an accessibility status role is not an authorization risk", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 78,
+    title: "Announce clinic opening",
+    body: `### Outcome
+
+Assistive technology receives the clinic opening status.
+
+### Acceptance criteria
+
+- [ ] The loading panel exposes role="status" and aria-live="polite".
+
+### Proof
+
+GIF showing the loading state and final screen.`,
+    labels: [{ name: config.labels.priorityHigh }]
+  });
+
+  assert.equal(result.priority, "high");
+  assert.equal(result.risk, "low");
+  assert.equal(result.proofNeeded, "GIF");
+});
+
+test("authorization role changes remain high risk", () => {
+  for (const [number, title, body] of [
+    [
+      79,
+      "Update staff role permissions",
+      `### Outcome
+
+Staff role permissions match the new policy.
+
+### Acceptance criteria
+
+- [ ] Assign the requested role access.`
+    ],
+    [80, "Grant the clinician role", "Grant the clinician role to the requested account."],
+    [81, "Add editor role", "Add editor role for the selected users."],
+    [82, "Change viewer role", "Viewer role can edit reports."]
+  ]) {
+    const result = lightweightTriageDecision(config, {
+      number,
+      title,
+      body,
+      labels: [{ name: config.labels.priorityLow }]
+    });
+
+    assert.equal(result.risk, "high", title);
+  }
+});
+
 test("proofless issue-form headings do not request UI proof", () => {
   const result = lightweightTriageDecision(config, {
     number: 42,

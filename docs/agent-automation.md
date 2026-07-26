@@ -133,6 +133,7 @@ gh issue create \
 
 That one label records a deterministic trusted intent seal before any implementation model runs.
 The seal uses no model credits, preserves explicit priority and proof requests, and sends routine ambiguity to the implementer.
+Accessibility attributes such as `role="status"` do not become authorization risk; user, staff, access, assignment, and permission role changes remain high-risk.
 A successful seal adds `agent:implement`, adds `agent:automerge` only when policy permits, clears stale triage blocks, and dispatches implementation automatically.
 If trusted triage asks a real question, reply on the source issue from the repository-owner account.
 That exact reply resumes zero-model triage automatically, is frozen as untrusted implementation context, and dispatches implementation once.

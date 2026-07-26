@@ -429,9 +429,13 @@ export function lightweightTriageDecision(config, issue) {
     priority === "high" && classifiedProof === "UI"
       ? "GIF"
       : classifiedProof;
+  const riskClassificationText = classificationWorkText.replace(
+    /\brole\s*=\s*(?:"[^"\r\n]*"|'[^'\r\n]*')/gi,
+    ""
+  );
   const highRisk =
     /\b(?:auth(?:entication|orization)?|security|secret|credential|billing|payment|migration|production data|destructive|delete production|external integration|webhook|broad refactor|architecture|tenant isolation|permission|role)\b/i.test(
-      classificationWorkText
+      riskClassificationText
     );
   const narrowUi =
     /\b(?:copy|wording|loading|layout|spacing|color|icon|image|empty state)\b/i.test(
