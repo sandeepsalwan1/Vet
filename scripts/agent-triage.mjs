@@ -272,6 +272,46 @@ function riskBearingConstraints(value) {
     .join("\n");
 }
 
+function hasDocumentationOnlyScope(sections) {
+  return [
+    sections["plan or context"],
+    sections["acceptance criteria"],
+    sections.constraints
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .split("\n")
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^[-*]\s+(?:\[[ xX]\]\s*)?/, "")
+        .replace(/^\d+[.)]\s+/, "")
+        .trim()
+    )
+    .some((line) =>
+      /^(?:this (?:is|remains) )?(?:a )?(?:documentation|docs|readme)[ -]?only(?:\s+(?:change|update|edit|task|work))?[.!]?$/i.test(
+        line
+      )
+    );
+}
+
+function maskDocumentationReferences(value, enabled) {
+  if (!enabled) return value;
+  return String(value)
+    .replace(
+      /`(?:readme(?:\.md)?|docs\/[^`\r\n]+\.md|[^`/\r\n]+\.md)`/gi,
+      " "
+    )
+    .replace(
+      /\b(?:architecture|deployment)(?:\s+and\s+(?:architecture|deployment))?\s+(?:guides?|documentation|docs?|references?)\b/gi,
+      " "
+    )
+    .replace(
+      /\b(?:guides?|documentation|docs?|references?)\s+(?:for|to)\s+(?:the\s+)?(?:architecture|deployment)\b/gi,
+      " "
+    );
+}
+
 export function lightweightTriageDecision(config, issue) {
   const labels = issueLabels(issue);
   const sections = parseIssueSections(issue?.body ?? "");
@@ -331,6 +371,15 @@ export function lightweightTriageDecision(config, issue) {
     /\b(?:readme|documentation|docs|copy|wording|typo|test coverage|dead code|cleanup|lint)\b/i.test(
       workRequestText
     );
+  const documentationOnlyScope = hasDocumentationOnlyScope(sections);
+  const classificationWorkText = maskDocumentationReferences(
+    workRequestText,
+    documentationOnlyScope
+  );
+  const classificationProofText = maskDocumentationReferences(
+    proofRequestText,
+    documentationOnlyScope
+  );
   const urgentWork =
     /\b(?:urgent|outage|incident|patient safety|security incident|clinic blocked|production down)\b/i.test(
       workRequestText
@@ -338,23 +387,25 @@ export function lightweightTriageDecision(config, issue) {
   const priority = explicitHigh || urgentWork ? "high" : explicitLow || lowWork ? "low" : "medium";
   const renderService =
     /\b(?:render\s+(?:api|blueprint|deploy(?:ment)?|environment|health|logs?|service)|(?:blueprint|deploy(?:ment)?|health|logs?|service)\s+(?:on\s+)?render)\b/i.test(
-      proofRequestText
+      classificationProofText
     );
-  const proofNeeded = /\b(?:gif|video|screen recording)\b/i.test(proofRequestText)
+  const proofNeeded = /\b(?:gif|video|screen recording)\b/i.test(
+    classificationProofText
+  )
     ? "GIF"
     : renderService ||
         /\b(?:deploy(?:ment)?|migration|database|postgres|supabase|webhook|integration|service health|production logs)\b/i.test(
-          proofRequestText
+          classificationProofText
         )
       ? "service"
       : /\b(?:ui|visual|screenshot|browser|page|route|screen|layout|loading state|animation)\b/i.test(
-            proofRequestText
+            classificationProofText
           ) || labels.includes(config.labels.proof)
         ? "UI"
         : "CI";
   const highRisk =
     /\b(?:auth(?:entication|orization)?|security|secret|credential|billing|payment|migration|production data|destructive|delete production|external integration|webhook|broad refactor|architecture|tenant isolation|permission|role)\b/i.test(
-      workRequestText
+      classificationWorkText
     );
   const narrowUi =
     /\b(?:copy|wording|loading|layout|spacing|color|icon|image|empty state)\b/i.test(
@@ -363,7 +414,7 @@ export function lightweightTriageDecision(config, issue) {
   const lowRisk =
     (lowWork || narrowUi) &&
     !/\b(?:runtime|production|deploy|database|migration|security|auth|permission|billing)\b/i.test(
-      workRequestText
+      classificationWorkText
     );
   const risk = highRisk ? "high" : lowRisk ? "low" : "medium";
   const disallowed =

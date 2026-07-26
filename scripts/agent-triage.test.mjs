@@ -415,6 +415,135 @@ No browser, media, deployment, or service proof is needed.`,
   assert.equal(result.proofNeeded, "CI");
 });
 
+test("documentation-only guide links do not become architecture or deployment work", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 62,
+    title: "Proofless canary: link core README guides",
+    body: `### Outcome
+
+Maintainers can open the architecture and deployment guides directly from the README Docs section.
+
+### Plan or context
+
+Limit the change to the existing README Docs bullet that names \`docs/architecture.md\` and \`docs/deployment.md\`.
+This is a documentation-only change.
+
+### Acceptance criteria
+
+- [ ] The existing architecture guide path links to \`docs/architecture.md\`.
+- [ ] The existing deployment guide path links to \`docs/deployment.md\`.
+- [ ] Only \`README.md\` changes.
+
+### Proof
+
+Automated tests and checks`,
+    labels: [{ name: config.labels.priorityLow }]
+  });
+
+  assert.equal(result.priority, "low");
+  assert.equal(result.risk, "low");
+  assert.equal(result.proofNeeded, "CI");
+  assert.equal(result.automationDecision, "implement");
+});
+
+test("documentation-only checklist scope masks guide references", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 63,
+    title: "Link architecture and deployment guides",
+    body: `### Outcome
+
+The README links the architecture and deployment guides.
+
+### Acceptance criteria
+
+- [ ] Documentation-only change.
+- [ ] Link \`docs/architecture.md\`.
+- [ ] Link \`docs/deployment.md\`.
+
+### Proof
+
+Automated tests and checks`,
+    labels: [{ name: config.labels.priorityLow }]
+  });
+
+  assert.equal(result.risk, "low");
+  assert.equal(result.proofNeeded, "CI");
+});
+
+test("documentation-only scope cannot mask architecture or deployment files", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 64,
+    title: "Update architecture and deployment files",
+    body: `### Outcome
+
+The architecture files and deployment files are updated.
+
+### Plan or context
+
+- [ ] Documentation-only change.
+
+### Acceptance criteria
+
+- [ ] Change the architecture files.
+- [ ] Update the deployment files.
+
+### Proof
+
+Automated tests and checks`,
+    labels: [{ name: config.labels.priorityLow }]
+  });
+
+  assert.equal(result.risk, "high");
+  assert.equal(result.proofNeeded, "service");
+});
+
+test("documentation-only wording cannot suppress real authorization work", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 65,
+    title: "Replace the authentication policy with runtime authorization",
+    body: `### Outcome
+
+Runtime authorization replaces the current authentication policy.
+
+### Plan or context
+
+This is a documentation-only change.
+
+### Acceptance criteria
+
+- [ ] Runtime authorization controls access.
+- [ ] The security policy is enforced.
+
+### Proof
+
+Automated tests and checks`,
+    labels: [{ name: config.labels.priorityLow }]
+  });
+
+  assert.equal(result.risk, "high");
+});
+
+test("negated documentation-only text does not create a safe scope", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 66,
+    title: "Replace the application architecture",
+    body: `### Outcome
+
+The application architecture is replaced.
+
+### Plan or context
+
+This is not documentation-only.
+
+### Acceptance criteria
+
+- [ ] The architecture changes across runtime packages.`,
+    labels: [{ name: config.labels.priorityLow }]
+  });
+
+  assert.equal(result.risk, "high");
+});
+
 test("scope exclusions do not become requested risk", () => {
   const result = lightweightTriageDecision(config, {
     number: 60,
