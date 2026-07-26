@@ -9,13 +9,20 @@ import {
   issueSnapshotSha256
 } from "./agent-lib.mjs";
 
-export const INTENT_CAPSULE_VERSION = 3;
+export const INTENT_CAPSULE_VERSION = 4;
 export const IMPLEMENTATION_RESULT_VERSION = 1;
 export const IMPLEMENTATION_ADDENDUM_MARKER =
   "<!-- agent-intent-addendum:v1 -->";
 export const PROOF_KINDS = Object.freeze(["none", "CI", "UI", "GIF", "service"]);
+export const EVIDENCE_LANES = Object.freeze([
+  "deterministic",
+  "browser",
+  "service"
+]);
 const TRANSIENT_INTENT_LABELS = new Set(["agent:implement", "agent:triage"]);
 const BEHAVIOR_CONTRACT_VERSION = 2;
+const STABLE_INTENT_LABEL_VERSION = 3;
+const EVIDENCE_LANE_CONTRACT_VERSION = 4;
 export const BASE_TRIAGE_FIELDS = Object.freeze([
   "value",
   "priority",
@@ -201,7 +208,6 @@ export function validateProofPlan(plan) {
         Array.isArray(task) ||
         JSON.stringify(Object.keys(task).sort()) !== JSON.stringify(keys) ||
         !Array.isArray(task.clauseIds) ||
-        task.clauseIds.length === 0 ||
         task.clauseIds.length > MAX_REQUIREMENTS ||
         task.clauseIds.some((id) => !/^AC[1-9][0-9]*$/.test(id)) ||
         new Set(task.clauseIds).size !== task.clauseIds.length
@@ -369,16 +375,61 @@ function proofRoutes(sections) {
   return [...new Set(value.split(/\s+/).filter(Boolean).map((route) => safeProofRoute(route)))].sort();
 }
 
+export function clauseEvidenceLanes(statement, proofKind) {
+  const text = normalizedText(statement).toLowerCase();
+  const lanes = new Set();
+  if (
+    /\b(?:test|tests|lint|typecheck|build|compile|regression|snapshot|file|line|content|order|format|localhost|local app|production data|secret|credential|permission|policy|configuration)\b/.test(
+      text
+    )
+  ) {
+    lanes.add("deterministic");
+  }
+  if (
+    /\b(?:database|migration|schema|deployment|deploy|service|integration|webhook|email|sms|pims|postgres|health|logs?|tenant(?: data)? (?:isolated|isolation))\b/.test(
+      text
+    )
+  ) {
+    lanes.add("service");
+  }
+  if (
+    /\b(?:visible|page|screen|route|open|click|loading|render|copy|text|layout|style|form|button|link|user|browser|animation|transition)\b/.test(
+      text
+    )
+  ) {
+    lanes.add("browser");
+  }
+  if (!lanes.size) {
+    lanes.add(
+      proofKind === "UI" || proofKind === "GIF"
+        ? "browser"
+        : proofKind === "service"
+          ? "service"
+          : "deterministic"
+    );
+  }
+  return EVIDENCE_LANES.filter((lane) => lanes.has(lane));
+}
+
+function artifactEvidenceLanes(proofKind) {
+  if (proofKind === "UI" || proofKind === "GIF") return ["browser"];
+  if (proofKind === "service") return ["service"];
+  return ["deterministic"];
+}
+
 function behaviorContract({
   outcome,
   acceptanceCriteria,
   explicitExclusions,
   sections,
-  proofKind
+  proofKind,
+  version
 }) {
   const userTasks = requirementLines(sections["proof interaction"]);
+  const contractVersion =
+    version >= EVIDENCE_LANE_CONTRACT_VERSION ? 2 : 1;
   const payload = {
-    version: 1,
+    version: contractVersion,
     goal: outcome,
     target: {
       kind:
@@ -393,7 +444,10 @@ function behaviorContract({
     userTasks,
     checks: acceptanceCriteria.map((statement, index) => ({
       id: `AC${index + 1}`,
-      statement
+      statement,
+      ...(contractVersion >= 2
+        ? { evidenceLanes: clauseEvidenceLanes(statement, proofKind) }
+        : {})
     })),
     antiCheatProbes:
       proofKind === "GIF"
@@ -427,6 +481,9 @@ function behaviorContract({
     outOfScope: explicitExclusions,
     captureBeforeAction: proofKind === "GIF"
   };
+  if (contractVersion >= 2) {
+    payload.artifactLanes = artifactEvidenceLanes(proofKind);
+  }
   return {
     ...payload,
     contractDigest: sha256(JSON.stringify(payload))
@@ -434,7 +491,7 @@ function behaviorContract({
 }
 
 function validateBehaviorContract(contract, acceptanceCriteria, proofKind) {
-  const expectedKeys = [
+  const legacyKeys = [
     "antiCheatProbes",
     "captureBeforeAction",
     "checks",
@@ -447,12 +504,16 @@ function validateBehaviorContract(contract, acceptanceCriteria, proofKind) {
     "userTasks",
     "version"
   ];
+  const expectedKeys =
+    contract?.version >= 2
+      ? [...legacyKeys, "artifactLanes"].sort()
+      : legacyKeys;
   const { contractDigest: _contractDigest, ...payload } = contract ?? {};
   if (
     !contract ||
     Array.isArray(contract) ||
     JSON.stringify(Object.keys(contract).sort()) !== JSON.stringify(expectedKeys) ||
-    contract.version !== 1 ||
+    ![1, 2].includes(contract.version) ||
     !/^[a-f0-9]{64}$/.test(contract.contractDigest ?? "") ||
     sha256(JSON.stringify(payload)) !== contract.contractDigest ||
     contract.target?.proofKind !== proofKind ||
@@ -470,9 +531,15 @@ function validateBehaviorContract(contract, acceptanceCriteria, proofKind) {
       JSON.stringify(
         acceptanceCriteria.map((statement, index) => ({
           id: `AC${index + 1}`,
-          statement
+          statement,
+          ...(contract.version >= 2
+            ? { evidenceLanes: clauseEvidenceLanes(statement, proofKind) }
+            : {})
         }))
-      )
+      ) ||
+    (contract.version >= 2 &&
+      JSON.stringify(contract.artifactLanes) !==
+        JSON.stringify(artifactEvidenceLanes(proofKind)))
   ) {
     throw new AgentError("behavior contract is invalid", 1);
   }
@@ -506,7 +573,7 @@ function createIntentCapsuleVersion({
     sourceIssue: issueNumber,
     issueSnapshotSha256: issueSnapshotSha256(issue),
     sourceLabels:
-      version >= INTENT_CAPSULE_VERSION
+      version >= STABLE_INTENT_LABEL_VERSION
         ? stableIntentLabels(issue)
         : [...new Set(issueLabels(issue))].sort(),
     title,
@@ -526,7 +593,8 @@ function createIntentCapsuleVersion({
       acceptanceCriteria: criteria,
       explicitExclusions,
       sections,
-      proofKind: decision.proofNeeded
+      proofKind: decision.proofNeeded,
+      version
     });
   }
   return {
@@ -565,7 +633,7 @@ export function validateIntentCapsule(capsule) {
     !capsule ||
     Array.isArray(capsule) ||
     JSON.stringify(Object.keys(capsule).sort()) !== JSON.stringify(expectedKeys) ||
-    ![1, BEHAVIOR_CONTRACT_VERSION, INTENT_CAPSULE_VERSION].includes(
+    ![1, BEHAVIOR_CONTRACT_VERSION, STABLE_INTENT_LABEL_VERSION, INTENT_CAPSULE_VERSION].includes(
       capsule.version
     ) ||
     !Number.isSafeInteger(capsule.sourceIssue) ||
@@ -814,7 +882,11 @@ export function intentCapsuleForManagedTriage({
     return { decision, capsule };
   }
   for (const legacyIssue of legacyIntentIssues(issue, decision)) {
-    for (const version of [BEHAVIOR_CONTRACT_VERSION, 1]) {
+    for (const version of [
+      STABLE_INTENT_LABEL_VERSION,
+      BEHAVIOR_CONTRACT_VERSION,
+      1
+    ]) {
       const legacyCapsule = createIntentCapsuleVersion({
         issue: legacyIssue,
         decision,

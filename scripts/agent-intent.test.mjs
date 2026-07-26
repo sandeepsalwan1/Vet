@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   IMPLEMENTATION_ADDENDUM_MARKER,
+  clauseEvidenceLanes,
   createIntentCapsule,
   implementationAddendumEnvelope,
   intentCapsuleForManagedTriage,
@@ -106,14 +107,39 @@ test("intent capsule binds issue, requirements, clarifications, transcript, and 
   assert.deepEqual(capsule.explicitExclusions, ["Do not expose private findings."]);
   assert.equal(capsule.transcriptContext.sourceDigest, "a".repeat(64));
   assert.equal(capsule.ownerClarifications[0].commentId, 55);
-  assert.equal(capsule.version, 3);
+  assert.equal(capsule.version, 4);
   assert.deepEqual(capsule.behaviorContract.routes, ["/staff/tasks"]);
   assert.deepEqual(
     capsule.behaviorContract.checks.map((check) => check.id),
     ["AC1", "AC2"]
   );
   assert.equal(capsule.behaviorContract.target.kind, "web");
+  assert.equal(capsule.behaviorContract.version, 2);
+  assert.deepEqual(capsule.behaviorContract.artifactLanes, ["browser"]);
+  assert.deepEqual(
+    capsule.behaviorContract.checks.map((check) => check.evidenceLanes),
+    [["browser"], ["service"]]
+  );
   assert.match(capsule.behaviorContract.contractDigest, /^[a-f0-9]{64}$/);
+});
+
+test("acceptance clauses select direct evidence without forcing every UI clause into a browser", () => {
+  assert.deepEqual(
+    clauseEvidenceLanes("Show the real clinic-opening copy on the page", "GIF"),
+    ["browser"]
+  );
+  assert.deepEqual(
+    clauseEvidenceLanes("Show the loading transition before the page settles", "GIF"),
+    ["browser"]
+  );
+  assert.deepEqual(
+    clauseEvidenceLanes("Browser proof uses only the local app and no production data", "GIF"),
+    ["deterministic", "browser"]
+  );
+  assert.deepEqual(
+    clauseEvidenceLanes("Existing repository tests continue to pass", "GIF"),
+    ["deterministic"]
+  );
 });
 
 test("intent digest changes with owner clarification or policy", () => {
@@ -279,6 +305,13 @@ test("proof plan rejects unsafe routes and unbounded waits", () => {
   };
 
   assert.deepEqual(validateProofPlan(base), base);
+  assert.deepEqual(
+    validateProofPlan({
+      version: 1,
+      tasks: [{ ...base.tasks[0], clauseIds: [] }]
+    }).tasks[0].clauseIds,
+    []
+  );
   assert.deepEqual(
     validateProofPlan({
       ...base,

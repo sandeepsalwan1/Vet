@@ -87,8 +87,13 @@ jobs:
     outputs:
       concurrency_group: ${{ steps.concurrency.outputs.group }}
       request_b64: ${{ steps.prepare.outputs.request_b64 }}
+      failure_b64: ${{ steps.prepare.outputs.failure_b64 }}
       requested: ${{ steps.prepare.outputs.requested }}
       proof_kind: ${{ steps.prepare.outputs.proof_kind }}
+      needs_browser: ${{ steps.prepare.outputs.needs_browser }}
+      needs_deterministic: ${{ steps.prepare.outputs.needs_deterministic }}
+      needs_remote: ${{ steps.prepare.outputs.needs_remote }}
+      needs_service: ${{ steps.prepare.outputs.needs_service }}
       sha: ${{ steps.begin.outputs.sha }}
       checkout_ref: ${{ steps.prepare.outputs.checkout_ref }}
     steps:
@@ -141,6 +146,7 @@ jobs:
             --target-kind "${{ inputs.target-kind }}"
             --target-number "${{ inputs.target-number }}"
             --status-sha "$STATUS_SHA"
+            --failure-output failure_b64
             --json
           )
           if [ "${{ github.event_name }}" = workflow_dispatch ]; then
@@ -159,7 +165,7 @@ jobs:
     needs: prepare
     if: >-
       needs.prepare.outputs.requested == 'true' &&
-      needs.prepare.outputs.proof_kind != 'service'
+      needs.prepare.outputs.needs_remote == 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: ${{ needs.prepare.outputs.concurrency_group }}
@@ -221,7 +227,7 @@ jobs:
     needs: prepare
     if: >-
       needs.prepare.outputs.requested == 'true' &&
-      needs.prepare.outputs.proof_kind == 'service'
+      needs.prepare.outputs.needs_service == 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: ${{ needs.prepare.outputs.concurrency_group }}
@@ -299,7 +305,7 @@ jobs:
     if: >-
       always() &&
       needs.prepare.outputs.requested == 'true' &&
-      needs.prepare.outputs.proof_kind == 'service'
+      needs.prepare.outputs.needs_service == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -335,7 +341,9 @@ jobs:
     if: >-
       always() &&
       needs.prepare.outputs.requested == 'true' &&
-      needs.prepare.outputs.proof_kind == 'CI' &&
+      needs.prepare.outputs.needs_deterministic == 'true' &&
+      needs.prepare.outputs.needs_browser != 'true' &&
+      needs.prepare.outputs.needs_service != 'true' &&
       (needs.remote.result != 'success' || needs.remote.outputs.needs_local == 'true')
     runs-on: ubuntu-latest
     concurrency:
@@ -407,6 +415,8 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          PREPARE_JOB_RESULT: ${{ needs.prepare.result }}
+          PREPARE_FAILURE_B64: ${{ needs.prepare.outputs.failure_b64 }}
           REQUEST_B64: ${{ needs.prepare.outputs.request_b64 }}
           REMOTE_OUTCOME_B64: ${{ needs.remote.outputs.outcome_b64 }}
           LOCAL_OUTCOME_B64: ${{ needs.local.outputs.outcome_b64 }}
@@ -415,11 +425,34 @@ jobs:
           LOCAL_JOB_RESULT: ${{ needs.local.result }}
           SERVICE_JOB_RESULT: ${{ needs.service.result }}
           SERVICE_CONFIG_JOB_RESULT: ${{ needs.service-config.result }}
-          ARTIFACT_URL: ${{ needs.remote.outputs.artifact_url || needs.service.outputs.artifact_url }}
+          NEEDS_BROWSER: ${{ needs.prepare.outputs.needs_browser }}
+          REMOTE_ARTIFACT_URL: ${{ needs.remote.outputs.artifact_url }}
+          SERVICE_ARTIFACT_URL: ${{ needs.service.outputs.artifact_url }}
           STATUS_SHA: ${{ needs.prepare.outputs.sha }}
           TERMINAL_MARKER: ${{ runner.temp }}/agent-proof-terminal.json
           COST_OUTCOME_FILE: ${{ runner.temp }}/agent-proof-cost-outcome.json
         run: |
+          if [ "$PREPARE_JOB_RESULT" != success ]; then
+            failure_args=(
+              --finalize-prepare-failure
+              --target-kind "${{ inputs.target-kind }}"
+              --target-number "${{ inputs.target-number }}"
+              --status-sha "$STATUS_SHA"
+              --terminal-marker "$TERMINAL_MARKER"
+              --cost-outcome-file "$COST_OUTCOME_FILE"
+              --json
+            )
+            if [ -n "$PREPARE_FAILURE_B64" ]; then
+              failure_args+=(--prepare-failure-base64 "$PREPARE_FAILURE_B64")
+            else
+              failure_args+=(
+                --prepare-failure-summary
+                "Proof preparation job failed before it recorded a primary error."
+              )
+            fi
+            node trusted/scripts/agent-proof.mjs "${failure_args[@]}"
+            exit 1
+          fi
           args=(
             --finalize
             --request-base64 "$REQUEST_B64"
@@ -432,8 +465,12 @@ jobs:
             --cost-outcome-file "$COST_OUTCOME_FILE"
             --json
           )
-          if [ -n "$ARTIFACT_URL" ]; then
-            args+=(--artifact-url "$ARTIFACT_URL")
+          artifact_url="$REMOTE_ARTIFACT_URL"
+          if [ "$NEEDS_BROWSER" != true ] && [ -z "$artifact_url" ]; then
+            artifact_url="$SERVICE_ARTIFACT_URL"
+          fi
+          if [ -n "$artifact_url" ]; then
+            args+=(--artifact-url "$artifact_url")
           fi
           if [ -n "$REMOTE_OUTCOME_B64" ]; then
             args+=(--remote-outcome-base64 "$REMOTE_OUTCOME_B64")

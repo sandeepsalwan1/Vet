@@ -70,7 +70,7 @@
                 "properties": {
                   "clauseIds": {
                     "type": "array",
-                    "minItems": 1,
+                    "minItems": 0,
                     "maxItems": 50,
                     "items": { "type": "string", "pattern": "^AC[1-9][0-9]*$" }
                   },

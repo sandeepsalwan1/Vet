@@ -30,7 +30,9 @@ Rules:
 - Keep its summary, changes, and checks concise.
 - Record repository-grounded decisions, routine assumptions, scope clarifications, verification choices, and only genuinely unresolved user questions in the intent addendum.
 - Return a bounded `proofPlan` in the intent addendum.
-  For browser proof, map sealed `AC1`, `AC2`, and later clause IDs to user actions plus deterministic visible assertions.
+  Browser tasks must name only clauses whose sealed `evidenceLanes` include `browser`.
+  When browser capture is required only as an overall artifact, use an empty `clauseIds` list and direct rendered assertions.
+  Map browser-assigned sealed clause IDs to user actions plus deterministic visible assertions.
   Use stable accessible or `data-agent-proof` selectors, local routes, non-secret test values, and the fewest steps that exercise the real behavior.
   Every route and navigation path must be pathname-only, begin with exactly one `/`, and contain no host, protocol, query, or fragment.
   For GIF proof, include an observable intermediate assertion and a final assertion.

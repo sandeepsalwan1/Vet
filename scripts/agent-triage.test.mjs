@@ -58,6 +58,71 @@ function managedDecision(overrides = {}) {
   };
 }
 
+function legacyIntentFixture(version) {
+  const value = decision({ priority: "low", risk: "low" });
+  const issue = {
+    number: 42,
+    title: "Document the operator guide",
+    body: `### Outcome
+
+Operators can find the guide.
+
+### Acceptance criteria
+
+- [ ] README links the guide.`,
+    labels: [config.labels.automerge, config.labels.priorityLow]
+  };
+  const current = createIntentCapsule({ issue, decision: value });
+  const { intentDigest: _currentDigest, ...currentPayload } = current;
+  const {
+    artifactLanes: _artifactLanes,
+    contractDigest: _contractDigest,
+    ...currentContractPayload
+  } = current.behaviorContract;
+  const legacyContractPayload = {
+    ...currentContractPayload,
+    version: 1,
+    checks: current.behaviorContract.checks.map(
+      ({ evidenceLanes: _evidenceLanes, ...check }) => check
+    )
+  };
+  const legacyPayload = {
+    ...currentPayload,
+    version,
+    behaviorContract: {
+      ...legacyContractPayload,
+      contractDigest: createHash("sha256")
+        .update(JSON.stringify(legacyContractPayload))
+        .digest("hex")
+    },
+    ...(version === 2
+      ? {
+          sourceLabels: [
+            config.labels.automerge,
+            config.labels.implement,
+            config.labels.priorityLow
+          ]
+        }
+      : {})
+  };
+  const intentDigest = createHash("sha256")
+    .update(JSON.stringify(legacyPayload))
+    .digest("hex");
+  const managed = {
+    ...value,
+    issueSnapshotSha256: current.issueSnapshotSha256,
+    ownerClarifications: [],
+    intentDigest
+  };
+  return {
+    intentDigest,
+    issue,
+    triageComment: {
+      body: `<!-- agent-triage:v1 -->\n\`\`\`json\n${JSON.stringify(managed)}\n\`\`\``
+    }
+  };
+}
+
 test("manual review blocks and removes stale implementation labels", () => {
   const changes = triageLabelChanges(config, decision({ automationDecision: "manual-review" }));
 
@@ -126,42 +191,7 @@ Operators can find the guide.
 });
 
 test("managed intent reconstructs a legacy v2 capsule after trigger cleanup", () => {
-  const value = decision({ priority: "low", risk: "low" });
-  const issue = {
-    number: 42,
-    title: "Document the operator guide",
-    body: `### Outcome
-
-Operators can find the guide.
-
-### Acceptance criteria
-
-- [ ] README links the guide.`,
-    labels: [config.labels.automerge, config.labels.priorityLow]
-  };
-  const current = createIntentCapsule({ issue, decision: value });
-  const { intentDigest: _currentDigest, ...currentPayload } = current;
-  const legacyPayload = {
-    ...currentPayload,
-    version: 2,
-    sourceLabels: [
-      config.labels.automerge,
-      config.labels.implement,
-      config.labels.priorityLow
-    ]
-  };
-  const legacyDigest = createHash("sha256")
-    .update(JSON.stringify(legacyPayload))
-    .digest("hex");
-  const managed = {
-    ...value,
-    issueSnapshotSha256: current.issueSnapshotSha256,
-    ownerClarifications: [],
-    intentDigest: legacyDigest
-  };
-  const triageComment = {
-    body: `<!-- agent-triage:v1 -->\n\`\`\`json\n${JSON.stringify(managed)}\n\`\`\``
-  };
+  const { intentDigest, issue, triageComment } = legacyIntentFixture(2);
 
   const reconstructed = intentCapsuleForManagedTriage({
     issue,
@@ -172,7 +202,22 @@ Operators can find the guide.
   }).capsule;
 
   assert.equal(reconstructed.version, 2);
-  assert.equal(reconstructed.intentDigest, legacyDigest);
+  assert.equal(reconstructed.intentDigest, intentDigest);
+});
+
+test("managed intent reconstructs a legacy v3 capsule after evidence routing changes", () => {
+  const { intentDigest, issue, triageComment } = legacyIntentFixture(3);
+
+  const reconstructed = intentCapsuleForManagedTriage({
+    issue,
+    comments: [],
+    triageComment,
+    marker: "<!-- agent-triage:v1 -->",
+    repoOwner: "owner"
+  }).capsule;
+
+  assert.equal(reconstructed.version, 3);
+  assert.equal(reconstructed.intentDigest, intentDigest);
 });
 
 test("high-priority work still implements but cannot automerge", () => {

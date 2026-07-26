@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { commandBehaviorReport } from "./agent-behavior-report.mjs";
 
 import {
+  combineProofResults,
   deriveAffectedRoutes,
   exactRemoteProofCommand,
   isProofRequested,
@@ -10,6 +12,7 @@ import {
   mayMutateProofTarget,
   proofBody,
   proofLabelChanges,
+  preparationFailureRecord,
   resolveTerminalResult,
   terminalMarker,
   structuredProofKind,
@@ -258,6 +261,154 @@ test("visual behavior plan covers every sealed clause and GIF transition", () =>
   );
 });
 
+test("browser plans cover browser clauses while final proof combines deterministic clauses", () => {
+  const behaviorContract = {
+    version: 2,
+    target: { kind: "web", proofKind: "UI" },
+    artifactLanes: ["browser"],
+    captureBeforeAction: false,
+    contractDigest: "d".repeat(64),
+    checks: [
+      {
+        id: "AC1",
+        statement: "The page shows the current state.",
+        evidenceLanes: ["browser"]
+      },
+      {
+        id: "AC2",
+        statement: "Repository tests pass.",
+        evidenceLanes: ["deterministic"]
+      }
+    ]
+  };
+  const proofPlan = {
+    version: 1,
+    tasks: [
+      {
+        clauseIds: ["AC1"],
+        route: "/staff/tasks",
+        actions: [],
+        intermediateAssertions: [],
+        finalAssertions: [{ type: "visible", selector: "main" }]
+      }
+    ]
+  };
+  assert.equal(
+    validateVisualBehaviorPlan({
+      proofKind: "UI",
+      routes: ["/staff/tasks"],
+      behaviorContract,
+      proofPlan,
+      evidenceLanes: ["deterministic", "browser"]
+    }),
+    proofPlan
+  );
+  assert.throws(
+    () =>
+      validateVisualBehaviorPlan({
+        proofKind: "UI",
+        routes: ["/staff/tasks"],
+        behaviorContract,
+        proofPlan: {
+          ...proofPlan,
+          tasks: [{ ...proofPlan.tasks[0], clauseIds: ["AC2"] }]
+        },
+        evidenceLanes: ["deterministic", "browser"]
+      }),
+    /non-browser clause AC2/
+  );
+
+  const request = {
+    kind: "pr",
+    number: 12,
+    requested: true,
+    proofKind: "UI",
+    routes: ["/staff/tasks"],
+    sha: "a".repeat(40),
+    checkoutRef: "a".repeat(40),
+    intentDigest: "b".repeat(64),
+    behaviorContract,
+    proofPlan,
+    evidenceLanes: ["deterministic", "browser"]
+  };
+  const resultFor = (lane, commands) => ({
+    proofKind: "UI",
+    status: "passed",
+    commands,
+    artifactPaths: [],
+    artifactDigests: [],
+    provider: "test",
+    leaseId: "",
+    summary: `${lane} passed`,
+    blocker: "",
+    evidenceLanes: [lane],
+    behaviorReport: commandBehaviorReport({
+      contract: behaviorContract,
+      passed: true,
+      access: request.sha,
+      commands,
+      evidenceLanes: [lane]
+    })
+  });
+  const combined = combineProofResults(request, [
+    resultFor("browser", ["open /staff/tasks"]),
+    resultFor("deterministic", ["npm test"])
+  ]);
+  assert.equal(combined.status, "passed");
+  assert.deepEqual(
+    combined.behaviorReport.checks.map((check) => check.status),
+    ["pass", "pass"]
+  );
+  assert.equal(
+    combineProofResults(request, [
+      resultFor("browser", ["open /staff/tasks"])
+    ]).status,
+    "failed"
+  );
+  assert.equal(
+    combineProofResults(request, [
+      {
+        ...resultFor("browser", ["open /staff/tasks"]),
+        status: "blocked",
+        blocker: "Browser provider unavailable."
+      },
+      resultFor("deterministic", ["npm test"])
+    ]).status,
+    "blocked"
+  );
+});
+
+test("proof preparation failure preserves the primary blocker without request decoding", () => {
+  const record = preparationFailureRecord(
+    {
+      "target-kind": "pr",
+      "target-number": "61",
+      "status-sha": "a".repeat(40),
+      "proof-kind": "GIF"
+    },
+    new Error(
+      "browser proof plan does not cover sealed clauses: AC3, AC5"
+    )
+  );
+
+  assert.equal(record.proofKind, "GIF");
+  assert.equal(record.targetNumber, 61);
+  assert.match(record.summary, /does not cover sealed clauses: AC3, AC5/);
+  assert.doesNotMatch(record.summary, /base64|JSON/);
+  assert.equal(
+    preparationFailureRecord(
+      {
+        "target-kind": "pr",
+        "target-number": "61",
+        "status-sha": "a".repeat(40),
+        "resolved-proof-kind": "GIF"
+      },
+      new Error("browser plan failed")
+    ).proofKind,
+    "GIF"
+  );
+});
+
 test("successful proof never clears a shared blocked label", () => {
   const passing = proofLabelChanges(config, "passed");
   const failing = proofLabelChanges(config, "failed");
@@ -309,6 +460,7 @@ test("untrusted proof commands receive no GitHub, OpenAI, Crabbox, or provider c
       secrets: {
         agentAuth: "OPENAI_API_KEY",
         githubWrite: "GITHUB_TOKEN",
+        githubPublisher: "AGENT_GITHUB_TOKEN",
         githubPat: "AGENT_PAT",
         crabboxCoordinator: "CRABBOX_COORDINATOR_TOKEN",
         crabboxProviders: ["HCLOUD_TOKEN"],
@@ -319,6 +471,7 @@ test("untrusted proof commands receive no GitHub, OpenAI, Crabbox, or provider c
       PATH: "/usr/bin",
       GH_TOKEN: "github",
       GITHUB_TOKEN: "github",
+      AGENT_GITHUB_TOKEN: "publisher",
       GITHUB_EVENT_PATH: "/tmp/event.json",
       ACTIONS_RUNTIME_TOKEN: "actions",
       OPENAI_API_KEY: "openai",
@@ -405,6 +558,25 @@ test("fresh finalizer trusts job conclusion, not a forged local success outcome"
     }).status,
     "passed"
   );
+
+  const failedOutcome = {
+    terminal: true,
+    result: {
+      ...forged.result,
+      status: "failed",
+      summary: "npm run build failed",
+      blocker: "npm run build exited unsuccessfully"
+    }
+  };
+  const failed = resolveTerminalResult({
+    request,
+    remoteOutcome: null,
+    remoteJobResult: "failure",
+    localOutcome: failedOutcome,
+    localJobResult: "failure"
+  });
+  assert.equal(failed.status, "failed");
+  assert.match(failed.blocker, /npm run build exited unsuccessfully/);
 });
 
 test("service proof requires both disposable checks and trusted Blueprint validation", () => {
@@ -455,6 +627,30 @@ test("service proof requires both disposable checks and trusted Blueprint valida
   });
   assert.equal(failed.status, "failed");
   assert.match(failed.summary, /Blueprint/);
+
+  const commandFailure = resolveTerminalResult({
+    request,
+    remoteOutcome: null,
+    remoteJobResult: "skipped",
+    localOutcome: null,
+    localJobResult: "skipped",
+    serviceOutcome: {
+      terminal: true,
+      result: {
+        ...serviceOutcome.result,
+        status: "failed",
+        summary: "npm run db:migrate failed",
+        blocker: "npm run db:migrate exited unsuccessfully"
+      }
+    },
+    serviceJobResult: "failure",
+    serviceConfigJobResult: "success"
+  });
+  assert.equal(commandFailure.status, "failed");
+  assert.match(
+    commandFailure.blocker,
+    /npm run db:migrate exited unsuccessfully/
+  );
 });
 
 test("terminal marker preserves terminal failure detail for status finalization", () => {
@@ -493,6 +689,25 @@ test("proof workflow dispatches automerge only after terminal success is publish
   assert.match(workflow, /create role anon nologin/);
   assert.match(workflow, /create role authenticated nologin/);
   assert.match(workflow, /--execute-service/);
+  assert.match(workflow, /needs\.prepare\.outputs\.needs_remote == 'true'/);
+  assert.match(workflow, /needs\.prepare\.outputs\.needs_service == 'true'/);
+  assert.match(workflow, /needs\.prepare\.outputs\.needs_browser != 'true'/);
+  assert.match(workflow, /--failure-output failure_b64/);
+  assert.match(finalizeJob, /PREPARE_JOB_RESULT: \$\{\{ needs\.prepare\.result \}\}/);
+  assert.match(finalizeJob, /--finalize-prepare-failure/);
+  assert.match(finalizeJob, /--prepare-failure-base64 "\$PREPARE_FAILURE_B64"/);
+  assert.match(
+    finalizeJob,
+    /if \[ "\$NEEDS_BROWSER" != true \] && \[ -z "\$artifact_url" \]; then/
+  );
+  assert.doesNotMatch(
+    finalizeJob,
+    /needs\.remote\.outputs\.artifact_url \|\| needs\.service\.outputs\.artifact_url/
+  );
+  assert.ok(
+    finalizeJob.indexOf("--finalize-prepare-failure") <
+      finalizeJob.indexOf("--request-base64")
+  );
   assert.match(workflow, /uses: \.\/trusted\/\.github\/actions\/setup-render/);
   assert.match(workflow, /RENDER_WORKSPACE_ID: \$\{\{ secrets\.RENDER_WORKSPACE_ID \}\}/);
   assert.match(workflow, /render workspace set "\$RENDER_WORKSPACE_ID"/);
@@ -502,7 +717,7 @@ test("proof workflow dispatches automerge only after terminal success is publish
   assert.doesNotMatch(`${workflow}\n${crabboxAction}`, /0\.38\.4/);
   assert.match(workflow, /steps\.terminal\.outputs\.state == 'success'/);
   assert.match(workflow, /artifact_url: \$\{\{ steps\.artifact\.outputs\.artifact-url \}\}/);
-  assert.match(workflow, /--artifact-url "\$ARTIFACT_URL"/);
+  assert.match(workflow, /--artifact-url "\$artifact_url"/);
   assert.match(finalizeJob, /--cost-outcome-file "\$COST_OUTCOME_FILE"/);
   assert.match(finalizeJob, /--proof-outcome-file "\$COST_OUTCOME_FILE"/);
   assert.match(finalizeJob, /steps\.terminal\.outputs\.proof_status == 'passed'/);
