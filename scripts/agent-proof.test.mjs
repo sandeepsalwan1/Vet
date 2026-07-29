@@ -39,6 +39,7 @@ const config = {
   repo: { owner: "sandeepsalwan1" },
   labels: {
     proof: "agent:proof",
+    proofFailed: "agent:proof-failed",
     blocked: "agent:blocked",
     automerge: "agent:automerge"
   },
@@ -584,15 +585,26 @@ test("proof preparation failure preserves the primary blocker without request de
   );
 });
 
-test("successful proof never clears a shared blocked label", () => {
+test("proof owns a dedicated failure label and never mutates shared policy labels", () => {
   const passing = proofLabelChanges(config, "passed");
   const failing = proofLabelChanges(config, "failed");
   const repairing = proofLabelChanges(config, "failed", { repairing: true });
 
-  assert.deepEqual(passing, { add: [], remove: [] });
-  assert.ok(failing.add.includes(config.labels.blocked));
-  assert.ok(failing.remove.includes(config.labels.automerge));
+  assert.deepEqual(passing, {
+    add: [],
+    remove: [config.labels.proofFailed],
+  });
+  assert.deepEqual(failing, {
+    add: [config.labels.proofFailed],
+    remove: [],
+  });
   assert.deepEqual(repairing, { add: [], remove: [] });
+  for (const changes of [passing, failing, repairing]) {
+    assert.equal(changes.add.includes(config.labels.blocked), false);
+    assert.equal(changes.remove.includes(config.labels.blocked), false);
+    assert.equal(changes.add.includes(config.labels.automerge), false);
+    assert.equal(changes.remove.includes(config.labels.automerge), false);
+  }
 });
 
 test("only exact-head failed behavior proof enters automatic semantic repair", () => {

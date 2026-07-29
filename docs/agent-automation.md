@@ -16,6 +16,7 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 - `agent:implement`: recommended one-label entry; record a zero-model trusted intent seal, then implement the issue on an agent branch and draft PR.
 - `agent:review`: review or fix an agent-created PR and publish a recommendation.
 - `agent:proof`: require explicit proof before automerge.
+- `agent:proof-failed`: exact-head proof failed; a later passing proof removes this proof-owned blocker.
 - `agent:automerge`: allow merge only after every configured gate passes.
 - `agent:blocked`: human input or a failed gate blocks automation.
 - `priority:high`: manual review required.
@@ -259,6 +260,8 @@ Bounded implementation repair receives a trusted browser-clause allowlist and ma
 For GIF proof, recording starts before browser navigation or user action so transient states are captured instead of only the settled page.
 Each intermediate assertion stops polling once observed, so later actions cannot wait away a transient final state.
 The lane checks each planned execution route, desktop health, actual provider, lease, route-bound media, every acceptance clause, intermediate assertion, final assertion, and anti-cheat observation.
+Proof failures use the dedicated `agent:proof-failed` label instead of changing the shared `agent:blocked` or `agent:automerge` policy labels.
+A later passing exact-head proof removes that proof-owned label idempotently before automerge reevaluates the pull request.
 Published multi-route bundles bind digests by exact artifact-relative path before using a unique-basename fallback, so repeated route-local filenames do not conflict.
 The managed GitHub comment links the downloadable Actions artifact and keeps runner-only paths in a collapsed diagnostic section.
 Visual proof fails closed when the proof plan is incomplete, behavior assertions fail, a clause is missing, or no reviewable artifact URL is published.

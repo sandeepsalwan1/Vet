@@ -796,9 +796,11 @@ ${markdownJsonBlock(result)}`;
 
 export function proofLabelChanges(config, status, { repairing = false } = {}) {
   if ((status === "blocked" || status === "failed") && !repairing) {
-    return { add: [config.labels.blocked], remove: [config.labels.automerge] };
+    return { add: [config.labels.proofFailed], remove: [] };
   }
-  // A shared blocked label may belong to triage, review, no-mistakes, or a human.
+  if (status === "passed") {
+    return { add: [], remove: [config.labels.proofFailed] };
+  }
   return { add: [], remove: [] };
 }
 
