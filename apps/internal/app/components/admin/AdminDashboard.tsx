@@ -39,6 +39,21 @@ export function AdminDashboard({ session, onLogout, onOpenBoard }: Props) {
     };
   }, []);
 
+  useEffect(() => {
+    if (logoClicks !== 5) return;
+
+    setLogoClicks(0);
+    setSparklesKey((currentKey) => currentKey + 1);
+    setSparklesVisible(true);
+    if (sparklesTimeoutRef.current !== null) {
+      window.clearTimeout(sparklesTimeoutRef.current);
+    }
+    sparklesTimeoutRef.current = window.setTimeout(() => {
+      setSparklesVisible(false);
+      sparklesTimeoutRef.current = null;
+    }, 900);
+  }, [logoClicks]);
+
   const {
     activeTasks,
     clearNewTaskCount,
@@ -71,21 +86,7 @@ export function AdminDashboard({ session, onLogout, onOpenBoard }: Props) {
   }
 
   function handleLogoClick() {
-    setLogoClicks((current) => {
-      const next = current + 1;
-      if (next < 5) return next;
-
-      setSparklesKey((currentKey) => currentKey + 1);
-      setSparklesVisible(true);
-      if (sparklesTimeoutRef.current !== null) {
-        window.clearTimeout(sparklesTimeoutRef.current);
-      }
-      sparklesTimeoutRef.current = window.setTimeout(() => {
-        setSparklesVisible(false);
-        sparklesTimeoutRef.current = null;
-      }, 900);
-      return 0;
-    });
+    setLogoClicks((current) => current + 1);
   }
 
   const today = new Date().toLocaleDateString("en-US", {
