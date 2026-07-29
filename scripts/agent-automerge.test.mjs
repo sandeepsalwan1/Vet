@@ -53,6 +53,7 @@ const config = {
     review: "agent:review",
     automerge: "agent:automerge",
     proof: "agent:proof",
+    proofFailed: "agent:proof-failed",
     blocked: "agent:blocked",
     postMergeFailed: "agent:post-merge-failed",
     priorityHigh: "priority:high",
@@ -62,7 +63,11 @@ const config = {
   comments: { triage: "<!-- agent-triage:v1 -->" },
   automerge: {
     requiredLabels: ["agent:automerge"],
-    blockedLabels: ["priority:high", "agent:blocked"],
+    blockedLabels: [
+      "priority:high",
+      "agent:blocked",
+      "agent:proof-failed",
+    ],
     requiredStatuses: ["agent-review", "no-mistakes"],
     noMistakesBypassStatus: "no-mistakes-bypass",
     requiredChecks: ["quality", "build", "scenarios", "audit", "dependency-review"],
@@ -964,6 +969,7 @@ test("post-merge cleanup removes only workflow labels and closes the source issu
     "agent:review",
     "agent:automerge",
     "agent:proof",
+    "agent:proof-failed",
     "agent:blocked",
     "agent:post-merge-failed"
   ]);
@@ -1181,6 +1187,20 @@ test("source issue and branch authorization fail closed", () => {
   assert.ok(result.blockers.includes("PR must use a same-repository branch"));
   assert.ok(result.blockers.includes("PR branch does not match implementation source issue"));
   assert.ok(result.blockers.includes("source issue blocked by label agent:blocked"));
+});
+
+test("proof failure label blocks automerge until exact-head proof recovers", () => {
+  const value = fixture();
+  value.pullIssue.labels.push({ name: config.labels.proofFailed });
+
+  const result = evaluate(value);
+
+  assert.equal(result.allowed, false);
+  assert.ok(
+    result.blockers.includes(
+      `PR blocked by label ${config.labels.proofFailed}`,
+    ),
+  );
 });
 
 test("zero-diff conflict recovery may refresh gates but cannot merge", () => {

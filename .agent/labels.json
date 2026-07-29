@@ -20,6 +20,11 @@
     "description": "Run explicit proof or visual evidence flow"
   },
   {
+    "name": "agent:proof-failed",
+    "color": "b60205",
+    "description": "Exact-head proof failed and needs a fresh proof run"
+  },
+  {
     "name": "agent:automerge",
     "color": "0e8a16",
     "description": "Merge allowed after every required gate passes"

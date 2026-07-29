@@ -573,6 +573,35 @@ jobs:
             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           echo "state=$state" >> "$GITHUB_OUTPUT"
           echo "proof_status=$proof_status" >> "$GITHUB_OUTPUT"
+      - name: Reconcile terminal proof blocker
+        if: >-
+          always() &&
+          ((inputs.target-kind == 'pr' &&
+          steps.terminal.outputs.state != 'success') ||
+          (inputs.target-kind == 'issue' &&
+          steps.finalize.outcome != 'success'))
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_KIND: ${{ inputs.target-kind }}
+          TARGET_NUMBER: ${{ inputs.target-number }}
+          STATUS_SHA: ${{ needs.prepare.outputs.sha }}
+          REQUESTED_HEAD_SHA: ${{ inputs.expected-head-sha }}
+        run: |
+          set -euo pipefail
+          if [ "$TARGET_KIND" = pr ]; then
+            expected_sha="${STATUS_SHA:-$REQUESTED_HEAD_SHA}"
+            [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]]
+            current_sha="$(
+              gh pr view "$TARGET_NUMBER" \
+                --repo "$GITHUB_REPOSITORY" \
+                --json headRefOid \
+                --jq .headRefOid
+            )"
+            test "$current_sha" = "$expected_sha"
+          fi
+          gh issue edit "$TARGET_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --add-label agent:proof-failed
       - name: Repair failed exact-head behavior
         if: >-
           always() &&

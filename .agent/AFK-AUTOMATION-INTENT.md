@@ -899,6 +899,9 @@ Generic affected-route discovery also added `/`, preparation accepted the plan, 
 When a validated implementation proof plan exists, its route-bound tasks now define the browser execution routes; affected-file and sealed-route discovery remain the fallback only when no plan exists.
 The first repaired exact-head run then reached `/staff` but rechecked an already observed hidden precondition after the triggering click, waited through the short sparkle animation, and tested final visibility only after it disappeared.
 The browser driver now stops polling each intermediate assertion once observed, preserving transient final states for immediate final assertions and capture.
+A production rerun then passed proof, published media validation, cost, review, CI, and no-mistakes but remained blocked because the earlier proof failure had changed shared policy labels that proof could not safely own or restore.
+Terminal proof failures now use the dedicated `agent:proof-failed` label while bounded semantic repair may continue.
+A later passing exact-head proof removes that proof-owned label idempotently from the pull request and its trusted source issue without changing human, triage, review, no-mistakes, or automerge policy labels.
 
 ## Baseline Health And Workflow Approval
 
