@@ -1,10 +1,11 @@
 "use client";
 
 import { BarChart3, BellRing, Bot, ClipboardList, LayoutDashboard, LogOut, Users } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { logout, type AccountSession } from "../../lib/accountStore";
 import { ChatPanel } from "../ChatPanel";
 import { useClinicBrand } from "../ClinicContext";
+import { MiniConfetti } from "../TaskBoardChrome";
 import { AdminAnalyticsTab } from "./AdminAnalyticsTab";
 import { AdminTasksTab } from "./AdminTasksTab";
 import { AdminNotificationsTab } from "./AdminNotificationsTab";
@@ -25,6 +26,31 @@ type Tab = "tasks" | "analytics" | "notifications" | "assistant" | "team";
 export function AdminDashboard({ session, onLogout, onOpenBoard }: Props) {
   const clinic = useClinicBrand();
   const [tab, setTab] = useState<Tab>("tasks");
+  const [logoClicks, setLogoClicks] = useState(0);
+  const [sparklesKey, setSparklesKey] = useState(0);
+  const [sparklesVisible, setSparklesVisible] = useState(false);
+  const logoClicksRef = useRef(0);
+  const sparklesTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (sparklesTimeoutRef.current !== null) {
+        window.clearTimeout(sparklesTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  function triggerSparkles() {
+    setSparklesKey((currentKey) => currentKey + 1);
+    setSparklesVisible(true);
+    if (sparklesTimeoutRef.current !== null) {
+      window.clearTimeout(sparklesTimeoutRef.current);
+    }
+    sparklesTimeoutRef.current = window.setTimeout(() => {
+      setSparklesVisible(false);
+      sparklesTimeoutRef.current = null;
+    }, 900);
+  }
 
   const {
     activeTasks,
@@ -57,6 +83,18 @@ export function AdminDashboard({ session, onLogout, onOpenBoard }: Props) {
     onLogout();
   }
 
+  function handleLogoClick() {
+    const nextClicks = logoClicksRef.current + 1;
+    if (nextClicks === 5) {
+      logoClicksRef.current = 0;
+      setLogoClicks(0);
+      triggerSparkles();
+      return;
+    }
+    logoClicksRef.current = nextClicks;
+    setLogoClicks(nextClicks);
+  }
+
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
@@ -67,7 +105,15 @@ export function AdminDashboard({ session, onLogout, onOpenBoard }: Props) {
     <div className="vetShell">
       <header className="vetHeader">
         <div className="vetHeaderLeft">
-          <ShieldMark />
+          <button
+            type="button"
+            className="adminLogoButton"
+            onClick={handleLogoClick}
+            aria-label={`${clinic.name} logo`}
+            title={logoClicks > 0 ? `${clinic.name} logo (${logoClicks}/5)` : `${clinic.name} logo`}
+          >
+            <ShieldMark />
+          </button>
           <div>
             <p className="vetHeaderEyebrow">{clinic.name}</p>
             <h1 className="vetHeaderTitle">{session.name}</h1>
@@ -84,6 +130,8 @@ export function AdminDashboard({ session, onLogout, onOpenBoard }: Props) {
           </button>
         </div>
       </header>
+
+      {sparklesVisible ? <MiniConfetti key={sparklesKey} /> : null}
 
       {/* Tabs */}
       <div className="adminDashTabs">
