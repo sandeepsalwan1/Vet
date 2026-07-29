@@ -105,6 +105,68 @@ test("source triage supplies proof tier when review has not run", () => {
   assert.equal(value, "GIF");
 });
 
+test("review proof cannot downgrade the sealed source tier", () => {
+  const value = structuredProofKind(
+    config,
+    details({
+      comments: [
+        {
+          user: { login: "github-actions[bot]" },
+          body: `<!-- agent-review:v1 -->
+\`\`\`json
+{"proofNeeded":"none"}
+\`\`\``
+        }
+      ],
+      source: {
+        comments: [
+          {
+            user: { login: "github-actions[bot]" },
+            body: `<!-- agent-triage:v1 -->
+\`\`\`json
+{"proofNeeded":"GIF"}
+\`\`\``
+          }
+        ]
+      }
+    })
+  );
+
+  assert.equal(value, "GIF");
+});
+
+test("incomparable service and browser proof requests fail closed", () => {
+  assert.throws(
+    () =>
+      structuredProofKind(
+        config,
+        details({
+          comments: [
+            {
+              user: { login: "github-actions[bot]" },
+              body: `<!-- agent-review:v1 -->
+\`\`\`json
+{"proofNeeded":"UI"}
+\`\`\``
+            }
+          ],
+          source: {
+            comments: [
+              {
+                user: { login: "github-actions[bot]" },
+                body: `<!-- agent-triage:v1 -->
+\`\`\`json
+{"proofNeeded":"service"}
+\`\`\``
+              }
+            ]
+          }
+        })
+      ),
+    /conflicting service and browser proof requests/
+  );
+});
+
 test("untrusted structured marker cannot request paid visual proof", () => {
   const value = structuredProofKind(
     config,

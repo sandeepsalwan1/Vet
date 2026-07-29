@@ -902,6 +902,8 @@ The browser driver now stops polling each intermediate assertion once observed, 
 A production rerun then passed proof, published media validation, cost, review, CI, and no-mistakes but remained blocked because the earlier proof failure had changed shared policy labels that proof could not safely own or restore.
 Terminal proof failures now use the dedicated `agent:proof-failed` label while bounded semantic repair may continue.
 A later passing exact-head proof removes that proof-owned label idempotently from the pull request and its trusted source issue without changing human, triage, review, no-mistakes, or automerge policy labels.
+A stale-head recovery review then requested no additional proof and unintentionally downgraded the source issue's sealed `GIF` requirement to `CI`, producing only a screenshot on the final exact head.
+Proof selection now keeps the strongest compatible trusted request, so later review cannot weaken sealed source proof; incomparable service and browser requests fail closed for explicit evidence routing.
 
 ## Baseline Health And Workflow Approval
 
