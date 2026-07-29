@@ -893,6 +893,16 @@ Pull request 85 replacement head `e2c8e55fe1b4e6d42b559a9ae09dc0f1335cd1ee` then
 Proof run 30221708062 artifact 8637420624 visibly covers the changed setting, enabled save action, transient sparkle burst, and settled saved state.
 The automatic merge workflow merged it as `f893cc0c731a8a2fd690f534c7f1b28c94050fe2` and closed issue 82 without a manual merge.
 
+Recorded correction on 2026-07-29:
+Issue 86 and pull request 89 changed shared CSS while their browser plan correctly exercised `/staff`.
+Generic affected-route discovery also added `/`, preparation accepted the plan, and execution then failed because `/` had no unrelated browser task.
+When a validated implementation proof plan exists, its route-bound tasks now define the browser execution routes; affected-file and sealed-route discovery remain the fallback only when no plan exists.
+The first repaired exact-head run then reached `/staff` but rechecked an already observed hidden precondition after the triggering click, waited through the short sparkle animation, and tested final visibility only after it disappeared.
+The browser driver now stops polling each intermediate assertion once observed, preserving transient final states for immediate final assertions and capture.
+A production rerun then passed proof, published media validation, cost, review, CI, and no-mistakes but remained blocked because the earlier proof failure had changed shared policy labels that proof could not safely own or restore.
+Terminal proof failures now use the dedicated `agent:proof-failed` label while bounded semantic repair may continue.
+A later passing exact-head proof removes that proof-owned label idempotently from the pull request and its trusted source issue without changing human, triage, review, no-mistakes, or automerge policy labels.
+
 ## Baseline Health And Workflow Approval
 
 Do not spend implementation or review tokens when `main` cannot satisfy a required gate.

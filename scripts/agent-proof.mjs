@@ -127,6 +127,7 @@ function targetDetails(config, kind, number) {
     const sourceNumber = sourceIssueNumber(config, pull);
     const source = sourceNumber
       ? {
+          number: sourceNumber,
           issue: ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${sourceNumber}`),
           comments: commentsFor(config, sourceNumber)
         }
@@ -267,12 +268,29 @@ function implementationProofPlan(details) {
   );
 }
 
-function visualRoutes(details, explicitRoute = "") {
-  const routes = [
-    ...deriveAffectedRoutes(details.files, explicitRoute),
-    ...(proofContract(details)?.routes ?? []),
-    ...implementationProofPlan(details).tasks.map((task) => task.route)
-  ];
+export function visualRoutes(details, explicitRoute = "") {
+  const plannedRoutes = implementationProofPlan(details).tasks.map(
+    (task) => task.route
+  );
+  const explicitRoutes = deriveAffectedRoutes([], explicitRoute);
+  if (
+    explicitRoutes.length &&
+    plannedRoutes.some((route) => route !== explicitRoutes[0])
+  ) {
+    throw new AgentError(
+      `explicit proof route ${explicitRoutes[0]} does not match the implementation browser plan`,
+      1
+    );
+  }
+  let routes = plannedRoutes;
+  if (!routes.length) {
+    routes = explicitRoutes.length
+      ? explicitRoutes
+      : [
+          ...deriveAffectedRoutes(details.files),
+          ...(proofContract(details)?.routes ?? [])
+        ];
+  }
   return [...new Set(routes)].sort();
 }
 
@@ -777,12 +795,50 @@ Structured proof:
 ${markdownJsonBlock(result)}`;
 }
 
-export function proofLabelChanges(config, status, { repairing = false } = {}) {
-  if ((status === "blocked" || status === "failed") && !repairing) {
-    return { add: [config.labels.blocked], remove: [config.labels.automerge] };
+export function proofLabelChanges(config, status) {
+  if (status === "blocked" || status === "failed") {
+    return { add: [config.labels.proofFailed], remove: [] };
   }
-  // A shared blocked label may belong to triage, review, no-mistakes, or a human.
+  if (status === "passed") {
+    return { add: [], remove: [config.labels.proofFailed] };
+  }
   return { add: [], remove: [] };
+}
+
+export function proofLabelUpdates(config, request, status) {
+  const changes = proofLabelChanges(config, status);
+  const updates = changes.add.length || changes.remove.length
+    ? [{ number: request.number, ...changes }]
+    : [];
+  if (
+    status === "passed" &&
+    request.kind === "pr" &&
+    Number.isInteger(request.sourceNumber) &&
+    request.sourceNumber > 0 &&
+    request.sourceNumber !== request.number
+  ) {
+    updates.push({
+      number: request.sourceNumber,
+      add: [],
+      remove: [config.labels.proofFailed]
+    });
+  }
+  return updates;
+}
+
+function applyProofLabelUpdates(config, updates, dryRun = false) {
+  return updates.reduce(
+    (applied, update) => {
+      applied.added.push(
+        ...addLabels(config, update.number, update.add, dryRun)
+      );
+      applied.removed.push(
+        ...removeLabels(config, update.number, update.remove, dryRun)
+      );
+      return applied;
+    },
+    { added: [], removed: [] }
+  );
 }
 
 export function isProofHeadFresh(expectedSha, currentSha) {
@@ -927,11 +983,19 @@ async function legacyMain(args = parseArgs(), config = loadConfig()) {
     body: proofBody(result, routes, timingRecord),
     dryRun
   });
-  const changes = proofLabelChanges(config, result.status);
-  const labels = {
-    added: addLabels(config, number, changes.add, dryRun),
-    removed: removeLabels(config, number, changes.remove, dryRun)
-  };
+  const labels = applyProofLabelUpdates(
+    config,
+    proofLabelUpdates(
+      config,
+      {
+        kind,
+        number,
+        sourceNumber: details.source?.number ?? null
+      },
+      result.status
+    ),
+    dryRun
+  );
   const status =
     kind === "pr" && details.sha && result.status !== "skipped"
       ? setCommitStatus({
@@ -998,6 +1062,7 @@ function readModeDocument(args, name) {
 
 function validateRequest(request) {
   if (!request || typeof request !== "object") throw new AgentError("invalid proof request", 1);
+  request.sourceNumber ??= null;
   request.intentDigest ??= "";
   request.behaviorContract ??= null;
   request.proofPlan = validateProofPlan(
@@ -1012,6 +1077,17 @@ function validateRequest(request) {
         : ["deterministic"];
   if (!["issue", "pr"].includes(request.kind)) throw new AgentError("invalid proof request kind", 1);
   if (!Number.isInteger(request.number) || request.number <= 0) throw new AgentError("invalid proof request number", 1);
+  if (
+    request.sourceNumber !== null &&
+    (!Number.isInteger(request.sourceNumber) ||
+      request.sourceNumber <= 0 ||
+      request.sourceNumber === request.number)
+  ) {
+    throw new AgentError("invalid proof source issue number", 1);
+  }
+  if (request.kind === "issue" && request.sourceNumber !== null) {
+    throw new AgentError("issue proof request cannot have a source issue", 1);
+  }
   if (typeof request.requested !== "boolean") throw new AgentError("invalid proof request decision", 1);
   if (!PROOF_KINDS.has(request.proofKind) || request.proofKind === "none") {
     throw new AgentError("invalid proof request kind", 1);
@@ -1239,6 +1315,7 @@ async function prepareMain(args, config) {
   const request = validateRequest({
     kind,
     number,
+    sourceNumber: details.source?.number ?? null,
     requested,
     proofKind,
     routes,
@@ -1938,13 +2015,10 @@ async function finalizeMain(args, config) {
       marker: config.comments.proof,
       body: proofBody(result, request.routes, timingRecord)
     });
-    const changes = proofLabelChanges(config, result.status, {
-      repairing: repairEligible,
-    });
-    labels = {
-      added: addLabels(config, request.number, changes.add),
-      removed: removeLabels(config, request.number, changes.remove)
-    };
+    labels = applyProofLabelUpdates(
+      config,
+      proofLabelUpdates(config, request, result.status)
+    );
   }
 
   writeTerminalMarker(args["terminal-marker"], result, request.sha || args["status-sha"] || "");
@@ -2041,11 +2115,18 @@ async function finalizePreparationFailure(args, config) {
       marker: config.comments.proof,
       body: proofBody(result, [], null)
     });
-    const changes = proofLabelChanges(config, result.status);
-    labels = {
-      added: addLabels(config, failure.targetNumber, changes.add),
-      removed: removeLabels(config, failure.targetNumber, changes.remove)
-    };
+    labels = applyProofLabelUpdates(
+      config,
+      proofLabelUpdates(
+        config,
+        {
+          kind: failure.targetKind,
+          number: failure.targetNumber,
+          sourceNumber: null
+        },
+        result.status
+      )
+    );
   }
   writeTerminalMarker(
     args["terminal-marker"],

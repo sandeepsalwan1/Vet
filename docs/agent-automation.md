@@ -16,8 +16,9 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 - `agent:implement`: recommended one-label entry; record a zero-model trusted intent seal, then implement the issue on an agent branch and draft PR.
 - `agent:review`: review or fix an agent-created PR and publish a recommendation.
 - `agent:proof`: require explicit proof before automerge.
+- `agent:proof-failed`: terminal exact-head proof failed; a later passing proof removes this proof-owned blocker.
 - `agent:automerge`: allow merge only after every configured gate passes.
-- `agent:blocked`: human input or a failed gate blocks automation.
+- `agent:blocked`: human input or a non-proof workflow failure blocks automation.
 - `priority:high`: manual review required.
 - `priority:trivial`: owner opt-in for trivial low-risk work; skip the paid no-mistakes model gate while keeping exact-head CI and agent review.
 - `priority:low`: small, low-risk work.
@@ -192,7 +193,8 @@ gh workflow run agent-skip-no-mistakes.yml \
 
 Only the repository owner can run this bypass.
 CI, agent review, requested proof, trust checks, risk policy, and exact-head automerge remain required.
-The pull request must already have `agent:automerge` and must not have `agent:blocked`.
+The pull request must already have `agent:automerge`.
+Neither the pull request nor its source issue may carry a configured automerge blocker, including `agent:blocked` or `agent:proof-failed`.
 The bypass never clears a shared review, proof, triage, or no-mistakes block.
 Use the approved no-mistakes rerun for an existing `ask-user` block.
 Any new PR commit invalidates the bypass because commit statuses are head-scoped.
@@ -249,13 +251,20 @@ Protected staff interactions require a staff-capable demo session.
 `click` and `fill` use executable CSS selectors; `clickText` selects a CSS element type and visible text without Playwright-only selector syntax.
 A task that clicks save or submit must first exercise the form-control change that enables the action.
 The proof plan may use an existing static app route without modifying that page merely to mark it affected.
+When a validated proof plan exists, its route-bound tasks define the browser execution routes; shared layout or stylesheet changes do not require unrelated page captures.
+An explicit manual proof route is valid only when every planned task uses that route; otherwise preparation fails before provider acquisition.
 When a protected data-backed screen cannot run without disposable external state, implementation provides a localhost-only deterministic harness for the same user-visible component behavior.
 When an acceptance clause explicitly names a sealed route, its proof task must exercise that route.
 For visible text assertions whose model-generated selector is one heading level, the driver accepts the same text on any visible `h1` through `h6`.
 The heading level is a locator preference; the sealed route and acceptance text remain exact.
 Bounded implementation repair receives a trusted browser-clause allowlist and may not move deterministic-only or service-only clauses into browser proof.
 For GIF proof, recording starts before browser navigation or user action so transient states are captured instead of only the settled page.
-The lane checks each affected route, desktop health, actual provider, lease, route-bound media, every acceptance clause, intermediate assertions, final assertions, and anti-cheat observations.
+Each intermediate assertion stops polling once observed, so later actions cannot wait away a transient final state.
+The lane checks each planned execution route, desktop health, actual provider, lease, route-bound media, every acceptance clause, intermediate assertion, final assertion, and anti-cheat observation.
+Terminal proof failures use the dedicated `agent:proof-failed` label instead of changing the shared `agent:blocked` or `agent:automerge` policy labels.
+If proof exits without publishing a successful terminal result, the terminal workflow reconciles that blocker only after verifying the current pull request head.
+Bounded semantic repair may continue while that blocker remains.
+A later passing exact-head proof removes the proof-owned label idempotently from the pull request and its trusted source issue before automerge reevaluates the pull request.
 Published multi-route bundles bind digests by exact artifact-relative path before using a unique-basename fallback, so repeated route-local filenames do not conflict.
 The managed GitHub comment links the downloadable Actions artifact and keeps runner-only paths in a collapsed diagnostic section.
 Visual proof fails closed when the proof plan is incomplete, behavior assertions fail, a clause is missing, or no reviewable artifact URL is published.
@@ -326,7 +335,10 @@ Successful low-risk completion has these observable results:
 - the linked issue is closed;
 - temporary `agent:*` labels are removed while priority labels remain.
 
-`agent:blocked` means the bounded repair or infrastructure retries are exhausted, required proof failed, or a real human decision remains.
+`agent:proof-failed` means required exact-head proof failed.
+Leave an active automatic semantic repair cycle alone.
+If the label remains after automatic recovery stops, read the newest managed proof and review comments, resolve the reported blocker, then rerun proof on the unchanged current head.
+`agent:blocked` means bounded repair or infrastructure retries are exhausted, or a real human decision remains.
 Read the newest managed agent comment, answer the decision, or use the exact-head approval path only for the specific approved no-mistakes decision.
 
 ### Readiness And Recovery

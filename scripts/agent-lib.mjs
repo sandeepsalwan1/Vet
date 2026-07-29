@@ -1024,14 +1024,28 @@ export function addLabels(config, number, labels, dryRun = false) {
   return applied;
 }
 
-export function removeLabels(config, number, labels, dryRun = false) {
+export function removeLabels(config, number, labels, dryRun = false, dependencies = {}) {
+  const editIssue = dependencies.gh ?? gh;
+  const readIssue = dependencies.ghApiJson ?? ghApiJson;
   const removed = [];
   for (const label of labels.filter(Boolean)) {
     if (dryRun) {
       removed.push(label);
       continue;
     }
-    gh(["issue", "edit", String(number), "--repo", repoSlug(config), "--remove-label", label], { check: false });
+    const result = editIssue(
+      ["issue", "edit", String(number), "--repo", repoSlug(config), "--remove-label", label],
+      { check: false }
+    );
+    if (result.status !== 0) {
+      const issue = readIssue(`repos/${config.repo.owner}/${config.repo.name}/issues/${number}`);
+      if (issueLabels(issue).includes(label)) {
+        throw new AgentError(`failed to remove label ${label} from #${number}`, 1, {
+          status: result.status,
+          stderr: String(result.stderr ?? "").trim()
+        });
+      }
+    }
     removed.push(label);
   }
   return removed;

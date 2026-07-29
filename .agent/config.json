@@ -74,6 +74,7 @@
     "implement": "agent:implement",
     "review": "agent:review",
     "proof": "agent:proof",
+    "proofFailed": "agent:proof-failed",
     "automerge": "agent:automerge",
     "blocked": "agent:blocked",
     "postMergeFailed": "agent:post-merge-failed",
@@ -237,7 +238,8 @@
     ],
     "blockedLabels": [
       "priority:high",
-      "agent:blocked"
+      "agent:blocked",
+      "agent:proof-failed"
     ],
     "requiredChecks": [
       "quality",

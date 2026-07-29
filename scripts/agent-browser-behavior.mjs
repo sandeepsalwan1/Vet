@@ -369,17 +369,30 @@ export async function runTask(client, payload, task) {
         task.intermediateAssertions.length &&
         ["navigate", "click", "clickText", "press"].includes(action.type)
       ) {
+        if (!intermediate.length) {
+          intermediate = task.intermediateAssertions.map((assertion) => ({
+            assertion: assertionLabel(assertion),
+            passed: false
+          }));
+        }
+        const pendingIndexes = intermediate
+          .map((result, index) => (result.passed ? -1 : index))
+          .filter((index) => index !== -1);
+        if (!pendingIndexes.length) continue;
         const observed = await waitForAssertions(
           client,
-          task.intermediateAssertions,
+          pendingIndexes.map(
+            (index) => task.intermediateAssertions[index]
+          ),
           intermediateAssertionTimeout(actions.length, actionIndex)
         );
-        intermediate = intermediate.length
-          ? intermediate.map((prior, index) => ({
-              ...prior,
-              passed: prior.passed || observed[index]?.passed
-            }))
-          : observed;
+        for (const [observedIndex, result] of observed.entries()) {
+          const intermediateIndex = pendingIndexes[observedIndex];
+          intermediate[intermediateIndex] = {
+            ...intermediate[intermediateIndex],
+            passed: result.passed
+          };
+        }
       }
     }
   } catch (error) {
