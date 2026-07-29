@@ -261,6 +261,8 @@ Bounded implementation repair receives a trusted browser-clause allowlist and ma
 For GIF proof, recording starts before browser navigation or user action so transient states are captured instead of only the settled page.
 Each intermediate assertion stops polling once observed, so later actions cannot wait away a transient final state.
 The lane checks each planned execution route, desktop health, actual provider, lease, route-bound media, every acceptance clause, intermediate assertion, final assertion, and anti-cheat observation.
+Proof selection keeps the strongest compatible tier from trusted source triage, target triage, and review metadata.
+A later review can increase proof but cannot weaken the source issue's sealed requirement; incomparable service and browser requests fail closed for explicit evidence routing.
 Terminal proof failures use the dedicated `agent:proof-failed` label instead of changing the shared `agent:blocked` or `agent:automerge` policy labels.
 If proof exits without publishing a successful terminal result, the terminal workflow reconciles that blocker only after verifying the current pull request head.
 Bounded semantic repair may continue while that blocker remains.
@@ -416,7 +418,7 @@ This is the duplicate-model boundary for interruption recovery.
 Normal automerge requires CI checks `quality`, `build`, `scenarios`, `audit`, and `dependency-review`, plus `agent-review`, `agent-cost`, and `no-mistakes` statuses.
 The `priority:trivial` lane requires the same CI and review but omits no-mistakes only when the pre-model validation artifact, immutable PR commit seal, PR metadata, current issue, and current PR all carry that label.
 An exact-head `no-mistakes-bypass` status also permits omission only after a repository-owner manual workflow verifies CI and agent review.
-`agent-proof` is also required when trusted labels or managed triage request visual proof.
+`agent-proof` is also required when trusted labels or managed triage request browser or service proof.
 After an agent PR merges, automerge explicitly dispatches baseline CI, CodeQL, and trusted Render verification against the exact merge commit.
 This explicit dispatch is required because GitHub suppresses recursive workflow events caused by its workflow token.
 Merge-commit CI does not redispatch automerge.

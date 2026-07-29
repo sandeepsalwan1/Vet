@@ -238,8 +238,24 @@ export function structuredProofKind(config, details) {
     managedJson(details.comments, config.comments.review, config.repo?.owner)?.proofNeeded,
     managedJson(details.source?.comments, config.comments.triage, config.repo?.owner)?.proofNeeded,
     managedJson(details.comments, config.comments.triage, config.repo?.owner)?.proofNeeded
-  ];
-  return candidates.find((value) => PROOF_KINDS.has(value)) ?? null;
+  ].filter((value) => PROOF_KINDS.has(value));
+  const browserKinds = candidates.filter((value) =>
+    ["UI", "GIF"].includes(value)
+  );
+  if (candidates.includes("service") && browserKinds.length) {
+    throw new AgentError(
+      "conflicting service and browser proof requests require explicit evidence routing",
+      1
+    );
+  }
+  if (candidates.includes("service")) return "service";
+  return candidates.reduce((strongest, candidate) => {
+    if (!strongest) return candidate;
+    return INTENT_PROOF_KINDS.indexOf(candidate) >
+      INTENT_PROOF_KINDS.indexOf(strongest)
+      ? candidate
+      : strongest;
+  }, null);
 }
 
 export function isProofRequested(config, details, explicit = false) {
