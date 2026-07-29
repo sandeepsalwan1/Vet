@@ -418,7 +418,7 @@ This is the duplicate-model boundary for interruption recovery.
 Normal automerge requires CI checks `quality`, `build`, `scenarios`, `audit`, and `dependency-review`, plus `agent-review`, `agent-cost`, and `no-mistakes` statuses.
 The `priority:trivial` lane requires the same CI and review but omits no-mistakes only when the pre-model validation artifact, immutable PR commit seal, PR metadata, current issue, and current PR all carry that label.
 An exact-head `no-mistakes-bypass` status also permits omission only after a repository-owner manual workflow verifies CI and agent review.
-`agent-proof` is also required when trusted labels or managed triage request visual proof.
+`agent-proof` is also required when trusted labels or managed triage request browser or service proof.
 After an agent PR merges, automerge explicitly dispatches baseline CI, CodeQL, and trusted Render verification against the exact merge commit.
 This explicit dispatch is required because GitHub suppresses recursive workflow events caused by its workflow token.
 Merge-commit CI does not redispatch automerge.
