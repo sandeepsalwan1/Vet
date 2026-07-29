@@ -43,7 +43,7 @@ Vet: one deployed Next.js app, Postgres-backed npm workspace.
 - One-head owner bypass: run `Agent Skip no-mistakes` with the exact PR head SHA; CI, review, proof, and merge policy remain required.
 - No manual branch or push is required.
 - Intentional manual bypass: a repository-owner direct push is outside the AFK loop; `[skip ci]` also skips push-triggered Actions.
-- Return only when `agent:blocked` requests a decision or reports a failed gate.
+- Return only when `agent:blocked` or `agent:proof-failed` reports an actionable decision or failed gate.
 - Full operation, recovery, and exact-head approval steps: `docs/agent-automation.md`.
 
 ## Architecture Rules

@@ -193,7 +193,8 @@ gh workflow run agent-skip-no-mistakes.yml \
 
 Only the repository owner can run this bypass.
 CI, agent review, requested proof, trust checks, risk policy, and exact-head automerge remain required.
-The pull request must already have `agent:automerge` and must not have `agent:blocked`.
+The pull request must already have `agent:automerge`.
+Neither the pull request nor its source issue may carry a configured automerge blocker, including `agent:blocked` or `agent:proof-failed`.
 The bypass never clears a shared review, proof, triage, or no-mistakes block.
 Use the approved no-mistakes rerun for an existing `ask-user` block.
 Any new PR commit invalidates the bypass because commit statuses are head-scoped.
