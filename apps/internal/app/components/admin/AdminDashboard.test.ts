@@ -9,8 +9,10 @@ test("admin logo reveals sparkles after five clicks", () => {
   const source = readSource("./AdminDashboard.tsx");
 
   assert.match(source, /const \[logoClicks, setLogoClicks\] = useState\(0\);/);
-  assert.match(source, /if \(logoClicks !== 5\) return;/);
-  assert.match(source, /setLogoClicks\(0\);/);
+  assert.match(source, /const logoClicksRef = useRef\(0\);/);
+  assert.match(source, /function triggerSparkles\(\) {/);
+  assert.match(source, /if \(nextClicks === 5\) {/);
+  assert.match(source, /logoClicksRef\.current = 0;/);
   assert.match(source, /setSparklesVisible\(true\);/);
   assert.match(source, /sparklesVisible \? <MiniConfetti key=\{sparklesKey\} \/> : null/);
 });

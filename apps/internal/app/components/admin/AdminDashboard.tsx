@@ -29,6 +29,7 @@ export function AdminDashboard({ session, onLogout, onOpenBoard }: Props) {
   const [logoClicks, setLogoClicks] = useState(0);
   const [sparklesKey, setSparklesKey] = useState(0);
   const [sparklesVisible, setSparklesVisible] = useState(false);
+  const logoClicksRef = useRef(0);
   const sparklesTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -39,10 +40,7 @@ export function AdminDashboard({ session, onLogout, onOpenBoard }: Props) {
     };
   }, []);
 
-  useEffect(() => {
-    if (logoClicks !== 5) return;
-
-    setLogoClicks(0);
+  function triggerSparkles() {
     setSparklesKey((currentKey) => currentKey + 1);
     setSparklesVisible(true);
     if (sparklesTimeoutRef.current !== null) {
@@ -52,7 +50,7 @@ export function AdminDashboard({ session, onLogout, onOpenBoard }: Props) {
       setSparklesVisible(false);
       sparklesTimeoutRef.current = null;
     }, 900);
-  }, [logoClicks]);
+  }
 
   const {
     activeTasks,
@@ -86,7 +84,15 @@ export function AdminDashboard({ session, onLogout, onOpenBoard }: Props) {
   }
 
   function handleLogoClick() {
-    setLogoClicks((current) => current + 1);
+    const nextClicks = logoClicksRef.current + 1;
+    if (nextClicks === 5) {
+      logoClicksRef.current = 0;
+      setLogoClicks(0);
+      triggerSparkles();
+      return;
+    }
+    logoClicksRef.current = nextClicks;
+    setLogoClicks(nextClicks);
   }
 
   const today = new Date().toLocaleDateString("en-US", {
