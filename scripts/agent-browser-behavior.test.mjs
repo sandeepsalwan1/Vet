@@ -193,3 +193,39 @@ test("intermediate observations wait fully only after the final action", () => {
   assert.equal(intermediateAssertionTimeout(4, 2), 250);
   assert.equal(intermediateAssertionTimeout(4, 3), 4_000);
 });
+
+test("browser task does not wait away a transient final state by rechecking proven intermediates", async () => {
+  let hiddenChecks = 0;
+  const task = {
+    clauseIds: ["AC1"],
+    route: "/staff",
+    session: "none",
+    actions: [
+      { type: "click", selector: "button[data-logo]" },
+      { type: "click", selector: "button[data-logo]" }
+    ],
+    intermediateAssertions: [
+      { type: "hidden", selector: ".miniConfetti" }
+    ],
+    finalAssertions: [
+      { type: "visible", selector: ".miniConfetti" }
+    ]
+  };
+  const client = {
+    async send(method, params = {}) {
+      if (method !== "Runtime.evaluate") return {};
+      if (params.expression.includes("element.click()")) {
+        return { result: { value: true } };
+      }
+      if (params.expression.startsWith("!")) {
+        hiddenChecks += 1;
+      }
+      return { result: { value: true } };
+    }
+  };
+
+  const result = await runTask(client, payload, task);
+
+  assert.equal(result.status, "pass");
+  assert.equal(hiddenChecks, 1);
+});

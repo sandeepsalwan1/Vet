@@ -249,13 +249,16 @@ Protected staff interactions require a staff-capable demo session.
 `click` and `fill` use executable CSS selectors; `clickText` selects a CSS element type and visible text without Playwright-only selector syntax.
 A task that clicks save or submit must first exercise the form-control change that enables the action.
 The proof plan may use an existing static app route without modifying that page merely to mark it affected.
+When a validated proof plan exists, its route-bound tasks define the browser execution routes; shared layout or stylesheet changes do not require unrelated page captures.
+An explicit manual proof route is valid only when every planned task uses that route; otherwise preparation fails before provider acquisition.
 When a protected data-backed screen cannot run without disposable external state, implementation provides a localhost-only deterministic harness for the same user-visible component behavior.
 When an acceptance clause explicitly names a sealed route, its proof task must exercise that route.
 For visible text assertions whose model-generated selector is one heading level, the driver accepts the same text on any visible `h1` through `h6`.
 The heading level is a locator preference; the sealed route and acceptance text remain exact.
 Bounded implementation repair receives a trusted browser-clause allowlist and may not move deterministic-only or service-only clauses into browser proof.
 For GIF proof, recording starts before browser navigation or user action so transient states are captured instead of only the settled page.
-The lane checks each affected route, desktop health, actual provider, lease, route-bound media, every acceptance clause, intermediate assertions, final assertions, and anti-cheat observations.
+Each intermediate assertion stops polling once observed, so later actions cannot wait away a transient final state.
+The lane checks each planned execution route, desktop health, actual provider, lease, route-bound media, every acceptance clause, intermediate assertion, final assertion, and anti-cheat observation.
 Published multi-route bundles bind digests by exact artifact-relative path before using a unique-basename fallback, so repeated route-local filenames do not conflict.
 The managed GitHub comment links the downloadable Actions artifact and keeps runner-only paths in a collapsed diagnostic section.
 Visual proof fails closed when the proof plan is incomplete, behavior assertions fail, a clause is missing, or no reviewable artifact URL is published.

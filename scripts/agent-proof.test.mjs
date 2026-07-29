@@ -31,6 +31,7 @@ import {
   validatePublishedMedia,
   validatePublishedMediaOutcome,
   validateVisualBehaviorPlan,
+  visualRoutes,
   visualServerCommand
 } from "./agent-proof.mjs";
 
@@ -198,6 +199,69 @@ test("explicit visual route is local, static, and normalized", () => {
   assert.deepEqual(deriveAffectedRoutes([], "/staff/tasks/"), ["/staff/tasks"]);
   assert.throws(() => deriveAffectedRoutes([], "https://example.com"), /unsafe or non-UI/);
   assert.throws(() => deriveAffectedRoutes([], "/api/tasks"), /unsafe or non-UI/);
+});
+
+test("visual execution follows the proof plan instead of unrelated shared-file routes", () => {
+  const proofPlan = {
+    version: 1,
+    tasks: [
+      {
+        clauseIds: ["AC1"],
+        route: "/staff",
+        actions: [{ type: "navigate", path: "/staff" }],
+        intermediateAssertions: [{ type: "hidden", selector: ".miniConfetti" }],
+        finalAssertions: [{ type: "visible", selector: ".miniConfetti" }],
+        session: "demo-admin"
+      }
+    ]
+  };
+  const proofDetails = details({
+    files: [
+      {
+        filename: "apps/internal/app/globals.css",
+        status: "modified"
+      }
+    ],
+    intentCapsule: {
+      behaviorContract: {
+        routes: []
+      }
+    },
+    implementationAddendum: {
+      intentAddendum: {
+        proofPlan
+      }
+    }
+  });
+
+  assert.deepEqual(deriveAffectedRoutes(proofDetails.files), ["/"]);
+  assert.deepEqual(visualRoutes(proofDetails), ["/staff"]);
+  assert.deepEqual(visualRoutes(proofDetails, "/staff"), ["/staff"]);
+  assert.throws(
+    () => visualRoutes(proofDetails, "/proof/loading"),
+    /explicit proof route \/proof\/loading does not match the implementation browser plan/
+  );
+});
+
+test("visual execution falls back to sealed and affected routes without a plan", () => {
+  assert.deepEqual(
+    visualRoutes(
+      details({
+        files: [
+          {
+            filename: "apps/internal/app/globals.css",
+            status: "modified"
+          }
+        ],
+        intentCapsule: {
+          behaviorContract: {
+            routes: ["/proof/loading"]
+          }
+        }
+      })
+    ),
+    ["/", "/proof/loading"]
+  );
 });
 
 test("visual behavior plan covers every sealed clause and GIF transition", () => {
