@@ -267,12 +267,29 @@ function implementationProofPlan(details) {
   );
 }
 
-function visualRoutes(details, explicitRoute = "") {
-  const routes = [
-    ...deriveAffectedRoutes(details.files, explicitRoute),
-    ...(proofContract(details)?.routes ?? []),
-    ...implementationProofPlan(details).tasks.map((task) => task.route)
-  ];
+export function visualRoutes(details, explicitRoute = "") {
+  const plannedRoutes = implementationProofPlan(details).tasks.map(
+    (task) => task.route
+  );
+  const explicitRoutes = deriveAffectedRoutes([], explicitRoute);
+  if (
+    explicitRoutes.length &&
+    plannedRoutes.some((route) => route !== explicitRoutes[0])
+  ) {
+    throw new AgentError(
+      `explicit proof route ${explicitRoutes[0]} does not match the implementation browser plan`,
+      1
+    );
+  }
+  let routes = plannedRoutes;
+  if (!routes.length) {
+    routes = explicitRoutes.length
+      ? explicitRoutes
+      : [
+          ...deriveAffectedRoutes(details.files),
+          ...(proofContract(details)?.routes ?? [])
+        ];
+  }
   return [...new Set(routes)].sort();
 }
 
