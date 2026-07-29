@@ -21,6 +21,7 @@ import {
   mayMutateProofTarget,
   proofBody,
   proofLabelChanges,
+  proofLabelUpdates,
   proofRepairEligible,
   preparationFailureRecord,
   resolveTerminalResult,
@@ -588,7 +589,6 @@ test("proof preparation failure preserves the primary blocker without request de
 test("proof owns a dedicated failure label and never mutates shared policy labels", () => {
   const passing = proofLabelChanges(config, "passed");
   const failing = proofLabelChanges(config, "failed");
-  const repairing = proofLabelChanges(config, "failed", { repairing: true });
 
   assert.deepEqual(passing, {
     add: [],
@@ -598,13 +598,48 @@ test("proof owns a dedicated failure label and never mutates shared policy label
     add: [config.labels.proofFailed],
     remove: [],
   });
-  assert.deepEqual(repairing, { add: [], remove: [] });
-  for (const changes of [passing, failing, repairing]) {
+  for (const changes of [passing, failing]) {
     assert.equal(changes.add.includes(config.labels.blocked), false);
     assert.equal(changes.remove.includes(config.labels.blocked), false);
     assert.equal(changes.add.includes(config.labels.automerge), false);
     assert.equal(changes.remove.includes(config.labels.automerge), false);
   }
+});
+
+test("passing PR proof clears proof-owned blockers from the PR and source issue", () => {
+  assert.deepEqual(
+    proofLabelUpdates(
+      config,
+      { kind: "pr", number: 76, sourceNumber: 42 },
+      "passed",
+    ),
+    [
+      {
+        number: 76,
+        add: [],
+        remove: [config.labels.proofFailed],
+      },
+      {
+        number: 42,
+        add: [],
+        remove: [config.labels.proofFailed],
+      },
+    ],
+  );
+  assert.deepEqual(
+    proofLabelUpdates(
+      config,
+      { kind: "pr", number: 76, sourceNumber: 42 },
+      "failed",
+    ),
+    [
+      {
+        number: 76,
+        add: [config.labels.proofFailed],
+        remove: [],
+      },
+    ],
+  );
 });
 
 test("only exact-head failed behavior proof enters automatic semantic repair", () => {
