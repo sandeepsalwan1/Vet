@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { isLocalProofHost } from "./_proofHost";
+import { isLocalProofHost } from "../_proofHost";
 import { ProofLoadingView } from "./ProofLoadingView";
 
 export default async function ProofLoadingPage() {
