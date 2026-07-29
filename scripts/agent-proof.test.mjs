@@ -1098,10 +1098,12 @@ test("proof workflow dispatches automerge only after terminal success is publish
   );
   const finalizeJob = workflow.slice(workflow.indexOf("\n  finalize:"));
   const statusIndex = workflow.indexOf("gh api \"repos/$GITHUB_REPOSITORY/statuses/$STATUS_SHA\"");
+  const blockerIndex = workflow.indexOf("name: Reconcile terminal proof blocker");
   const repairIndex = workflow.indexOf("gh workflow run agent-review.yml");
   const dispatchIndex = workflow.indexOf("gh workflow run agent-automerge.yml");
 
   assert.ok(statusIndex >= 0);
+  assert.ok(blockerIndex > statusIndex);
   assert.ok(repairIndex > statusIndex);
   assert.ok(dispatchIndex > statusIndex);
   assert.match(finalizeJob, /pull-requests: write/);
@@ -1155,6 +1157,17 @@ test("proof workflow dispatches automerge only after terminal success is publish
   assert.match(crabboxAction, /crabbox_0\.40\.0_linux_amd64\.tar\.gz/);
   assert.doesNotMatch(`${workflow}\n${crabboxAction}`, /0\.38\.4/);
   assert.match(workflow, /steps\.terminal\.outputs\.state == 'success'/);
+  assert.match(
+    finalizeJob,
+    /\(inputs\.target-kind == 'pr' &&\s+steps\.terminal\.outputs\.state != 'success'\)/
+  );
+  assert.match(
+    finalizeJob,
+    /\(inputs\.target-kind == 'issue' &&\s+steps\.finalize\.outcome != 'success'\)/
+  );
+  assert.match(finalizeJob, /expected_sha="\$\{STATUS_SHA:-\$REQUESTED_HEAD_SHA\}"/);
+  assert.match(finalizeJob, /test "\$current_sha" = "\$expected_sha"/);
+  assert.match(finalizeJob, /--add-label agent:proof-failed/);
   assert.match(workflow, /artifact_url: \$\{\{ steps\.artifact\.outputs\.artifact-url \}\}/);
   assert.match(workflow, /--artifact-url "\$artifact_url"/);
   assert.match(finalizeJob, /--cost-outcome-file "\$COST_OUTCOME_FILE"/);
