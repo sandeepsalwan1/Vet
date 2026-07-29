@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { isLocalProofHost } from "../loading/_proofHost";
+import { isLocalProofHost } from "../_proofHost";
 import { ProofNotificationSaveView } from "./ProofNotificationSaveView";
 
 export default async function ProofNotificationSavePage() {

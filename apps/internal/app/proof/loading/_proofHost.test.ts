@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isLocalProofHost } from "./_proofHost";
+import { isLocalProofHost } from "../_proofHost";
 
 test("allows localhost proof hosts with or without a port", () => {
   assert.equal(isLocalProofHost("localhost"), true);
