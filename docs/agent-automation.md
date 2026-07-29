@@ -18,7 +18,7 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
 - `agent:proof`: require explicit proof before automerge.
 - `agent:proof-failed`: exact-head proof failed; a later passing proof removes this proof-owned blocker.
 - `agent:automerge`: allow merge only after every configured gate passes.
-- `agent:blocked`: human input or a failed gate blocks automation.
+- `agent:blocked`: human input or a non-proof workflow failure blocks automation.
 - `priority:high`: manual review required.
 - `priority:trivial`: owner opt-in for trivial low-risk work; skip the paid no-mistakes model gate while keeping exact-head CI and agent review.
 - `priority:low`: small, low-risk work.
@@ -332,7 +332,8 @@ Successful low-risk completion has these observable results:
 - the linked issue is closed;
 - temporary `agent:*` labels are removed while priority labels remain.
 
-`agent:blocked` means the bounded repair or infrastructure retries are exhausted, required proof failed, or a real human decision remains.
+`agent:proof-failed` means required exact-head proof failed; rerun proof on the current exact head after recovery.
+`agent:blocked` means bounded repair or infrastructure retries are exhausted, or a real human decision remains.
 Read the newest managed agent comment, answer the decision, or use the exact-head approval path only for the specific approved no-mistakes decision.
 
 ### Readiness And Recovery
