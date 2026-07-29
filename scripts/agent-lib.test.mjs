@@ -24,6 +24,7 @@ import {
   parseImplementationMetadata,
   privilegedCandidatePaths,
   publisherEnvironment,
+  removeLabels,
   resolveAgentTargetRoot,
   runCommand,
   skipsNoMistakesForCost,
@@ -62,6 +63,49 @@ test("publisher authentication stays process-scoped and validates its secret", (
   assert.throws(
     () => publisherEnvironment({ AGENT_GITHUB_TOKEN: "short" }),
     /missing or invalid AGENT_GITHUB_TOKEN/
+  );
+});
+
+test("label removal accepts only success or reconciled absence", () => {
+  const calls = [];
+  const dependencies = {
+    gh(args, options) {
+      calls.push({ args, options });
+      return { status: 1, stderr: "label update failed" };
+    },
+    ghApiJson() {
+      return { labels: [] };
+    }
+  };
+
+  assert.deepEqual(
+    removeLabels(config, 42, ["agent:proof-failed"], false, dependencies),
+    ["agent:proof-failed"]
+  );
+  assert.deepEqual(calls, [
+    {
+      args: [
+        "issue",
+        "edit",
+        "42",
+        "--repo",
+        "repo-owner/repo",
+        "--remove-label",
+        "agent:proof-failed"
+      ],
+      options: { check: false }
+    }
+  ]);
+
+  assert.throws(
+    () =>
+      removeLabels(config, 42, ["agent:proof-failed"], false, {
+        ...dependencies,
+        ghApiJson() {
+          return { labels: [{ name: "agent:proof-failed" }] };
+        }
+      }),
+    /failed to remove label agent:proof-failed from #42/
   );
 });
 
