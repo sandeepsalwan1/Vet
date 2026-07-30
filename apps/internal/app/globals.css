@@ -3716,6 +3716,37 @@ textarea:not([data-slot]):focus {
   font-style: italic;
 }
 
+.chatDogEgg {
+  position: sticky;
+  bottom: 10px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.chatDogEggCard {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(22, 131, 74, 0.22);
+  color: var(--green-strong);
+  box-shadow: 0 10px 24px rgba(17, 43, 30, 0.12);
+  font-size: 12px;
+  font-weight: 700;
+  animation: dogEggPop 1.6s ease both;
+}
+
+@keyframes dogEggPop {
+  0% { opacity: 0; transform: translateY(10px) scale(0.92); }
+  15% { opacity: 1; transform: translateY(0) scale(1); }
+  75% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-6px) scale(0.98); }
+}
+
 /* Chat composer */
 .chatComposer {
   display: flex;
