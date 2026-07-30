@@ -10,7 +10,7 @@ import {
   issueSnapshotSha256
 } from "./agent-lib.mjs";
 
-export const INTENT_CAPSULE_VERSION = 5;
+export const INTENT_CAPSULE_VERSION = 6;
 export const IMPLEMENTATION_RESULT_VERSION = 1;
 export const IMPLEMENTATION_ADDENDUM_MARKER =
   "<!-- agent-intent-addendum:v1 -->";
@@ -32,6 +32,7 @@ const BEHAVIOR_CONTRACT_VERSION = 2;
 const STABLE_INTENT_LABEL_VERSION = 3;
 const EVIDENCE_LANE_CONTRACT_VERSION = 4;
 const REFINED_EVIDENCE_LANE_CONTRACT_VERSION = 5;
+const PROOF_RESULT_TRANSIENT_LABEL_VERSION = 6;
 export const BASE_TRIAGE_FIELDS = Object.freeze([
   "value",
   "priority",
@@ -659,20 +660,36 @@ function capsulePayload(capsule) {
   return payload;
 }
 
-function stableIntentLabels(issue) {
+function stableIntentLabels(issue, version) {
   return [...new Set(issueLabels(issue))]
-    .filter((label) => !TRANSIENT_INTENT_LABELS.has(label))
+    .filter(
+      (label) =>
+        !TRANSIENT_INTENT_LABELS.has(label) &&
+        !(
+          version >= PROOF_RESULT_TRANSIENT_LABEL_VERSION &&
+          label === "agent:proof-failed"
+        )
+    )
     .sort();
 }
 
 function legacyIntentIssues(issue, decision) {
   const currentLabels = [...new Set(issueLabels(issue))].sort();
-  const labelSets = [currentLabels];
+  const labelSets = [];
+  const addProofResultVariants = (labels) => {
+    const normalized = [...new Set(labels)].sort();
+    labelSets.push(
+      normalized,
+      normalized.filter((label) => label !== "agent:proof-failed"),
+      [...new Set([...normalized, "agent:proof-failed"])].sort()
+    );
+  };
+  addProofResultVariants(currentLabels);
   if (decision.automationDecision === "implement") {
     const activeLabels = new Set(currentLabels);
     activeLabels.add("agent:implement");
     activeLabels.delete("agent:blocked");
-    labelSets.push([...activeLabels].sort());
+    addProofResultVariants([...activeLabels]);
   }
   return labelSets
     .filter(
@@ -907,7 +924,7 @@ export function createIntentCapsuleVersion({
     issueSnapshotSha256: issueSnapshotSha256(issue),
     sourceLabels:
       version >= STABLE_INTENT_LABEL_VERSION
-        ? stableIntentLabels(issue)
+        ? stableIntentLabels(issue, version)
         : [...new Set(issueLabels(issue))].sort(),
     title,
     body,
@@ -971,6 +988,7 @@ export function validateIntentCapsule(capsule) {
       BEHAVIOR_CONTRACT_VERSION,
       STABLE_INTENT_LABEL_VERSION,
       EVIDENCE_LANE_CONTRACT_VERSION,
+      REFINED_EVIDENCE_LANE_CONTRACT_VERSION,
       INTENT_CAPSULE_VERSION
     ].includes(capsule.version) ||
     !Number.isSafeInteger(capsule.sourceIssue) ||
@@ -1220,6 +1238,7 @@ export function intentCapsuleForManagedTriage({
   }
   for (const legacyIssue of legacyIntentIssues(issue, decision)) {
     for (const version of [
+      REFINED_EVIDENCE_LANE_CONTRACT_VERSION,
       EVIDENCE_LANE_CONTRACT_VERSION,
       STABLE_INTENT_LABEL_VERSION,
       BEHAVIOR_CONTRACT_VERSION,

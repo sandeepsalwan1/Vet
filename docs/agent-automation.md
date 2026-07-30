@@ -263,6 +263,8 @@ Each intermediate assertion stops polling once observed, so later actions cannot
 The lane checks each planned execution route, desktop health, actual provider, lease, route-bound media, every acceptance clause, intermediate assertion, final assertion, and anti-cheat observation.
 Proof selection keeps the strongest compatible tier from trusted source triage, target triage, and review metadata.
 A later review can increase proof but cannot weaken the source issue's sealed requirement; incomparable service and browser requests fail closed for explicit evidence routing.
+`agent:proof-failed` is workflow result state, not source intent, so adding or removing it cannot change an existing intent seal.
+Intent capsule v6 applies this rule while retaining v5 reconstruction for seals created before the distinction.
 Terminal proof failures use the dedicated `agent:proof-failed` label instead of changing the shared `agent:blocked` or `agent:automerge` policy labels.
 If proof exits without publishing a successful terminal result, the terminal workflow reconciles that blocker only after verifying the current pull request head.
 Bounded semantic repair may continue while that blocker remains.

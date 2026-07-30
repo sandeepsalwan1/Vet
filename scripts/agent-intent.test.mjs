@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   IMPLEMENTATION_ADDENDUM_MARKER,
+  INTENT_CAPSULE_VERSION,
   browserProofRequirements,
   clauseEvidenceLanes,
   createIntentCapsule,
@@ -110,7 +111,7 @@ test("intent capsule binds issue, requirements, clarifications, transcript, and 
   assert.deepEqual(capsule.explicitExclusions, ["Do not expose private findings."]);
   assert.equal(capsule.transcriptContext.sourceDigest, "a".repeat(64));
   assert.equal(capsule.ownerClarifications[0].commentId, 55);
-  assert.equal(capsule.version, 5);
+  assert.equal(capsule.version, INTENT_CAPSULE_VERSION);
   assert.deepEqual(capsule.behaviorContract.routes, ["/staff/tasks"]);
   assert.deepEqual(
     capsule.behaviorContract.checks.map((check) => check.id),
@@ -268,6 +269,201 @@ test("intent digest changes with owner clarification or policy", () => {
 
   assert.notEqual(base.intentDigest, clarified.intentDigest);
   assert.notEqual(base.intentDigest, higherRisk.intentDigest);
+});
+
+test("proof result labels do not mutate sealed source intent", () => {
+  const sourceIssue = issue({
+    labels: [{ name: "agent:proof" }, { name: "agent:automerge" }]
+  });
+  const sealed = createIntentCapsule({
+    issue: sourceIssue,
+    decision: decision({ proofNeeded: "GIF" })
+  });
+  const afterFailure = createIntentCapsule({
+    issue: {
+      ...sourceIssue,
+      labels: [...sourceIssue.labels, { name: "agent:proof-failed" }]
+    },
+    decision: decision({ proofNeeded: "GIF" })
+  });
+
+  assert.equal(afterFailure.intentDigest, sealed.intentDigest);
+  assert.deepEqual(afterFailure.sourceLabels, sealed.sourceLabels);
+});
+
+test("managed intent reconstruction preserves legacy v5 proof-result labels", () => {
+  const sourceIssue = issue({
+    labels: [
+      { name: "agent:proof" },
+      { name: "agent:automerge" },
+      { name: "agent:proof-failed" }
+    ]
+  });
+  const sourceDecision = decision({ proofNeeded: "GIF" });
+  const legacy = createIntentCapsuleVersion({
+    issue: sourceIssue,
+    decision: sourceDecision,
+    version: 5
+  });
+  const managedDecision = {
+    ...sourceDecision,
+    issueSnapshotSha256: legacy.issueSnapshotSha256,
+    ownerClarifications: [],
+    intentDigest: legacy.intentDigest
+  };
+  const triageComment = {
+    body: `<!-- agent-triage:v1 -->
+\`\`\`json
+${JSON.stringify(managedDecision)}
+\`\`\``
+  };
+
+  assert.deepEqual(legacy.sourceLabels, [
+    "agent:automerge",
+    "agent:proof",
+    "agent:proof-failed"
+  ]);
+  assert.equal(
+    intentCapsuleForManagedTriage({
+      issue: sourceIssue,
+      comments: [triageComment],
+      triageComment,
+      marker: "<!-- agent-triage:v1 -->",
+      repoOwner: "owner"
+    }).capsule.version,
+    5
+  );
+});
+
+test("managed intent reconstruction tolerates proof failure after a v5 seal", () => {
+  const sealedIssue = issue({
+    labels: [{ name: "agent:proof" }, { name: "agent:automerge" }]
+  });
+  const sourceDecision = decision({ proofNeeded: "GIF" });
+  const legacy = createIntentCapsuleVersion({
+    issue: sealedIssue,
+    decision: sourceDecision,
+    version: 5
+  });
+  const managedDecision = {
+    ...sourceDecision,
+    issueSnapshotSha256: legacy.issueSnapshotSha256,
+    ownerClarifications: [],
+    intentDigest: legacy.intentDigest
+  };
+  const triageComment = {
+    body: `<!-- agent-triage:v1 -->
+\`\`\`json
+${JSON.stringify(managedDecision)}
+\`\`\``
+  };
+
+  assert.equal(
+    intentCapsuleForManagedTriage({
+      issue: {
+        ...sealedIssue,
+        labels: [...sealedIssue.labels, { name: "agent:proof-failed" }]
+      },
+      comments: [triageComment],
+      triageComment,
+      marker: "<!-- agent-triage:v1 -->",
+      repoOwner: "owner"
+    }).capsule.version,
+    5
+  );
+});
+
+test("managed intent reconstruction tolerates proof recovery after a v5 seal", () => {
+  const failedIssue = issue({
+    labels: [
+      { name: "agent:proof" },
+      { name: "agent:automerge" },
+      { name: "agent:proof-failed" }
+    ]
+  });
+  const sourceDecision = decision({ proofNeeded: "GIF" });
+  const legacy = createIntentCapsuleVersion({
+    issue: failedIssue,
+    decision: sourceDecision,
+    version: 5
+  });
+  const managedDecision = {
+    ...sourceDecision,
+    issueSnapshotSha256: legacy.issueSnapshotSha256,
+    ownerClarifications: [],
+    intentDigest: legacy.intentDigest
+  };
+  const triageComment = {
+    body: `<!-- agent-triage:v1 -->
+\`\`\`json
+${JSON.stringify(managedDecision)}
+\`\`\``
+  };
+
+  assert.equal(
+    intentCapsuleForManagedTriage({
+      issue: {
+        ...failedIssue,
+        labels: failedIssue.labels.filter(
+          ({ name }) => name !== "agent:proof-failed"
+        )
+      },
+      comments: [triageComment],
+      triageComment,
+      marker: "<!-- agent-triage:v1 -->",
+      repoOwner: "owner"
+    }).capsule.version,
+    5
+  );
+});
+
+test("legacy implement cleanup composes with proof-result label drift", () => {
+  const sealedIssue = issue({
+    labels: [
+      { name: "agent:implement" },
+      { name: "agent:proof" },
+      { name: "agent:automerge" }
+    ]
+  });
+  const sourceDecision = decision({
+    automationDecision: "implement",
+    proofNeeded: "GIF"
+  });
+  const legacy = createIntentCapsuleVersion({
+    issue: sealedIssue,
+    decision: sourceDecision,
+    version: 2
+  });
+  const managedDecision = {
+    ...sourceDecision,
+    issueSnapshotSha256: legacy.issueSnapshotSha256,
+    ownerClarifications: [],
+    intentDigest: legacy.intentDigest
+  };
+  const triageComment = {
+    body: `<!-- agent-triage:v1 -->
+\`\`\`json
+${JSON.stringify(managedDecision)}
+\`\`\``
+  };
+
+  assert.equal(
+    intentCapsuleForManagedTriage({
+      issue: {
+        ...sealedIssue,
+        labels: [
+          { name: "agent:proof" },
+          { name: "agent:automerge" },
+          { name: "agent:proof-failed" }
+        ]
+      },
+      comments: [triageComment],
+      triageComment,
+      marker: "<!-- agent-triage:v1 -->",
+      repoOwner: "owner"
+    }).capsule.version,
+    2
+  );
 });
 
 test("managed triage parser requires one exact capsule-bound decision", () => {
