@@ -31,9 +31,9 @@ Do not ask the user to perform routine debugging, polling, approvals, reruns, or
 
 ## Current Handoff Snapshot
 
-This snapshot was refreshed on 2026-07-26 and must be reverified where state can drift.
+This snapshot was refreshed on 2026-07-29 and must be reverified where state can drift.
 
-- The production implementation is on `main` and uses Crabbox-only model lanes, scoped credential handoffs, structural project-skill discovery, sealed intent capsule v5, and backward-compatible v1 through v4 reconstruction.
+- The production implementation is on `main` and uses Crabbox-only model lanes, scoped credential handoffs, structural project-skill discovery, sealed intent capsule v6, and backward-compatible v1 through v5 reconstruction.
 - Review and no-mistakes share one three-revision semantic ledger, and every model lane publishes bounded per-call usage plus provider and issue-level cost accounting.
 - Source-blind UI and GIF proof binds browser actions, intermediate and final assertions, acceptance clauses, routes, exact heads, artifact digests, media validity, and anti-cheat probes.
 - Proof-required issue 75 and pull request 76 passed exact-head CI, CodeQL, review, no-mistakes, playable GIF verification, automatic merge, issue closure, branch deletion, and exact-merge post-merge health.
@@ -904,6 +904,9 @@ Terminal proof failures now use the dedicated `agent:proof-failed` label while b
 A later passing exact-head proof removes that proof-owned label idempotently from the pull request and its trusted source issue without changing human, triage, review, no-mistakes, or automerge policy labels.
 A stale-head recovery review then requested no additional proof and unintentionally downgraded the source issue's sealed `GIF` requirement to `CI`, producing only a screenshot on the final exact head.
 Proof selection now keeps the strongest compatible trusted request, so later review cannot weaken sealed source proof; incomparable service and browser requests fail closed for explicit evidence routing.
+A post-merge GIF replay then restored the sealed source labels, but the closed issue's automatic proof attempt added `agent:proof-failed` while the pull-request proof was running.
+Proof result labels are now excluded from stable intent labels, so workflow outcome state cannot invalidate the already sealed source request during finalization.
+Intent capsule v6 applies that rule while legacy v1 through v5 reconstruction accepts the exact historical state across proof-result and implementation-label transitions.
 
 ## Baseline Health And Workflow Approval
 
