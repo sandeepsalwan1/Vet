@@ -1,4 +1,5 @@
 import { AlertTriangle, BellRing, Calendar, Clock, Search } from "lucide-react";
+import type { ReactNode } from "react";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -41,6 +42,47 @@ interface PricingReportData {
 
 // ── Renderers ───────────────────────────────────────────────────────────────
 
+const OPS_DETAIL_DATE_OPTIONS = {
+  month: "short",
+  day: "numeric",
+} as const;
+
+function formatOpsDetailDate(value: string) {
+  return new Date(value).toLocaleDateString("en-US", OPS_DETAIL_DATE_OPTIONS);
+}
+
+function OpsDetailItem({
+  className,
+  icon,
+  title,
+  date,
+  body,
+  badge,
+}: {
+  className: string;
+  icon: ReactNode;
+  title: ReactNode;
+  date: ReactNode;
+  body: ReactNode;
+  badge: ReactNode;
+}) {
+  return (
+    <div className={className}>
+      <div className="opsDetailHeader">
+        <div className="opsDetailTitleGroup">
+          {icon}
+          <span className="opsDetailTitle">{title}</span>
+        </div>
+        <span className="opsDetailDate">{date}</span>
+      </div>
+      <div className="opsDetailBody">
+        <p className="opsDetailText">{body}</p>
+        {badge}
+      </div>
+    </div>
+  );
+}
+
 export function ApprovalsList({ approvals }: { approvals: ApprovalData[] }) {
   if (!approvals || approvals.length === 0) {
     return <p className="noDetailsNote">No pending approvals.</p>;
@@ -49,24 +91,15 @@ export function ApprovalsList({ approvals }: { approvals: ApprovalData[] }) {
   return (
     <div className="opsDetailList">
       {approvals.map((a) => (
-        <div key={a.id} className="opsDetailItem opsDetailItem--approval">
-          <div className="opsDetailHeader">
-            <div className="opsDetailTitleGroup">
-              <BellRing size={13} className="opsDetailIcon opsDetailIcon--bell" />
-              <span className="opsDetailTitle">{a.title}</span>
-            </div>
-            <span className="opsDetailDate">
-              {new Date(a.createdAt).toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-              })}
-            </span>
-          </div>
-          <div className="opsDetailBody">
-            <p className="opsDetailText">{a.summary}</p>
-            <span className="opsDetailBadge opsDetailBadge--pending">{a.status}</span>
-          </div>
-        </div>
+        <OpsDetailItem
+          key={a.id}
+          className="opsDetailItem opsDetailItem--approval"
+          icon={<BellRing size={13} className="opsDetailIcon opsDetailIcon--bell" />}
+          title={a.title}
+          date={formatOpsDetailDate(a.createdAt)}
+          body={a.summary}
+          badge={<span className="opsDetailBadge opsDetailBadge--pending">{a.status}</span>}
+        />
       ))}
     </div>
   );
@@ -84,19 +117,15 @@ export function FollowupsList({ followups }: { followups: FollowupData[] }) {
           .replace(/_/g, " ")
           .replace(/\b\w/g, (c) => c.toUpperCase());
         return (
-          <div key={f.id} className="opsDetailItem opsDetailItem--followup">
-            <div className="opsDetailHeader">
-              <div className="opsDetailTitleGroup">
-                <Calendar size={13} className="opsDetailIcon opsDetailIcon--calendar" />
-                <span className="opsDetailTitle">{typeLabel}</span>
-              </div>
-              <span className="opsDetailDate">Due {f.dueDate}</span>
-            </div>
-            <div className="opsDetailBody">
-              <p className="opsDetailText">{f.recommendedAction}</p>
-              <span className="opsDetailBadge opsDetailBadge--open">{f.status}</span>
-            </div>
-          </div>
+          <OpsDetailItem
+            key={f.id}
+            className="opsDetailItem opsDetailItem--followup"
+            icon={<Calendar size={13} className="opsDetailIcon opsDetailIcon--calendar" />}
+            title={typeLabel}
+            date={`Due ${f.dueDate}`}
+            body={f.recommendedAction}
+            badge={<span className="opsDetailBadge opsDetailBadge--open">{f.status}</span>}
+          />
         );
       })}
     </div>
@@ -111,24 +140,20 @@ export function HighPriorityTaskList({ tasks }: { tasks: TaskData[] }) {
   return (
     <div className="opsDetailList">
       {tasks.map((t) => (
-        <div key={t.id} className="opsDetailItem opsDetailItem--task">
-          <div className="opsDetailHeader">
-            <div className="opsDetailTitleGroup">
-              <AlertTriangle size={13} className="opsDetailIcon opsDetailIcon--alert" />
-              <span className="opsDetailTitle">
-                {t.petName || "Pet"} ({t.clientName || "Client"})
-              </span>
-            </div>
-            <span className="opsDetailDate">
+        <OpsDetailItem
+          key={t.id}
+          className="opsDetailItem opsDetailItem--task"
+          icon={<AlertTriangle size={13} className="opsDetailIcon opsDetailIcon--alert" />}
+          title={`${t.petName || "Pet"} (${t.clientName || "Client"})`}
+          date={
+            <>
               <Clock size={11} style={{ marginRight: "2px", verticalAlign: "middle" }} />
               {t.dueTime}
-            </span>
-          </div>
-          <div className="opsDetailBody">
-            <p className="opsDetailText">{t.request}</p>
-            <span className="opsDetailBadge opsDetailBadge--urgent">high priority</span>
-          </div>
-        </div>
+            </>
+          }
+          body={t.request}
+          badge={<span className="opsDetailBadge opsDetailBadge--urgent">high priority</span>}
+        />
       ))}
     </div>
   );
@@ -142,24 +167,15 @@ export function PricingReportsList({ reports }: { reports: PricingReportData[] }
   return (
     <div className="opsDetailList">
       {reports.map((r) => (
-        <div key={r.id} className="opsDetailItem opsDetailItem--pricing">
-          <div className="opsDetailHeader">
-            <div className="opsDetailTitleGroup">
-              <Search size={13} className="opsDetailIcon opsDetailIcon--search" />
-              <span className="opsDetailTitle">{r.title}</span>
-            </div>
-            <span className="opsDetailDate">
-              {new Date(r.createdAt).toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-              })}
-            </span>
-          </div>
-          <div className="opsDetailBody">
-            <p className="opsDetailText">{r.summary}</p>
-            <span className="opsDetailBadge opsDetailBadge--pricing">Pricing</span>
-          </div>
-        </div>
+        <OpsDetailItem
+          key={r.id}
+          className="opsDetailItem opsDetailItem--pricing"
+          icon={<Search size={13} className="opsDetailIcon opsDetailIcon--search" />}
+          title={r.title}
+          date={formatOpsDetailDate(r.createdAt)}
+          body={r.summary}
+          badge={<span className="opsDetailBadge opsDetailBadge--pricing">Pricing</span>}
+        />
       ))}
     </div>
   );
