@@ -614,14 +614,11 @@ test("Linux desktop key dispatch uses the unique visible Crabbox browser window"
     calls[0][1][1],
     /xdotool getwindowclassname "\$active_window"/
   );
-  assert.match(
-    calls[0][1][1],
-    /search --onlyvisible --maxdepth 1 --class google-chrome/
-  );
-  assert.match(
-    calls[0][1][1],
-    /search --onlyvisible --maxdepth 1 --class chromium/
-  );
+  assert.match(calls[0][1][1], /command -v wmctrl/);
+  assert.match(calls[0][1][1], /wmctrl -lx/);
+  assert.match(calls[0][1][1], /google-chrome\|chromium/);
+  assert.match(calls[0][1][1], /xdotool search --onlyvisible --class google-chrome/);
+  assert.match(calls[0][1][1], /grep -Fxq "\$decimal_id"/);
   assert.match(
     calls[0][1][1],
     /xdotool windowactivate --sync "\$active_window"/

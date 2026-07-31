@@ -638,16 +638,29 @@ export async function dispatchLinuxDesktopKey(
 set -eu
 if [ -f /var/lib/crabbox/desktop.env ]; then . /var/lib/crabbox/desktop.env; fi
 export DISPLAY="\${DISPLAY:-:99}"
-if command -v xdotool >/dev/null 2>&1; then
-  visible_windows="$(
+if command -v xdotool >/dev/null 2>&1 && command -v wmctrl >/dev/null 2>&1; then
+  visible_candidates="$(
     {
-      xdotool search --onlyvisible --maxdepth 1 --class google-chrome 2>/dev/null || true
-      xdotool search --onlyvisible --maxdepth 1 --class chromium 2>/dev/null || true
+      xdotool search --onlyvisible --class google-chrome 2>/dev/null || true
+      xdotool search --onlyvisible --class chromium 2>/dev/null || true
     } | sort -un
   )"
+  visible_windows="$(
+    wmctrl -lx 2>/dev/null |
+      awk 'tolower($3) ~ /(^|\\.)(google-chrome|chromium)(\\.|$)/ { print $1 }' |
+      while IFS= read -r window_id; do
+        printf '%s\\n' "$window_id" | grep -Eq '^0x[0-9a-fA-F]+$' || continue
+        decimal_id="$((window_id))"
+        printf '%s\\n' "$visible_candidates" | grep -Fxq "$decimal_id" || continue
+        printf '%s\\n' "$decimal_id"
+      done |
+      sort -u
+  )"
   case "$visible_windows" in
-    ''|*[!0-9]*) exit 126 ;;
+    ''|*'
+'*) exit 126 ;;
   esac
+  printf '%s\\n' "$visible_windows" | grep -Eq '^[1-9][0-9]*$' || exit 126
   active_window="$visible_windows"
   xdotool windowactivate --sync "$active_window" || exit 126
   [ "$(xdotool getactivewindow 2>/dev/null || true)" = "$active_window" ] || exit 126
