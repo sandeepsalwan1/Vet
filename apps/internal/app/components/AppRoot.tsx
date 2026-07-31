@@ -6,7 +6,6 @@ import { validateAccountTeamSession } from "../lib/authClient";
 import { AdminDashboard } from "./admin/AdminDashboard";
 import { AuthScreen, type Audience } from "./auth/AuthScreen";
 import { ClinicLoadingPanel, ClinicProvider } from "./ClinicContext";
-import { FrogWordmark } from "./TaskBoardChrome";
 import { CustomerExperience } from "./customer/CustomerExperience";
 import { TaskBoard } from "./TaskBoard";
 import {
@@ -123,18 +122,7 @@ function AppRootContent({ audience }: { audience: Audience }) {
   }
 
   if (view.kind === "loading" || view.kind === "redirecting") {
-    if (view.kind === "loading") {
-      return <ClinicLoadingPanel wordmark={<FrogWordmark />} />;
-    }
-
-    return (
-      <main className="entryShell">
-        <section className="entryPanel bootPanel">
-          <FrogWordmark />
-          <p className="bootLine">Taking you there…</p>
-        </section>
-      </main>
-    );
+    return <ClinicLoadingPanel />;
   }
 
   if (view.kind === "auth") {
