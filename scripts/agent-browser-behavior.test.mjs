@@ -632,6 +632,13 @@ test("browser task converts final assertion exceptions into exact failed evidenc
   assert.equal(result.status, "fail");
   assert.match(result.evidence, /Browser assertion failed/);
   assert.deepEqual(result.reproductionSteps, ["Navigate to /request"]);
+  assert.deepEqual(result.assertions, [
+    {
+      phase: "final",
+      assertion: "main is unsupported",
+      passed: false
+    }
+  ]);
 });
 
 test("intermediate observations wait fully only after the final action", () => {
@@ -674,4 +681,146 @@ test("browser task does not wait away a transient final state by rechecking prov
 
   assert.equal(result.status, "pass");
   assert.equal(hiddenChecks, 1);
+});
+
+test("last user action observes transient final state while intermediate state settles", async () => {
+  let intermediateChecks = 0;
+  let finalChecks = 0;
+  const task = {
+    clauseIds: ["AC1"],
+    route: "/request",
+    session: "none",
+    actions: [{ type: "click", selector: "button[data-save]" }],
+    intermediateAssertions: [
+      { type: "visible", selector: "[data-state='saved']" }
+    ],
+    finalAssertions: [
+      { type: "visible", selector: "[data-state='toast']" }
+    ]
+  };
+  const client = {
+    async send(method, params = {}) {
+      if (method !== "Runtime.evaluate") return {};
+      if (params.expression.includes("element.click()")) {
+        return { result: { value: true } };
+      }
+      if (params.expression.includes("[data-state='saved']")) {
+        intermediateChecks += 1;
+        return { result: { value: intermediateChecks >= 2 } };
+      }
+      if (params.expression.includes("[data-state='toast']")) {
+        finalChecks += 1;
+        return { result: { value: finalChecks === 1 } };
+      }
+      return { result: { value: true } };
+    }
+  };
+
+  const result = await runTask(client, payload, task);
+
+  assert.equal(result.status, "pass");
+  assert.ok(intermediateChecks >= 2);
+  assert.ok(finalChecks >= 1);
+});
+
+test("last user action observes transient final state without intermediate assertions", async () => {
+  let finalChecks = 0;
+  const task = {
+    clauseIds: ["AC1"],
+    route: "/request",
+    session: "none",
+    actions: [{ type: "click", selector: "button[data-save]" }],
+    intermediateAssertions: [],
+    finalAssertions: [
+      { type: "visible", selector: "[data-state='toast']" }
+    ]
+  };
+  const client = {
+    async send(method, params = {}) {
+      if (method !== "Runtime.evaluate") return {};
+      if (params.expression.includes("element.click()")) {
+        return { result: { value: true } };
+      }
+      if (params.expression.includes("[data-state='toast']")) {
+        finalChecks += 1;
+        return { result: { value: finalChecks === 1 } };
+      }
+      return { result: { value: true } };
+    }
+  };
+
+  const result = await runTask(client, payload, task);
+
+  assert.equal(result.status, "pass");
+  assert.equal(finalChecks, 1);
+});
+
+test("last user trigger retains a delayed transient final state before a trailing wait", async () => {
+  let triggeredAt = 0;
+  const task = {
+    clauseIds: ["AC1"],
+    route: "/request",
+    session: "none",
+    actions: [
+      { type: "click", selector: "button[data-save]" },
+      { type: "wait", milliseconds: 500 }
+    ],
+    intermediateAssertions: [],
+    finalAssertions: [
+      { type: "visible", selector: "[data-state='toast']" }
+    ]
+  };
+  const client = {
+    async send(method, params = {}) {
+      if (method !== "Runtime.evaluate") return {};
+      if (params.expression.includes("element.click()")) {
+        triggeredAt = Date.now();
+        return { result: { value: true } };
+      }
+      if (params.expression.includes("[data-state='toast']")) {
+        const elapsed = Date.now() - triggeredAt;
+        return { result: { value: elapsed >= 300 && elapsed < 650 } };
+      }
+      return { result: { value: true } };
+    }
+  };
+
+  const result = await runTask(client, payload, task);
+
+  assert.equal(result.status, "pass");
+});
+
+test("final assertion errors after a user trigger remain assertion failures", async () => {
+  const task = {
+    clauseIds: ["AC1"],
+    route: "/request",
+    session: "none",
+    actions: [{ type: "click", selector: "button[data-save]" }],
+    intermediateAssertions: [],
+    finalAssertions: [{ type: "unsupported", selector: "main" }]
+  };
+  const client = {
+    async send(method, params = {}) {
+      if (
+        method === "Runtime.evaluate" &&
+        params.expression.includes("element.click()")
+      ) {
+        return { result: { value: true } };
+      }
+      return {};
+    }
+  };
+
+  const result = await runTask(client, payload, task);
+
+  assert.equal(result.status, "fail");
+  assert.match(result.evidence, /Browser assertion failed/);
+  assert.doesNotMatch(result.evidence, /Browser interaction failed/);
+  assert.deepEqual(result.assertions, [
+    {
+      phase: "final",
+      assertion: "main is unsupported",
+      passed: false
+    }
+  ]);
 });

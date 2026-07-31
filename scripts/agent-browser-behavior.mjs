@@ -39,6 +39,13 @@ function fail(message) {
   throw new Error(message);
 }
 
+class BrowserAssertionError extends Error {
+  constructor(error) {
+    super(error?.message ?? String(error), { cause: error });
+    this.name = "BrowserAssertionError";
+  }
+}
+
 export function validateBrowserPayload(payload) {
   if (
     !payload ||
@@ -493,9 +500,16 @@ export async function runTask(client, payload, task) {
     assertion: assertionLabel(assertion),
     passed: false
   }));
+  const final = task.finalAssertions.map((assertion) => ({
+    assertion: assertionLabel(assertion),
+    passed: false
+  }));
   const actions = task.actions.length
     ? task.actions
     : [{ type: "navigate", path: task.route }];
+  const lastTriggerActionIndex = actions.findLastIndex((action) =>
+    ["fill", "click", "clickText", "press"].includes(action.type)
+  );
   try {
     const sessionStep = await establishDemoSession(
       client,
@@ -506,28 +520,87 @@ export async function runTask(client, payload, task) {
     if (sessionStep) reproductionSteps.push(sessionStep);
     for (const [actionIndex, action] of actions.entries()) {
       reproductionSteps.push(await runAction(client, payload.baseUrl, action));
-      if (
-        task.intermediateAssertions.length &&
-        ["fill", "click", "clickText", "press"].includes(action.type)
-      ) {
-        const pendingIndexes = intermediate
+      if (["fill", "click", "clickText", "press"].includes(action.type)) {
+        const pendingIntermediateIndexes = intermediate
           .map((result, index) => (result.passed ? -1 : index))
           .filter((index) => index !== -1);
-        if (!pendingIndexes.length) continue;
-        const observed = await waitForAssertions(
-          client,
-          pendingIndexes.map(
-            (index) => task.intermediateAssertions[index]
-          ),
-          intermediateAssertionTimeout(actions.length, actionIndex)
-        );
+        const pendingFinalIndexes =
+          actionIndex === lastTriggerActionIndex
+            ? final
+                .map((result, index) => (result.passed ? -1 : index))
+                .filter((index) => index !== -1)
+            : [];
+        const pending = [
+          ...pendingIntermediateIndexes.map((index) => ({
+            phase: "intermediate",
+            index,
+            assertion: task.intermediateAssertions[index]
+          })),
+          ...pendingFinalIndexes.map((index) => ({
+            phase: "final",
+            index,
+            assertion: task.finalAssertions[index]
+          }))
+        ];
+        if (!pending.length) continue;
+        let observed;
+        try {
+          observed = await waitForAssertions(
+            client,
+            pending.map((entry) => entry.assertion),
+            intermediateAssertionTimeout(lastTriggerActionIndex + 1, actionIndex)
+          );
+        } catch (error) {
+          throw new BrowserAssertionError(error);
+        }
         for (const [observedIndex, result] of observed.entries()) {
-          const intermediateIndex = pendingIndexes[observedIndex];
-          intermediate[intermediateIndex] = {
-            ...intermediate[intermediateIndex],
+          const entry = pending[observedIndex];
+          const target = entry.phase === "intermediate" ? intermediate : final;
+          target[entry.index] = {
+            ...target[entry.index],
             passed: result.passed
           };
         }
+      }
+    }
+  } catch (error) {
+    const assertionFailure = error instanceof BrowserAssertionError;
+    return {
+      clauseIds: task.clauseIds,
+      route: task.route,
+      status: "fail",
+      evidence: `Browser ${assertionFailure ? "assertion" : "interaction"} failed: ${error?.message ?? String(error)}`,
+      reproductionSteps,
+      assertions: [
+        ...intermediate.map((result) => ({
+          phase: "intermediate",
+          ...result
+        })),
+        ...(assertionFailure
+          ? final.map((result) => ({
+              phase: "final",
+              ...result
+            }))
+          : [])
+      ]
+    };
+  }
+  try {
+    const pendingFinalIndexes = final
+      .map((result, index) => (result.passed ? -1 : index))
+      .filter((index) => index !== -1);
+    if (pendingFinalIndexes.length) {
+      const observed = await waitForAssertions(
+        client,
+        pendingFinalIndexes.map((index) => task.finalAssertions[index]),
+        8_000
+      );
+      for (const [observedIndex, result] of observed.entries()) {
+        const finalIndex = pendingFinalIndexes[observedIndex];
+        final[finalIndex] = {
+          ...final[finalIndex],
+          passed: result.passed
+        };
       }
     }
   } catch (error) {
@@ -535,28 +608,18 @@ export async function runTask(client, payload, task) {
       clauseIds: task.clauseIds,
       route: task.route,
       status: "fail",
-      evidence: `Browser interaction failed: ${error?.message ?? String(error)}`,
-      reproductionSteps,
-      assertions: intermediate.map((result) => ({
-        phase: "intermediate",
-        ...result
-      }))
-    };
-  }
-  let final;
-  try {
-    final = await waitForAssertions(client, task.finalAssertions, 8_000);
-  } catch (error) {
-    return {
-      clauseIds: task.clauseIds,
-      route: task.route,
-      status: "fail",
       evidence: `Browser assertion failed: ${error?.message ?? String(error)}`,
       reproductionSteps,
-      assertions: intermediate.map((result) => ({
-        phase: "intermediate",
-        ...result
-      }))
+      assertions: [
+        ...intermediate.map((result) => ({
+          phase: "intermediate",
+          ...result
+        })),
+        ...final.map((result) => ({
+          phase: "final",
+          ...result
+        }))
+      ]
     };
   }
   const assertions = [
