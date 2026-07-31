@@ -551,6 +551,7 @@ test("demo session setup clears ambient state before visible login", async () =>
 
 test("navigation retries evaluation while the page context changes", async () => {
   let settledChecks = 0;
+  let painted = false;
   const task = {
     clauseIds: ["AC1"],
     route: "/request",
@@ -566,6 +567,10 @@ test("navigation retries evaluation while the page context changes", async () =>
         params.expression.includes("__agentProofNavigationMarkerV1") &&
         params.expression.includes(" = ")
       ) {
+        return { result: { value: true } };
+      }
+      if (params.expression.includes("requestAnimationFrame")) {
+        painted = true;
         return { result: { value: true } };
       }
       if (params.expression.includes("location.pathname")) {
@@ -584,6 +589,40 @@ test("navigation retries evaluation while the page context changes", async () =>
 
   assert.equal(result.status, "pass");
   assert.equal(settledChecks, 4);
+  assert.equal(painted, true);
+});
+
+test("navigation requires full document load before its painted interaction boundary", async () => {
+  const expressions = [];
+  const client = {
+    async send(method, params = {}) {
+      if (method === "Runtime.evaluate") {
+        expressions.push(params.expression);
+        return { result: { value: true } };
+      }
+      return {};
+    }
+  };
+
+  await runAction(client, "http://127.0.0.1:3000", {
+    type: "navigate",
+    path: "/request"
+  });
+
+  const settledIndex = expressions.findIndex((expression) =>
+    expression.includes('document.readyState === "complete"')
+  );
+  const paintedIndex = expressions.findIndex((expression) =>
+    expression.includes("requestAnimationFrame") &&
+    expression.includes("setTimeout(() => resolve(false)")
+  );
+  assert.ok(settledIndex >= 0);
+  assert.ok(paintedIndex > settledIndex);
+  assert.match(expressions[paintedIndex], /location\.pathname === "\/request"/);
+  assert.match(
+    expressions[paintedIndex],
+    /document\.readyState === "complete"/
+  );
 });
 
 test("intermediate state is observed only after a user trigger", async () => {
@@ -809,7 +848,8 @@ test("browser task converts final assertion exceptions into exact failed evidenc
             params.expression.includes("__agentProofNavigationMarkerV1") &&
             params.expression.includes(" = ")
           ) ||
-          params.expression.includes("location.pathname")
+          params.expression.includes("location.pathname") ||
+          params.expression.includes("requestAnimationFrame")
         )
       ) {
         return { result: { value: true } };

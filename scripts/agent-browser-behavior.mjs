@@ -270,15 +270,29 @@ async function navigate(client, baseUrl, path) {
   if (!marked) fail("browser navigation could not bind the current document");
   const result = await client.send("Page.navigate", { url: `${baseUrl}${path}` });
   if (result.errorText) fail(`browser navigation failed: ${result.errorText}`);
+  const navigationSettled =
+    `location.pathname === ${JSON.stringify(path)} && ` +
+    `document.readyState === "complete" && ` +
+    `globalThis[${JSON.stringify(NAVIGATION_MARKER)}] !== ${JSON.stringify(marker)}`;
   const settled = await waitForEvaluation(
     client,
-    `location.pathname === ${JSON.stringify(path)} && ` +
-      `document.readyState !== "loading" && ` +
-      `globalThis[${JSON.stringify(NAVIGATION_MARKER)}] !== ${JSON.stringify(marker)}`,
+    navigationSettled,
     8_000,
     true
   );
   if (!settled) fail(`browser navigation did not settle: ${path}`);
+  const painted = await waitForEvaluation(
+    client,
+    `(async () => { ` +
+      `return await Promise.race([` +
+      `new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)))), ` +
+      `new Promise(resolve => setTimeout(() => resolve(false), 1000))` +
+      `]) && (${navigationSettled}); ` +
+      `})()`,
+    8_000,
+    true
+  );
+  if (!painted) fail(`browser navigation did not become interactive: ${path}`);
 }
 
 function keyEventMetadata(key) {
