@@ -168,6 +168,11 @@ test("fill uses browser text insertion on a focused cleared control", async () =
     value: "Hello"
   });
 
+  for (const { method, params } of calls) {
+    if (method === "Runtime.evaluate") {
+      assert.doesNotThrow(() => new Function(`return (${params.expression});`));
+    }
+  }
   assert.ok(
     calls.some(
       ({ method, params }) =>

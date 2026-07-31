@@ -380,7 +380,7 @@ export async function runAction(client, baseUrl, action) {
       client,
       `(element => Boolean(element && !element.disabled && ` +
         `element.matches("input,textarea,select")))` +
-        `)(document.querySelector(${selector}))`
+        `(document.querySelector(${selector}))`
     );
     if (!fillable) fail(`browser fill target was not found: ${action.selector}`);
     const inputKind = await evaluate(
