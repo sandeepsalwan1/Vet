@@ -1,3 +1,4 @@
+import React from "react";
 import { AlertTriangle, BellRing, Calendar, Clock, Search } from "lucide-react";
 import type { ReactNode } from "react";
 
