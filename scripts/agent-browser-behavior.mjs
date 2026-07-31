@@ -66,6 +66,7 @@ const EVENT_INPUT_TYPES = new Set([
   "deleteContentForward"
 ]);
 const browserEventCollectors = new WeakMap();
+const browserProcessIds = new WeakMap();
 const execFileAsync = promisify(execFile);
 let navigationSequence = 0;
 
@@ -140,16 +141,37 @@ async function devtoolsTarget(port = 9222) {
   let lastError = "";
   for (let attempt = 0; attempt < 100; attempt += 1) {
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/list`);
-      const targets = await response.json();
+      const [targetsResponse, versionResponse] = await Promise.all([
+        fetch(`http://127.0.0.1:${port}/json/list`),
+        fetch(`http://127.0.0.1:${port}/json/version`)
+      ]);
+      const [targets, version] = await Promise.all([
+        targetsResponse.json(),
+        versionResponse.json()
+      ]);
       const page = targets.find((target) => target.type === "page" && target.webSocketDebuggerUrl);
-      if (page) return page;
+      if (page && version.webSocketDebuggerUrl) {
+        return {
+          ...page,
+          browserWebSocketDebuggerUrl: version.webSocketDebuggerUrl
+        };
+      }
     } catch (error) {
       lastError = error.message;
     }
     await sleep(100);
   }
   fail(`browser DevTools endpoint is unavailable${lastError ? `: ${lastError}` : ""}`);
+}
+
+export async function browserProcessId(client) {
+  const result = await client.send("SystemInfo.getProcessInfo");
+  const ids = (result.processInfo ?? [])
+    .filter((process) => process.type === "browser")
+    .map((process) => process.id)
+    .filter((id) => Number.isSafeInteger(id) && id > 0);
+  if (ids.length !== 1) fail("browser process identity is unavailable");
+  return ids[0];
 }
 
 async function cdpClient(webSocketDebuggerUrl) {
@@ -581,9 +603,14 @@ async function dispatchKey(client, key, onKeyDown) {
   const { text, ...metadata } = keyEventMetadata(key);
   await client.send("Page.bringToFront");
   let observationStarted = false;
-  if (browserEventCollectors.has(client) && process.platform === "linux") {
+  const browserPid = browserProcessIds.get(client);
+  if (
+    browserEventCollectors.has(client) &&
+    browserPid &&
+    process.platform === "linux"
+  ) {
     if (
-      await dispatchLinuxDesktopKey(key, execFileAsync, () => {
+      await dispatchLinuxDesktopKey(key, browserPid, execFileAsync, () => {
         observationStarted = true;
         onKeyDown?.();
       })
@@ -611,6 +638,7 @@ async function dispatchKey(client, key, onKeyDown) {
 
 export async function dispatchLinuxDesktopKey(
   key,
+  browserPid,
   run = execFileAsync,
   onDispatch
 ) {
@@ -638,23 +666,12 @@ export async function dispatchLinuxDesktopKey(
 set -eu
 if [ -f /var/lib/crabbox/desktop.env ]; then . /var/lib/crabbox/desktop.env; fi
 export DISPLAY="\${DISPLAY:-:99}"
-if command -v xdotool >/dev/null 2>&1 && command -v wmctrl >/dev/null 2>&1; then
-  visible_candidates="$(
-    {
-      xdotool search --onlyvisible --class google-chrome 2>/dev/null || true
-      xdotool search --onlyvisible --class chromium 2>/dev/null || true
-    } | sort -un
-  )"
+case "$1" in
+  ''|*[!0-9]*) exit 126 ;;
+esac
+if command -v xdotool >/dev/null 2>&1; then
   visible_windows="$(
-    wmctrl -lx 2>/dev/null |
-      awk 'tolower($3) ~ /(^|\\.)(google-chrome|chromium)(\\.|$)/ { print $1 }' |
-      while IFS= read -r window_id; do
-        printf '%s\\n' "$window_id" | grep -Eq '^0x[0-9a-fA-F]+$' || continue
-        decimal_id="$((window_id))"
-        printf '%s\\n' "$visible_candidates" | grep -Fxq "$decimal_id" || continue
-        printf '%s\\n' "$decimal_id"
-      done |
-      sort -u
+    xdotool search --onlyvisible --pid "$1" 2>/dev/null | sort -un
   )"
   case "$visible_windows" in
     ''|*'
@@ -678,7 +695,7 @@ exit 127
   try {
     const prepared = await run(
       "sh",
-      ["-lc", prepareScript, "agent-browser-key"],
+      ["-lc", prepareScript, "agent-browser-key", String(browserPid)],
       { timeout: 5_000, maxBuffer: 4_096 }
     );
     const match = /^xdotool:([1-9][0-9]*)$/.exec(
@@ -1164,6 +1181,12 @@ export async function runBrowserBehavior(payload) {
   const target = await devtoolsTarget();
   const client = await cdpClient(target.webSocketDebuggerUrl);
   try {
+    const browserClient = await cdpClient(target.browserWebSocketDebuggerUrl);
+    try {
+      browserProcessIds.set(client, await browserProcessId(browserClient));
+    } finally {
+      browserClient.close();
+    }
     await client.send("Page.enable");
     await client.send("Runtime.enable");
     await installBrowserEventCollector(client);

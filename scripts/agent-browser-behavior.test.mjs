@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   assertionLabel,
   assertionExpression,
+  browserProcessId,
   dispatchLinuxDesktopKey,
   establishDemoSession,
   installBrowserEventCollector,
@@ -591,6 +592,32 @@ test("non-text keys use raw keydown browser metadata", async () => {
   assert.equal(keyCalls[1].params.type, "keyUp");
 });
 
+test("browser process identity comes from the browser-level CDP target", async () => {
+  assert.equal(
+    await browserProcessId({
+      async send(method) {
+        assert.equal(method, "SystemInfo.getProcessInfo");
+        return {
+          processInfo: [
+            { type: "renderer", id: 88 },
+            { type: "browser", id: 777 }
+          ]
+        };
+      }
+    }),
+    777
+  );
+  await assert.rejects(
+    () =>
+      browserProcessId({
+        async send() {
+          return { processInfo: [{ type: "renderer", id: 88 }] };
+        }
+      }),
+    /browser process identity is unavailable/
+  );
+});
+
 test("Linux desktop key dispatch uses the unique visible Crabbox browser window", async () => {
   const calls = [];
   const phases = [];
@@ -601,7 +628,7 @@ test("Linux desktop key dispatch uses the unique visible Crabbox browser window"
   };
 
   assert.equal(
-    await dispatchLinuxDesktopKey("Enter", run, () => {
+    await dispatchLinuxDesktopKey("Enter", 777, run, () => {
       phases.push("observe");
     }),
     true
@@ -614,11 +641,11 @@ test("Linux desktop key dispatch uses the unique visible Crabbox browser window"
     calls[0][1][1],
     /xdotool getwindowclassname "\$active_window"/
   );
-  assert.match(calls[0][1][1], /command -v wmctrl/);
-  assert.match(calls[0][1][1], /wmctrl -lx/);
-  assert.match(calls[0][1][1], /google-chrome\|chromium/);
-  assert.match(calls[0][1][1], /xdotool search --onlyvisible --class google-chrome/);
-  assert.match(calls[0][1][1], /grep -Fxq "\$decimal_id"/);
+  assert.match(
+    calls[0][1][1],
+    /xdotool search --onlyvisible --pid "\$1"/
+  );
+  assert.equal(calls[0][1][3], "777");
   assert.match(
     calls[0][1][1],
     /xdotool windowactivate --sync "\$active_window"/
@@ -646,14 +673,14 @@ test("Linux desktop key dispatch falls back only before sending input", async ()
     code: 127
   });
   assert.equal(
-    await dispatchLinuxDesktopKey("ArrowDown", async () => {
+    await dispatchLinuxDesktopKey("ArrowDown", 777, async () => {
       throw unavailable;
     }),
     false
   );
   await assert.rejects(
     () =>
-      dispatchLinuxDesktopKey("Enter", async (_file, _args, _options) => {
+      dispatchLinuxDesktopKey("Enter", 777, async (_file, _args, _options) => {
         if (_args[1].includes("printf 'xdotool")) {
           return { stdout: "xdotool:4242\n" };
         }
@@ -663,7 +690,7 @@ test("Linux desktop key dispatch falls back only before sending input", async ()
   );
   let dispatchAttempt = 0;
   assert.equal(
-    await dispatchLinuxDesktopKey("Enter", async () => {
+    await dispatchLinuxDesktopKey("Enter", 777, async () => {
       dispatchAttempt += 1;
       if (dispatchAttempt === 1) return { stdout: "xdotool:4242\n" };
       throw Object.assign(new Error("focus changed"), { code: 126 });
@@ -671,7 +698,7 @@ test("Linux desktop key dispatch falls back only before sending input", async ()
     false
   );
   assert.equal(
-    await dispatchLinuxDesktopKey("Enter", async () => {
+    await dispatchLinuxDesktopKey("Enter", 777, async () => {
       throw Object.assign(new Error("browser window missing"), { code: 126 });
     }),
     false
