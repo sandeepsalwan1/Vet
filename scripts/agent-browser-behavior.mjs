@@ -334,6 +334,16 @@ async function dispatchKey(client, key) {
   });
 }
 
+async function typeText(client, value) {
+  for (const character of [...value]) {
+    if (/^[A-Za-z0-9 ]$/.test(character)) {
+      await dispatchKey(client, character);
+    } else {
+      await client.send("Input.insertText", { text: character });
+    }
+  }
+}
+
 export async function runAction(client, baseUrl, action) {
   if (action.type === "navigate") {
     await navigate(client, baseUrl, action.path);
@@ -416,7 +426,7 @@ export async function runAction(client, baseUrl, action) {
       fail(`browser fill option was not found: ${action.selector}`);
     }
     if (inputKind === "text") {
-      await client.send("Input.insertText", { text: action.value });
+      await typeText(client, action.value);
     }
     return `Fill ${action.selector}`;
   }

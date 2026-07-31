@@ -147,7 +147,7 @@ test("text proof binds a select assertion to its selected value", () => {
   assert.equal(result, false);
 });
 
-test("fill uses browser text insertion on a focused cleared control", async () => {
+test("fill types browser key events into a focused cleared control", async () => {
   const calls = [];
   const client = {
     async send(method, params = {}) {
@@ -182,11 +182,54 @@ test("fill uses browser text insertion on a focused cleared control", async () =
     )
   );
   assert.ok(
-    calls.some(
-      ({ method, params }) =>
-        method === "Input.insertText" &&
-        params.text === "Hello"
-    )
+    calls
+      .filter(
+        ({ method, params }) =>
+          method === "Input.dispatchKeyEvent" &&
+          params.type === "keyDown"
+      )
+      .map(({ params }) => params.text)
+      .join("") === "Hello"
+  );
+});
+
+test("fill falls back to text insertion only for punctuation and Unicode", async () => {
+  const calls = [];
+  const client = {
+    async send(method, params = {}) {
+      calls.push({ method, params });
+      if (
+        method === "Runtime.evaluate" &&
+        params.expression.includes('return "text"')
+      ) {
+        return { result: { value: "text" } };
+      }
+      return { result: { value: true } };
+    }
+  };
+
+  await runAction(client, "", {
+    type: "fill",
+    selector: "input[type=email]",
+    value: "a@b.c"
+  });
+
+  assert.deepEqual(
+    calls
+      .filter(({ method }) => method === "Input.insertText")
+      .map(({ params }) => params.text),
+    ["@", "."]
+  );
+  assert.equal(
+    calls
+      .filter(
+        ({ method, params }) =>
+          method === "Input.dispatchKeyEvent" &&
+          params.type === "keyDown"
+      )
+      .map(({ params }) => params.text)
+      .join(""),
+    "abc"
   );
 });
 
@@ -440,7 +483,8 @@ test("intermediate state is observed only after a user trigger", async () => {
         return {};
       }
       if (method === "Input.dispatchKeyEvent") {
-        if (params.type === "keyDown") pressed = true;
+        if (params.type === "keyDown" && params.key === "Enter") pressed = true;
+        if (params.type === "keyDown" && params.key !== "Enter") filled = true;
         return {};
       }
       if (method !== "Runtime.evaluate") return {};
