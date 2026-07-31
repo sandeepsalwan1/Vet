@@ -691,11 +691,6 @@ if command -v xdotool >/dev/null 2>&1; then
   active_window="$visible_windows"
   xdotool windowactivate --sync "$active_window" || exit 124
   [ "$(xdotool getactivewindow 2>/dev/null || true)" = "$active_window" ] || exit 125
-  active_class="$(xdotool getwindowclassname "$active_window" 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
-  case "$active_class" in
-    *chrome*|*chromium*) ;;
-    *) exit 126 ;;
-  esac
   printf 'xdotool:%s\\n' "$active_window"
   exit 0
 fi
@@ -720,7 +715,6 @@ exit 127
       123: "invalid-window-id",
       124: "window-activation-failed",
       125: "window-activation-mismatch",
-      126: "window-class-mismatch",
       127: "xdotool-unavailable"
     };
     if (fallbackReasons[error?.code]) {
@@ -739,17 +733,20 @@ if [ -f /var/lib/crabbox/desktop.env ]; then . /var/lib/crabbox/desktop.env; fi
 export DISPLAY="\${DISPLAY:-:99}"
 active_window="$(xdotool getactivewindow)"
 [ "$active_window" = "$1" ] || exit 126
-active_class="$(xdotool getwindowclassname "$active_window" 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
-case "$active_class" in
-  *chrome*|*chromium*) ;;
-  *) exit 126 ;;
-esac
+[ "$(xdotool getwindowpid "$active_window" 2>/dev/null || true)" = "$3" ] || exit 126
 exec xdotool key --clearmodifiers "$2"
 `;
   try {
     await run(
       "sh",
-      ["-lc", dispatchScript, "agent-browser-key", activeWindow, desktopKey],
+      [
+        "-lc",
+        dispatchScript,
+        "agent-browser-key",
+        activeWindow,
+        desktopKey,
+        String(browserPid)
+      ],
       { timeout: 5_000, maxBuffer: 4_096 }
     );
     return true;
