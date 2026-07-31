@@ -638,8 +638,19 @@ export async function dispatchLinuxDesktopKey(
 set -eu
 if [ -f /var/lib/crabbox/desktop.env ]; then . /var/lib/crabbox/desktop.env; fi
 export DISPLAY="\${DISPLAY:-:99}"
-if command -v xdotool >/dev/null 2>&1 && xdotool getactivewindow >/dev/null 2>&1; then
-  active_window="$(xdotool getactivewindow)"
+if command -v xdotool >/dev/null 2>&1; then
+  visible_windows="$(
+    {
+      xdotool search --onlyvisible --maxdepth 1 --class google-chrome 2>/dev/null || true
+      xdotool search --onlyvisible --maxdepth 1 --class chromium 2>/dev/null || true
+    } | sort -un
+  )"
+  case "$visible_windows" in
+    ''|*[!0-9]*) exit 126 ;;
+  esac
+  active_window="$visible_windows"
+  xdotool windowactivate --sync "$active_window" || exit 126
+  [ "$(xdotool getactivewindow 2>/dev/null || true)" = "$active_window" ] || exit 126
   active_class="$(xdotool getwindowclassname "$active_window" 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
   case "$active_class" in
     *chrome*|*chromium*) ;;

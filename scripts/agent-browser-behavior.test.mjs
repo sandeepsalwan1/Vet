@@ -591,7 +591,7 @@ test("non-text keys use raw keydown browser metadata", async () => {
   assert.equal(keyCalls[1].params.type, "keyUp");
 });
 
-test("Linux desktop key dispatch uses the active Crabbox browser window", async () => {
+test("Linux desktop key dispatch uses the unique visible Crabbox browser window", async () => {
   const calls = [];
   const phases = [];
   const run = async (...args) => {
@@ -614,8 +614,23 @@ test("Linux desktop key dispatch uses the active Crabbox browser window", async 
     calls[0][1][1],
     /xdotool getwindowclassname "\$active_window"/
   );
+  assert.match(
+    calls[0][1][1],
+    /search --onlyvisible --maxdepth 1 --class google-chrome/
+  );
+  assert.match(
+    calls[0][1][1],
+    /search --onlyvisible --maxdepth 1 --class chromium/
+  );
+  assert.match(
+    calls[0][1][1],
+    /xdotool windowactivate --sync "\$active_window"/
+  );
+  assert.match(
+    calls[0][1][1],
+    /\[ "\$\(xdotool getactivewindow 2>\/dev\/null \|\| true\)" = "\$active_window" \]/
+  );
   assert.match(calls[0][1][1], /\*chrome\*\|\*chromium\*/);
-  assert.doesNotMatch(calls[0][1][1], /xdotool search/);
   assert.doesNotMatch(calls[0][1][1], /wtype/);
   assert.deepEqual(calls[0][2], { timeout: 5_000, maxBuffer: 4_096 });
   assert.match(calls[1][1][1], /\[ "\$active_window" = "\$1" \] \|\| exit 126/);
