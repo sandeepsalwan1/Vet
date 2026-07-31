@@ -183,25 +183,51 @@ test("press emits complete browser key metadata", async () => {
       method: "Input.dispatchKeyEvent",
       params: {
         type: "keyDown",
+        modifiers: 0,
         key: "Enter",
         code: "Enter",
         windowsVirtualKeyCode: 13,
-        nativeVirtualKeyCode: 13,
+        location: 0,
         text: "\r",
-        unmodifiedText: "\r"
+        unmodifiedText: "\r",
+        autoRepeat: false,
+        isKeypad: false,
+        commands: []
       }
     },
     {
       method: "Input.dispatchKeyEvent",
       params: {
         type: "keyUp",
+        modifiers: 0,
         key: "Enter",
         code: "Enter",
         windowsVirtualKeyCode: 13,
-        nativeVirtualKeyCode: 13
+        location: 0
       }
     }
   ]);
+});
+
+test("non-text keys use raw keydown browser metadata", async () => {
+  const calls = [];
+  const client = {
+    async send(method, params = {}) {
+      calls.push({ method, params });
+      return {};
+    }
+  };
+
+  await runAction(client, "", { type: "press", key: "ArrowDown" });
+
+  assert.equal(calls[0].params.type, "rawKeyDown");
+  assert.equal(calls[0].params.key, "ArrowDown");
+  assert.equal(calls[0].params.code, "ArrowDown");
+  assert.equal(calls[0].params.windowsVirtualKeyCode, 40);
+  assert.equal(calls[0].params.text, undefined);
+  assert.equal(calls[0].params.unmodifiedText, undefined);
+  assert.equal(calls[0].params.nativeVirtualKeyCode, undefined);
+  assert.equal(calls[1].params.type, "keyUp");
 });
 
 test("press rejects keys without truthful DOM metadata", async () => {

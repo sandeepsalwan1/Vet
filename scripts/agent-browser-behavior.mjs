@@ -298,7 +298,7 @@ function keyEventMetadata(key) {
       key,
       code: named.code,
       windowsVirtualKeyCode: named.virtualKeyCode,
-      nativeVirtualKeyCode: named.virtualKeyCode,
+      location: 0,
       ...(named.text ? { text: named.text } : {})
     };
   }
@@ -309,7 +309,7 @@ function keyEventMetadata(key) {
       key,
       code: /^[A-Za-z]$/.test(key) ? `Key${upper}` : `Digit${key}`,
       windowsVirtualKeyCode: upper.charCodeAt(0),
-      nativeVirtualKeyCode: upper.charCodeAt(0),
+      location: 0,
       text: key
     };
   }
@@ -328,12 +328,17 @@ export async function runAction(client, baseUrl, action) {
   if (action.type === "press") {
     const { text, ...metadata } = keyEventMetadata(action.key);
     await client.send("Input.dispatchKeyEvent", {
-      type: "keyDown",
+      type: text ? "keyDown" : "rawKeyDown",
+      modifiers: 0,
       ...metadata,
-      ...(text ? { text, unmodifiedText: text } : {})
+      ...(text ? { text, unmodifiedText: text } : {}),
+      autoRepeat: false,
+      isKeypad: metadata.location === 3,
+      commands: []
     });
     await client.send("Input.dispatchKeyEvent", {
       type: "keyUp",
+      modifiers: 0,
       ...metadata
     });
     return `Press ${action.key}`;
