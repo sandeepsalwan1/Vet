@@ -650,11 +650,17 @@ test("Linux desktop key dispatch uses the unique visible Crabbox browser window"
     calls[0][1][1],
     /\[ "\$\(xdotool getactivewindow 2>\/dev\/null \|\| true\)" = "\$active_window" \]/
   );
+  assert.match(calls[0][1][1], /xdotool getwindowfocus/);
   assert.doesNotMatch(calls[0][1][1], /wtype/);
   assert.deepEqual(calls[0][2], { timeout: 5_000, maxBuffer: 4_096 });
   assert.match(calls[1][1][1], /\[ "\$active_window" = "\$1" \] \|\| exit 126/);
   assert.match(calls[1][1][1], /xdotool getwindowpid "\$active_window"/);
-  assert.match(calls[1][1][1], /exec xdotool key --clearmodifiers "\$2"/);
+  assert.match(calls[1][1][1], /xdotool getwindowfocus/);
+  assert.doesNotMatch(calls[1][1][1], /focus_attempt/);
+  assert.match(
+    calls[1][1][1],
+    /exec xdotool key --clearmodifiers --delay 50 "\$2"/
+  );
   assert.equal(calls[1][1][3], "4242");
   assert.equal(calls[1][1][4], "Return");
   assert.equal(calls[1][1][5], "777");
@@ -715,10 +721,23 @@ test("Linux desktop key dispatch falls back only before sending input", async ()
     ),
     false
   );
+  assert.equal(
+    await dispatchLinuxDesktopKey(
+      "Enter",
+      777,
+      async () => {
+        throw Object.assign(new Error("browser focus missing"), { code: 119 });
+      },
+      undefined,
+      (reason) => fallbackReasons.push(reason)
+    ),
+    false
+  );
   assert.deepEqual(fallbackReasons, [
     "xdotool-unavailable",
     "window-focus-changed",
-    "no-visible-pid-window"
+    "no-visible-pid-window",
+    "window-focus-not-ready"
   ]);
 });
 

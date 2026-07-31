@@ -691,6 +691,17 @@ if command -v xdotool >/dev/null 2>&1; then
   active_window="$visible_windows"
   xdotool windowactivate --sync "$active_window" || exit 124
   [ "$(xdotool getactivewindow 2>/dev/null || true)" = "$active_window" ] || exit 125
+  focus_ready=0
+  focus_attempt=0
+  while [ "$focus_attempt" -lt 20 ]; do
+    if [ "$(xdotool getwindowfocus 2>/dev/null || true)" = "$active_window" ]; then
+      focus_ready=1
+      break
+    fi
+    focus_attempt=$((focus_attempt + 1))
+    sleep 0.05
+  done
+  [ "$focus_ready" -eq 1 ] || exit 119
   printf 'xdotool:%s\\n' "$active_window"
   exit 0
 fi
@@ -709,6 +720,7 @@ exit 127
     activeWindow = match?.[1];
   } catch (error) {
     const fallbackReasons = {
+      119: "window-focus-not-ready",
       120: "invalid-browser-pid",
       121: "no-visible-pid-window",
       122: "ambiguous-visible-pid-window",
@@ -734,7 +746,8 @@ export DISPLAY="\${DISPLAY:-:99}"
 active_window="$(xdotool getactivewindow)"
 [ "$active_window" = "$1" ] || exit 126
 [ "$(xdotool getwindowpid "$active_window" 2>/dev/null || true)" = "$3" ] || exit 126
-exec xdotool key --clearmodifiers "$2"
+[ "$(xdotool getwindowfocus 2>/dev/null || true)" = "$active_window" ] || exit 126
+exec xdotool key --clearmodifiers --delay 50 "$2"
 `;
   try {
     await run(
