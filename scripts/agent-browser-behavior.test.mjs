@@ -147,11 +147,17 @@ test("text proof binds a select assertion to its selected value", () => {
   assert.equal(result, false);
 });
 
-test("fill uses the selected control's value setter", async () => {
-  let expression = "";
+test("fill uses browser text insertion on a focused cleared control", async () => {
+  const calls = [];
   const client = {
     async send(method, params = {}) {
-      if (method === "Runtime.evaluate") expression = params.expression;
+      calls.push({ method, params });
+      if (
+        method === "Runtime.evaluate" &&
+        params.expression.includes('return "text"')
+      ) {
+        return { result: { value: "text" } };
+      }
       return { result: { value: true } };
     }
   };
@@ -162,9 +168,77 @@ test("fill uses the selected control's value setter", async () => {
     value: "Hello"
   });
 
-  assert.match(expression, /Object\.getPrototypeOf\(element\)/);
-  assert.match(expression, /element\.focus\(\)/);
-  assert.doesNotMatch(expression, /HTMLInputElement\.prototype/);
+  assert.ok(
+    calls.some(
+      ({ method, params }) =>
+        method === "Runtime.evaluate" &&
+        params.expression.includes("element.focus()") &&
+        params.expression.includes('element.value = ""; return "text"')
+    )
+  );
+  assert.ok(
+    calls.some(
+      ({ method, params }) =>
+        method === "Input.insertText" &&
+        params.text === "Hello"
+    )
+  );
+});
+
+test("empty fill clears a controlled input through its native value setter", async () => {
+  const calls = [];
+  const client = {
+    async send(method, params = {}) {
+      calls.push({ method, params });
+      if (
+        method === "Runtime.evaluate" &&
+        params.expression.includes('return "direct"')
+      ) {
+        return { result: { value: "direct" } };
+      }
+      return { result: { value: true } };
+    }
+  };
+
+  await runAction(client, "", {
+    type: "fill",
+    selector: "textarea.chatInput",
+    value: ""
+  });
+
+  assert.ok(
+    calls.some(
+      ({ method, params }) =>
+        method === "Runtime.evaluate" &&
+        params.expression.includes("Object.getOwnPropertyDescriptor") &&
+        params.expression.includes('dispatchEvent(new Event("input"')
+    )
+  );
+  assert.ok(
+    calls.every(({ method }) => method !== "Input.insertText")
+  );
+});
+
+test("fill rejects non-text inputs instead of invoking invalid selection APIs", async () => {
+  const client = {
+    async send(method, params = {}) {
+      if (method !== "Runtime.evaluate") return {};
+      if (params.expression.includes('return "unsupported"')) {
+        return { result: { value: "unsupported" } };
+      }
+      return { result: { value: true } };
+    }
+  };
+
+  await assert.rejects(
+    () =>
+      runAction(client, "", {
+        type: "fill",
+        selector: "input[type=file]",
+        value: "anything"
+      }),
+    /browser fill target is unsupported/
+  );
 });
 
 test("press emits complete browser key metadata", async () => {
@@ -255,23 +329,14 @@ test("browser payload accepts bounded demo sessions and rejects unknown sessions
 
 test("demo session setup clears ambient state before visible login", async () => {
   const calls = [];
-  const evaluationResults = [
-    true,
-    true,
-    true,
-    true,
-    true,
-    true,
-    true,
-    true,
-    true,
-    true
-  ];
   const client = {
     async send(method, params = {}) {
       calls.push({ method, params });
       if (method === "Runtime.evaluate") {
-        return { result: { value: evaluationResults.shift() } };
+        if (params.expression.includes('return "text"')) {
+          return { result: { value: "text" } };
+        }
+        return { result: { value: true } };
       }
       return {};
     }
@@ -365,13 +430,19 @@ test("intermediate state is observed only after a user trigger", async () => {
   const client = {
     async send(method, params = {}) {
       if (method === "Page.navigate") return {};
+      if (method === "Input.insertText") {
+        filled = true;
+        return {};
+      }
       if (method === "Input.dispatchKeyEvent") {
         if (params.type === "keyDown") pressed = true;
         return {};
       }
       if (method !== "Runtime.evaluate") return {};
-      if (params.expression.includes("Object.getOwnPropertyDescriptor")) {
-        filled = true;
+      if (params.expression.includes('return "text"')) {
+        return { result: { value: "text" } };
+      }
+      if (params.expression.includes("Boolean(element && !element.disabled")) {
         return { result: { value: true } };
       }
       if (params.expression.includes("textarea.chatInput")) {

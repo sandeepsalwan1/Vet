@@ -316,6 +316,24 @@ function keyEventMetadata(key) {
   fail(`unsupported browser key: ${JSON.stringify(key)}`);
 }
 
+async function dispatchKey(client, key) {
+  const { text, ...metadata } = keyEventMetadata(key);
+  await client.send("Input.dispatchKeyEvent", {
+    type: text ? "keyDown" : "rawKeyDown",
+    modifiers: 0,
+    ...metadata,
+    ...(text ? { text, unmodifiedText: text } : {}),
+    autoRepeat: false,
+    isKeypad: metadata.location === 3,
+    commands: []
+  });
+  await client.send("Input.dispatchKeyEvent", {
+    type: "keyUp",
+    modifiers: 0,
+    ...metadata
+  });
+}
+
 export async function runAction(client, baseUrl, action) {
   if (action.type === "navigate") {
     await navigate(client, baseUrl, action.path);
@@ -326,21 +344,7 @@ export async function runAction(client, baseUrl, action) {
     return `Wait ${action.milliseconds}ms`;
   }
   if (action.type === "press") {
-    const { text, ...metadata } = keyEventMetadata(action.key);
-    await client.send("Input.dispatchKeyEvent", {
-      type: text ? "keyDown" : "rawKeyDown",
-      modifiers: 0,
-      ...metadata,
-      ...(text ? { text, unmodifiedText: text } : {}),
-      autoRepeat: false,
-      isKeypad: metadata.location === 3,
-      commands: []
-    });
-    await client.send("Input.dispatchKeyEvent", {
-      type: "keyUp",
-      modifiers: 0,
-      ...metadata
-    });
+    await dispatchKey(client, action.key);
     return `Press ${action.key}`;
   }
   const selector = JSON.stringify(action.selector);
@@ -372,17 +376,48 @@ export async function runAction(client, baseUrl, action) {
     return `Click ${action.selector} containing ${JSON.stringify(action.value)}`;
   }
   if (action.type === "fill") {
-    const filled = await waitForEvaluation(
+    const fillable = await waitForEvaluation(
       client,
-      `(element => { if (!element) return false; ` +
+      `(element => Boolean(element && !element.disabled && ` +
+        `element.matches("input,textarea,select")))` +
+        `)(document.querySelector(${selector}))`
+    );
+    if (!fillable) fail(`browser fill target was not found: ${action.selector}`);
+    const inputKind = await evaluate(
+      client,
+      `(element => { ` +
         `element.focus(); ` +
-        `const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set; ` +
-        `if (setter) setter.call(element, ${JSON.stringify(action.value)}); else element.value = ${JSON.stringify(action.value)}; ` +
+        `if (element.matches("select")) { ` +
+        `const matched = Array.from(element.options).some(option => option.value === ${JSON.stringify(action.value)}); ` +
+        `if (!matched) return "missing-option"; ` +
+        `for (const option of element.options) option.selected = option.value === ${JSON.stringify(action.value)}; ` +
         `element.dispatchEvent(new Event("input", { bubbles: true })); ` +
-        `element.dispatchEvent(new Event("change", { bubbles: true })); return true; ` +
+        `element.dispatchEvent(new Event("change", { bubbles: true })); ` +
+        `return "select"; ` +
+        `} ` +
+        `const typeable = element.matches(` +
+        `"textarea,input:not([type]),input[type=text],input[type=email],input[type=number],` +
+        `input[type=password],input[type=search],input[type=tel],input[type=url]"); ` +
+        `if (!typeable) return "unsupported"; ` +
+        `if (${JSON.stringify(action.value)} === "") { ` +
+        `const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set; ` +
+        `if (setter) setter.call(element, ""); else element.value = ""; ` +
+        `element.dispatchEvent(new Event("input", { bubbles: true })); ` +
+        `element.dispatchEvent(new Event("change", { bubbles: true })); ` +
+        `return "direct"; ` +
+        `} ` +
+        `element.value = ""; return "text"; ` +
         `})(document.querySelector(${selector}))`
     );
-    if (!filled) fail(`browser fill target was not found: ${action.selector}`);
+    if (inputKind === "unsupported") {
+      fail(`browser fill target is unsupported: ${action.selector}`);
+    }
+    if (inputKind === "missing-option") {
+      fail(`browser fill option was not found: ${action.selector}`);
+    }
+    if (inputKind === "text") {
+      await client.send("Input.insertText", { text: action.value });
+    }
     return `Fill ${action.selector}`;
   }
   fail(`unsupported browser action: ${action.type}`);
