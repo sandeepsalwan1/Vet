@@ -70,6 +70,8 @@ jobs:
       reviewed-base-sha: ${{ steps.mark-pending.outputs.base-sha }}
       reviewed-head-sha: ${{ steps.mark-pending.outputs.head-sha }}
       replay-next-gate: ${{ steps.prompt.outputs.replay-next-gate }}
+      replay-add-automerge: ${{ steps.prompt.outputs.replay-add-automerge }}
+      replay-remove-blocked: ${{ steps.prompt.outputs.replay-remove-blocked }}
       skip-model: ${{ steps.prompt.outputs.skip-model }}
     permissions:
       actions: write
@@ -373,15 +375,19 @@ jobs:
       actions: write
       checks: read
       contents: read
-      pull-requests: read
-      statuses: read
+      issues: write
+      pull-requests: write
+      statuses: write
     steps:
       - name: Dispatch standalone no-mistakes gate
         env:
           GH_TOKEN: ${{ github.token }}
           APPLIED_NEXT_GATE: ${{ needs.apply-review.outputs.next-gate }}
+          EXPECTED_HEAD_SHA: ${{ needs.prepare-review.outputs.reviewed-head-sha }}
           PR_NUMBER: ${{ inputs.pr-number }}
+          REPLAY_ADD_AUTOMERGE: ${{ needs.prepare-review.outputs.replay-add-automerge }}
           REPLAY_NEXT_GATE: ${{ needs.prepare-review.outputs.replay-next-gate }}
+          REPLAY_REMOVE_BLOCKED: ${{ needs.prepare-review.outputs.replay-remove-blocked }}
           SKIP_MODEL: ${{ needs.prepare-review.outputs.skip-model }}
         run: |
           set -euo pipefail
@@ -392,6 +398,28 @@ jobs:
           fi
           head_sha="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)"
           [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
+          if [ "$SKIP_MODEL" = true ]; then
+            test "$head_sha" = "$EXPECTED_HEAD_SHA"
+            gh api "repos/$GITHUB_REPOSITORY/statuses/$head_sha" -X POST \
+              -f state=success \
+              -f context=agent-review \
+              -f description='agent review passed (cached exact-head result)' \
+              -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            labels_file="$RUNNER_TEMP/replay-labels.json"
+            gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER" > "$labels_file"
+            if [ "$REPLAY_ADD_AUTOMERGE" = true ] && \
+              [ "$(jq '[.labels[].name == "agent:automerge"] | any' "$labels_file")" != true ]; then
+              gh issue edit "$PR_NUMBER" \
+                --repo "$GITHUB_REPOSITORY" \
+                --add-label agent:automerge
+            fi
+            if [ "$REPLAY_REMOVE_BLOCKED" = true ] && \
+              [ "$(jq '[.labels[].name == "agent:blocked"] | any' "$labels_file")" = true ]; then
+              gh issue edit "$PR_NUMBER" \
+                --repo "$GITHUB_REPOSITORY" \
+                --remove-label agent:blocked
+            fi
+          fi
           review_state="$(
             gh api "repos/$GITHUB_REPOSITORY/commits/$head_sha/statuses?per_page=100" \
               --jq '[.[] | select(.context == "agent-review" and .creator.login == "github-actions[bot]")] | sort_by(.created_at) | last | .state // "missing"'
