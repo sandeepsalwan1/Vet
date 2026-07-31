@@ -147,8 +147,10 @@ test("text proof binds a select assertion to its selected value", () => {
   assert.equal(result, false);
 });
 
-test("fill types browser key events into a focused cleared control", async () => {
+test("fill uses the native setter and waits for the controlled value to persist", async () => {
   const calls = [];
+  let persistenceChecks = 0;
+  let triggeredAtPersistenceCheck;
   const client = {
     async send(method, params = {}) {
       calls.push({ method, params });
@@ -158,15 +160,29 @@ test("fill types browser key events into a focused cleared control", async () =>
       ) {
         return { result: { value: "text" } };
       }
+      if (
+        method === "Runtime.evaluate" &&
+        params.expression.includes('element.value === "Hello"')
+      ) {
+        persistenceChecks += 1;
+        return { result: { value: true } };
+      }
       return { result: { value: true } };
     }
   };
 
-  await runAction(client, "", {
-    type: "fill",
-    selector: "textarea.chatInput",
-    value: "Hello"
-  });
+  await runAction(
+    client,
+    "",
+    {
+      type: "fill",
+      selector: "textarea.chatInput",
+      value: "Hello"
+    },
+    () => {
+      triggeredAtPersistenceCheck = persistenceChecks;
+    }
+  );
 
   for (const { method, params } of calls) {
     if (method === "Runtime.evaluate") {
@@ -178,31 +194,66 @@ test("fill types browser key events into a focused cleared control", async () =>
       ({ method, params }) =>
         method === "Runtime.evaluate" &&
         params.expression.includes("element.focus()") &&
-        params.expression.includes('element.value = ""; return "text"')
+        params.expression.includes("Object.getOwnPropertyDescriptor") &&
+        params.expression.includes('setter.call(element, "Hello")') &&
+        params.expression.includes('new InputEvent("input"')
     )
   );
-  assert.ok(
-    calls
-      .filter(
-        ({ method, params }) =>
-          method === "Input.dispatchKeyEvent" &&
-          params.type === "keyDown"
-      )
-      .map(({ params }) => params.text)
-      .join("") === "Hello"
-  );
+  assert.equal(triggeredAtPersistenceCheck, 0);
+  assert.ok(persistenceChecks >= 5);
+  assert.ok(calls.every(({ method }) => method !== "Input.dispatchKeyEvent"));
+  assert.ok(calls.every(({ method }) => method !== "Input.insertText"));
 });
 
-test("fill falls back to text insertion only for punctuation and Unicode", async () => {
-  const calls = [];
+test("fill fails before the next action when controlled state rejects the value", async () => {
+  let persistenceChecks = 0;
   const client = {
     async send(method, params = {}) {
-      calls.push({ method, params });
       if (
         method === "Runtime.evaluate" &&
         params.expression.includes('return "text"')
       ) {
         return { result: { value: "text" } };
+      }
+      if (
+        method === "Runtime.evaluate" &&
+        params.expression.includes('element.value === "a@b.c"')
+      ) {
+        persistenceChecks += 1;
+        return { result: { value: persistenceChecks <= 3 } };
+      }
+      return { result: { value: true } };
+    }
+  };
+
+  await assert.rejects(
+    () =>
+      runAction(client, "", {
+        type: "fill",
+        selector: "input[type=email]",
+        value: "a@b.c"
+      }),
+    /browser fill did not persist: input\[type=email\]/
+  );
+  assert.ok(persistenceChecks > 3);
+});
+
+test("select fill waits for the controlled value to persist", async () => {
+  let persistenceChecks = 0;
+  const client = {
+    async send(method, params = {}) {
+      if (
+        method === "Runtime.evaluate" &&
+        params.expression.includes('return "select"')
+      ) {
+        return { result: { value: "select" } };
+      }
+      if (
+        method === "Runtime.evaluate" &&
+        params.expression.includes('element.value === "urgent"')
+      ) {
+        persistenceChecks += 1;
+        return { result: { value: true } };
       }
       return { result: { value: true } };
     }
@@ -210,27 +261,11 @@ test("fill falls back to text insertion only for punctuation and Unicode", async
 
   await runAction(client, "", {
     type: "fill",
-    selector: "input[type=email]",
-    value: "a@b.c"
+    selector: "select[name=priority]",
+    value: "urgent"
   });
 
-  assert.deepEqual(
-    calls
-      .filter(({ method }) => method === "Input.insertText")
-      .map(({ params }) => params.text),
-    ["@", "."]
-  );
-  assert.equal(
-    calls
-      .filter(
-        ({ method, params }) =>
-          method === "Input.dispatchKeyEvent" &&
-          params.type === "keyDown"
-      )
-      .map(({ params }) => params.text)
-      .join(""),
-    "abc"
-  );
+  assert.ok(persistenceChecks >= 5);
 });
 
 test("empty fill clears a controlled input through its native value setter", async () => {
@@ -240,9 +275,9 @@ test("empty fill clears a controlled input through its native value setter", asy
       calls.push({ method, params });
       if (
         method === "Runtime.evaluate" &&
-        params.expression.includes('return "direct"')
+        params.expression.includes('return "text"')
       ) {
-        return { result: { value: "direct" } };
+        return { result: { value: "text" } };
       }
       return { result: { value: true } };
     }
@@ -259,7 +294,8 @@ test("empty fill clears a controlled input through its native value setter", asy
       ({ method, params }) =>
         method === "Runtime.evaluate" &&
         params.expression.includes("Object.getOwnPropertyDescriptor") &&
-        params.expression.includes('dispatchEvent(new Event("input"')
+        params.expression.includes('setter.call(element, "")') &&
+        params.expression.includes('new InputEvent("input"')
     )
   );
   assert.ok(
@@ -478,18 +514,17 @@ test("intermediate state is observed only after a user trigger", async () => {
   const client = {
     async send(method, params = {}) {
       if (method === "Page.navigate") return {};
-      if (method === "Input.insertText") {
-        filled = true;
-        return {};
-      }
       if (method === "Input.dispatchKeyEvent") {
         if (params.type === "keyDown" && params.key === "Enter") pressed = true;
-        if (params.type === "keyDown" && params.key !== "Enter") filled = true;
         return {};
       }
       if (method !== "Runtime.evaluate") return {};
       if (params.expression.includes('return "text"')) {
+        filled = true;
         return { result: { value: "text" } };
+      }
+      if (params.expression.includes('element.value === "trigger"')) {
+        return { result: { value: true } };
       }
       if (params.expression.includes("Boolean(element && !element.disabled")) {
         return { result: { value: true } };
@@ -509,6 +544,63 @@ test("intermediate state is observed only after a user trigger", async () => {
   assert.ok(intermediateChecks.every((check) => check.filled));
   assert.ok(intermediateChecks.some((check) => !check.pressed));
   assert.ok(intermediateChecks.some((check) => check.pressed));
+});
+
+test("rejected controlled fill cannot authorize a later action or assertion", async () => {
+  let pressed = false;
+  let emptyAssertionChecks = 0;
+  const task = {
+    clauseIds: ["AC1"],
+    route: "/proof/dog-egg",
+    session: "none",
+    actions: [
+      { type: "fill", selector: "textarea.chatInput", value: "trigger" },
+      { type: "press", key: "Enter" }
+    ],
+    intermediateAssertions: [
+      { type: "text", selector: "textarea.chatInput", value: "" }
+    ],
+    finalAssertions: [
+      { type: "visible", selector: "[data-agent-proof='dog-easter-egg']" }
+    ]
+  };
+  const client = {
+    async send(method, params = {}) {
+      if (method === "Input.dispatchKeyEvent") {
+        pressed = true;
+        return {};
+      }
+      if (method !== "Runtime.evaluate") return {};
+      if (params.expression.includes('return "text"')) {
+        return { result: { value: "text" } };
+      }
+      if (params.expression.includes('element.value === "trigger"')) {
+        return { result: { value: false } };
+      }
+      if (
+        params.expression.includes("textarea.chatInput") &&
+        params.expression.includes('=== ""')
+      ) {
+        emptyAssertionChecks += 1;
+        return { result: { value: true } };
+      }
+      return { result: { value: true } };
+    }
+  };
+
+  const result = await runTask(client, payload, task);
+
+  assert.equal(result.status, "fail");
+  assert.match(result.evidence, /browser fill did not persist/);
+  assert.equal(pressed, false);
+  assert.ok(emptyAssertionChecks > 0);
+  assert.deepEqual(result.assertions, [
+    {
+      phase: "intermediate",
+      assertion: "textarea.chatInput contains expected text",
+      passed: false
+    }
+  ]);
 });
 
 test("requested intermediate state cannot disappear without a user trigger", async () => {

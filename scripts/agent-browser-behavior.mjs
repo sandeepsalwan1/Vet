@@ -343,14 +343,30 @@ async function dispatchKey(client, key, onKeyDown) {
   });
 }
 
-async function typeText(client, value) {
-  for (const character of [...value]) {
-    if (/^[A-Za-z0-9 ]$/.test(character)) {
-      await dispatchKey(client, character);
-    } else {
-      await client.send("Input.insertText", { text: character });
+async function waitForStableInputValue(
+  client,
+  selector,
+  value,
+  timeoutMs = 1_000,
+  stableMs = 250
+) {
+  const deadline = Date.now() + timeoutMs;
+  let matchingSince;
+  do {
+    const matches = await evaluate(
+      client,
+      `(element => Boolean(element && element.value === ${JSON.stringify(value)}))` +
+        `(document.querySelector(${JSON.stringify(selector)}))`,
+      true
+    );
+    if (!matches) matchingSince = undefined;
+    else {
+      matchingSince ??= Date.now();
+      if (Date.now() - matchingSince >= stableMs) return true;
     }
-  }
+    await sleep(50);
+  } while (Date.now() < deadline);
+  return false;
 }
 
 export async function runAction(client, baseUrl, action, onTriggered) {
@@ -420,14 +436,15 @@ export async function runAction(client, baseUrl, action, onTriggered) {
         `"textarea,input:not([type]),input[type=text],input[type=email],input[type=number],` +
         `input[type=password],input[type=search],input[type=tel],input[type=url]"); ` +
         `if (!typeable) return "unsupported"; ` +
-        `if (${JSON.stringify(action.value)} === "") { ` +
         `const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set; ` +
-        `if (setter) setter.call(element, ""); else element.value = ""; ` +
-        `element.dispatchEvent(new Event("input", { bubbles: true })); ` +
+        `if (setter) setter.call(element, ${JSON.stringify(action.value)}); ` +
+        `else element.value = ${JSON.stringify(action.value)}; ` +
+        `const inputEvent = typeof InputEvent === "function" ` +
+        `? new InputEvent("input", { bubbles: true, inputType: "insertText", data: ${JSON.stringify(action.value)} }) ` +
+        `: new Event("input", { bubbles: true }); ` +
+        `element.dispatchEvent(inputEvent); ` +
         `element.dispatchEvent(new Event("change", { bubbles: true })); ` +
-        `return "direct"; ` +
-        `} ` +
-        `element.value = ""; return "text"; ` +
+        `return "text"; ` +
         `})(document.querySelector(${selector}))`
     );
     if (inputKind === "unsupported") {
@@ -436,10 +453,14 @@ export async function runAction(client, baseUrl, action, onTriggered) {
     if (inputKind === "missing-option") {
       fail(`browser fill option was not found: ${action.selector}`);
     }
-    if (inputKind === "text") {
-      await typeText(client, action.value);
+    const triggeredObservation = onTriggered?.();
+    if (
+      ["select", "text"].includes(inputKind) &&
+      !(await waitForStableInputValue(client, action.selector, action.value))
+    ) {
+      await triggeredObservation;
+      fail(`browser fill did not persist: ${action.selector}`);
     }
-    onTriggered?.();
     return `Fill ${action.selector}`;
   }
   fail(`unsupported browser action: ${action.type}`);
@@ -553,7 +574,7 @@ export async function runTask(client, payload, task) {
       let observationPromise;
       const observeTriggeredState = pending.length
         ? () => {
-            if (observationPromise) return;
+            if (observationPromise) return observationPromise;
             observationPromise = waitForAssertions(
               client,
               pending.map((entry) => entry.assertion),
@@ -565,6 +586,7 @@ export async function runTask(client, payload, task) {
               (observed) => ({ observed }),
               (error) => ({ error })
             );
+            return observationPromise;
           }
         : undefined;
       reproductionSteps.push(
