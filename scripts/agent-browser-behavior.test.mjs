@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   assertionLabel,
   assertionExpression,
+  dispatchLinuxDesktopKey,
   establishDemoSession,
   installBrowserEventCollector,
   intermediateAssertionTimeout,
@@ -588,6 +589,81 @@ test("non-text keys use raw keydown browser metadata", async () => {
   assert.equal(keyCalls[0].params.unmodifiedText, undefined);
   assert.equal(keyCalls[0].params.nativeVirtualKeyCode, undefined);
   assert.equal(keyCalls[1].params.type, "keyUp");
+});
+
+test("Linux desktop key dispatch uses the active Crabbox browser window", async () => {
+  const calls = [];
+  const phases = [];
+  const run = async (...args) => {
+    calls.push(args);
+    phases.push(calls.length === 1 ? "prepare" : "dispatch");
+    return calls.length === 1 ? { stdout: "xdotool:4242\n" } : {};
+  };
+
+  assert.equal(
+    await dispatchLinuxDesktopKey("Enter", run, () => {
+      phases.push("observe");
+    }),
+    true
+  );
+
+  assert.equal(calls[0][0], "sh");
+  assert.equal(calls[0][1][0], "-lc");
+  assert.match(calls[0][1][1], /\/var\/lib\/crabbox\/desktop\.env/);
+  assert.match(
+    calls[0][1][1],
+    /xdotool getwindowclassname "\$active_window"/
+  );
+  assert.match(calls[0][1][1], /\*chrome\*\|\*chromium\*/);
+  assert.doesNotMatch(calls[0][1][1], /xdotool search/);
+  assert.doesNotMatch(calls[0][1][1], /wtype/);
+  assert.deepEqual(calls[0][2], { timeout: 5_000, maxBuffer: 4_096 });
+  assert.match(calls[1][1][1], /\[ "\$active_window" = "\$1" \] \|\| exit 126/);
+  assert.match(
+    calls[1][1][1],
+    /xdotool getwindowclassname "\$active_window"/
+  );
+  assert.match(calls[1][1][1], /exec xdotool key --clearmodifiers "\$2"/);
+  assert.equal(calls[1][1][3], "4242");
+  assert.equal(calls[1][1][4], "Return");
+  assert.deepEqual(phases, ["prepare", "observe", "dispatch"]);
+});
+
+test("Linux desktop key dispatch falls back only before sending input", async () => {
+  const unavailable = Object.assign(new Error("missing desktop input"), {
+    code: 127
+  });
+  assert.equal(
+    await dispatchLinuxDesktopKey("ArrowDown", async () => {
+      throw unavailable;
+    }),
+    false
+  );
+  await assert.rejects(
+    () =>
+      dispatchLinuxDesktopKey("Enter", async (_file, _args, _options) => {
+        if (_args[1].includes("printf 'xdotool")) {
+          return { stdout: "xdotool:4242\n" };
+        }
+        throw Object.assign(new Error("input failed"), { code: 1 });
+      }),
+    /native browser key failed: 1/
+  );
+  let dispatchAttempt = 0;
+  assert.equal(
+    await dispatchLinuxDesktopKey("Enter", async () => {
+      dispatchAttempt += 1;
+      if (dispatchAttempt === 1) return { stdout: "xdotool:4242\n" };
+      throw Object.assign(new Error("focus changed"), { code: 126 });
+    }),
+    false
+  );
+  assert.equal(
+    await dispatchLinuxDesktopKey("Enter", async () => {
+      throw Object.assign(new Error("browser window missing"), { code: 126 });
+    }),
+    false
+  );
 });
 
 test("press rejects keys without truthful DOM metadata", async () => {

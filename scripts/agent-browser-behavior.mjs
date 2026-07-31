@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 export const BROWSER_BEHAVIOR_MARKER = "AGENT_BROWSER_BEHAVIOR_V1 ";
 export const DEMO_SESSION_CREDENTIALS = Object.freeze({
@@ -64,6 +66,7 @@ const EVENT_INPUT_TYPES = new Set([
   "deleteContentForward"
 ]);
 const browserEventCollectors = new WeakMap();
+const execFileAsync = promisify(execFile);
 let navigationSequence = 0;
 
 function parseArgs(argv = process.argv.slice(2)) {
@@ -577,6 +580,17 @@ function keyEventMetadata(key) {
 async function dispatchKey(client, key, onKeyDown) {
   const { text, ...metadata } = keyEventMetadata(key);
   await client.send("Page.bringToFront");
+  let observationStarted = false;
+  if (browserEventCollectors.has(client) && process.platform === "linux") {
+    if (
+      await dispatchLinuxDesktopKey(key, execFileAsync, () => {
+        observationStarted = true;
+        onKeyDown?.();
+      })
+    ) {
+      return;
+    }
+  }
   const keyDown = client.send("Input.dispatchKeyEvent", {
     type: text ? "keyDown" : "rawKeyDown",
     modifiers: 0,
@@ -586,13 +600,99 @@ async function dispatchKey(client, key, onKeyDown) {
     isKeypad: metadata.location === 3,
     commands: []
   });
-  onKeyDown?.();
+  if (!observationStarted) onKeyDown?.();
   await keyDown;
   await client.send("Input.dispatchKeyEvent", {
     type: "keyUp",
     modifiers: 0,
     ...metadata
   });
+}
+
+export async function dispatchLinuxDesktopKey(
+  key,
+  run = execFileAsync,
+  onDispatch
+) {
+  const names = {
+    Backspace: "BackSpace",
+    Tab: "Tab",
+    Enter: "Return",
+    Escape: "Escape",
+    " ": "space",
+    PageUp: "Page_Up",
+    PageDown: "Page_Down",
+    End: "End",
+    Home: "Home",
+    ArrowLeft: "Left",
+    ArrowUp: "Up",
+    ArrowRight: "Right",
+    ArrowDown: "Down",
+    Insert: "Insert",
+    Delete: "Delete"
+  };
+  const desktopKey =
+    names[key] ?? (/^[A-Za-z0-9]$/.test(key) ? key : undefined);
+  if (!desktopKey) fail(`unsupported desktop key: ${JSON.stringify(key)}`);
+  const prepareScript = `
+set -eu
+if [ -f /var/lib/crabbox/desktop.env ]; then . /var/lib/crabbox/desktop.env; fi
+export DISPLAY="\${DISPLAY:-:99}"
+if command -v xdotool >/dev/null 2>&1 && xdotool getactivewindow >/dev/null 2>&1; then
+  active_window="$(xdotool getactivewindow)"
+  active_class="$(xdotool getwindowclassname "$active_window" 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
+  case "$active_class" in
+    *chrome*|*chromium*) ;;
+    *) exit 126 ;;
+  esac
+  printf 'xdotool:%s\\n' "$active_window"
+  exit 0
+fi
+exit 127
+`;
+  let activeWindow;
+  try {
+    const prepared = await run(
+      "sh",
+      ["-lc", prepareScript, "agent-browser-key"],
+      { timeout: 5_000, maxBuffer: 4_096 }
+    );
+    const match = /^xdotool:([1-9][0-9]*)$/.exec(
+      String(prepared?.stdout ?? "").trim()
+    );
+    activeWindow = match?.[1];
+  } catch (error) {
+    if ([126, 127].includes(error?.code)) return false;
+    fail(`native browser key failed: ${error?.code ?? "unknown"}`);
+  }
+  if (!activeWindow) {
+    fail("native browser key preparation returned an unknown backend");
+  }
+  onDispatch?.();
+  const dispatchScript = `
+set -eu
+if [ -f /var/lib/crabbox/desktop.env ]; then . /var/lib/crabbox/desktop.env; fi
+export DISPLAY="\${DISPLAY:-:99}"
+active_window="$(xdotool getactivewindow)"
+[ "$active_window" = "$1" ] || exit 126
+active_class="$(xdotool getwindowclassname "$active_window" 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
+case "$active_class" in
+  *chrome*|*chromium*) ;;
+  *) exit 126 ;;
+esac
+exec xdotool key --clearmodifiers "$2"
+`;
+  try {
+    await run(
+      "sh",
+      ["-lc", dispatchScript, "agent-browser-key", activeWindow, desktopKey],
+      { timeout: 5_000, maxBuffer: 4_096 }
+    );
+    return true;
+  } catch (error) {
+    if ([126, 127].includes(error?.code)) return false;
+    fail(`native browser key failed: ${error?.code ?? "unknown"}`);
+  }
 }
 
 async function selectAllText(client) {
