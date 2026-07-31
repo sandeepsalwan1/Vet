@@ -9,6 +9,8 @@ test("task board chrome reveals a short frog easter egg after five activations",
   const source = readSource("./TaskBoardChrome.tsx");
   const styles = readSource("../globals.css");
 
+  assert.match(source, /function BootScreen\(\) \{/);
+  assert.match(source, /<FrogWordmark \/>/);
   assert.match(source, /function FrogWordmark\(\) \{/);
   assert.match(source, /const \[activationCount, setActivationCount\] = useState\(0\);/);
   assert.match(source, /activationRef\.current === 5|nextCount === 5/);

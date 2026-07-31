@@ -5,8 +5,8 @@ import { getSession, logout, type AccountSession } from "../lib/accountStore";
 import { validateAccountTeamSession } from "../lib/authClient";
 import { AdminDashboard } from "./admin/AdminDashboard";
 import { AuthScreen, type Audience } from "./auth/AuthScreen";
-import { ClinicLoadingPanel, ClinicProvider, useClinicBrand } from "./ClinicContext";
-import { ClinicWordmark } from "./ClinicWordmark";
+import { ClinicLoadingPanel, ClinicProvider } from "./ClinicContext";
+import { FrogWordmark } from "./TaskBoardChrome";
 import { CustomerExperience } from "./customer/CustomerExperience";
 import { TaskBoard } from "./TaskBoard";
 import {
@@ -73,7 +73,6 @@ async function resolveViewForSession(session: AccountSession): Promise<View> {
 
 function AppRootContent({ audience }: { audience: Audience }) {
   const [view, setView] = useState<View>({ kind: "loading" });
-  const clinic = useClinicBrand();
 
   useEffect(() => {
     let cancelled = false;
@@ -125,13 +124,13 @@ function AppRootContent({ audience }: { audience: Audience }) {
 
   if (view.kind === "loading" || view.kind === "redirecting") {
     if (view.kind === "loading") {
-      return <ClinicLoadingPanel />;
+      return <ClinicLoadingPanel wordmark={<FrogWordmark />} />;
     }
 
     return (
       <main className="entryShell">
         <section className="entryPanel bootPanel">
-          <ClinicWordmark name={clinic.name} />
+          <FrogWordmark />
           <p className="bootLine">Taking you there…</p>
         </section>
       </main>

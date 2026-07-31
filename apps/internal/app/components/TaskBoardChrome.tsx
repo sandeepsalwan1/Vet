@@ -69,11 +69,10 @@ export function SessionNameTag({
 }
 
 export function BootScreen() {
-  const clinic = useClinicBrand();
   return (
     <main className="entryShell">
       <section className="entryPanel bootPanel">
-        <ClinicWordmark name={clinic.name} />
+        <FrogWordmark />
         <div className="bootLine">Opening board</div>
       </section>
     </main>
