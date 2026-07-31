@@ -576,11 +576,14 @@ function keyEventMetadata(key) {
 
 async function dispatchKey(client, key, onKeyDown) {
   const { text, ...metadata } = keyEventMetadata(key);
+  const characterText = /^[A-Za-z0-9]$/.test(key) ? text : undefined;
   const keyDown = client.send("Input.dispatchKeyEvent", {
-    type: text ? "keyDown" : "rawKeyDown",
+    type: characterText ? "keyDown" : "rawKeyDown",
     modifiers: 0,
     ...metadata,
-    ...(text ? { text, unmodifiedText: text } : {}),
+    ...(characterText
+      ? { text: characterText, unmodifiedText: characterText }
+      : {}),
     autoRepeat: false,
     isKeypad: metadata.location === 3,
     commands: []

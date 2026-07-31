@@ -493,14 +493,12 @@ test("press emits complete browser key metadata", async () => {
     {
       method: "Input.dispatchKeyEvent",
       params: {
-        type: "keyDown",
+        type: "rawKeyDown",
         modifiers: 0,
         key: "Enter",
         code: "Enter",
         windowsVirtualKeyCode: 13,
         location: 0,
-        text: "\r",
-        unmodifiedText: "\r",
         autoRepeat: false,
         isKeypad: false,
         commands: []
@@ -518,6 +516,42 @@ test("press emits complete browser key metadata", async () => {
       }
     }
   ]);
+});
+
+test("alphanumeric press retains browser text generation", async () => {
+  const calls = [];
+  const client = {
+    async send(method, params = {}) {
+      calls.push({ method, params });
+      return {};
+    }
+  };
+
+  await runAction(client, "", { type: "press", key: "a" });
+
+  assert.equal(calls[0].params.type, "keyDown");
+  assert.equal(calls[0].params.text, "a");
+  assert.equal(calls[0].params.unmodifiedText, "a");
+  assert.equal(calls[1].params.type, "keyUp");
+});
+
+test("Space uses one named-control raw key sequence", async () => {
+  const calls = [];
+  const client = {
+    async send(method, params = {}) {
+      calls.push({ method, params });
+      return {};
+    }
+  };
+
+  await runAction(client, "", { type: "press", key: " " });
+
+  assert.equal(calls[0].params.type, "rawKeyDown");
+  assert.equal(calls[0].params.key, " ");
+  assert.equal(calls[0].params.code, "Space");
+  assert.equal(calls[0].params.text, undefined);
+  assert.equal(calls[0].params.unmodifiedText, undefined);
+  assert.equal(calls[1].params.type, "keyUp");
 });
 
 test("non-text keys use raw keydown browser metadata", async () => {
@@ -710,7 +744,7 @@ test("intermediate state is observed only after a user trigger", async () => {
     async send(method, params = {}) {
       if (method === "Page.navigate") return {};
       if (method === "Input.dispatchKeyEvent") {
-        if (params.type === "keyDown" && params.key === "Enter") pressed = true;
+        if (params.type === "rawKeyDown" && params.key === "Enter") pressed = true;
         return {};
       }
       if (method !== "Runtime.evaluate") return {};
@@ -763,7 +797,7 @@ test("rejected controlled fill cannot authorize a later action or assertion", as
     async send(method, params = {}) {
       if (
         method === "Input.dispatchKeyEvent" &&
-        params.type === "keyDown" &&
+        params.type === "rawKeyDown" &&
         params.key === "Enter"
       ) {
         pressed = true;
@@ -1331,7 +1365,7 @@ test("key-triggered final state is observed before a slow keydown response", asy
     async send(method, params = {}) {
       if (
         method === "Input.dispatchKeyEvent" &&
-        params.type === "keyDown"
+        params.type === "rawKeyDown"
       ) {
         visible = true;
         setTimeout(() => {
