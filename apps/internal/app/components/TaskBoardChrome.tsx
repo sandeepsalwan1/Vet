@@ -144,6 +144,7 @@ export function FrogWordmark() {
         role="status"
         aria-live="polite"
         aria-atomic="true"
+        aria-hidden={!revealed}
         data-agent-proof="frog-easter-egg"
       >
         <span className="frogEasterEggIcon" aria-hidden="true">
