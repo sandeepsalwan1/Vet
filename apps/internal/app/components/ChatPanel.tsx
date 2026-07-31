@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Bot, CheckCircle2, Clock, Send, ShieldAlert, User } from "lucide-react";
+import { AlertCircle, Bot, CheckCircle2, Clock, PawPrint, Send, ShieldAlert, User } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { ReportSummary, WorkflowStatus } from "../lib/agentClient";
 import { ChatReportCard } from "./ChatReportCard";
@@ -23,6 +23,9 @@ type Props = {
   placeholder?: string;
   className?: string;
 };
+
+const DOG_EGG_PHRASE = "i need a dog image now";
+const DOG_EGG_VISIBLE_MS = 1600;
 
 const statusMeta: Record<WorkflowStatus, { label: string; icon: React.ReactNode; cls: string }> = {
   running: { label: "Running", icon: <Clock size={12} />, cls: "agentChip agentChip--running" },
@@ -47,31 +50,61 @@ function formatMarkdown(text: string) {
     .replace(/\n/g, "<br />");
 }
 
+export function normalizeDogEggInput(text: string) {
+  return text.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 export function ChatPanel({ messages, onSend, isLoading, placeholder, className }: Props) {
   const [input, setInput] = useState("");
+  const [dogVisible, setDogVisible] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const dogTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
-  function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  useEffect(() => {
+    return () => {
+      if (dogTimeoutRef.current !== null) {
+        window.clearTimeout(dogTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  function showDogEgg() {
+    if (dogTimeoutRef.current !== null) {
+      window.clearTimeout(dogTimeoutRef.current);
+    }
+    setDogVisible(true);
+    dogTimeoutRef.current = window.setTimeout(() => {
+      setDogVisible(false);
+      dogTimeoutRef.current = null;
+    }, DOG_EGG_VISIBLE_MS);
+  }
+
+  function submitInput() {
     const trimmed = input.trim();
     if (!trimmed || isLoading) return;
+    if (normalizeDogEggInput(trimmed) === DOG_EGG_PHRASE) {
+      setInput("");
+      showDogEgg();
+      return;
+    }
     onSend(trimmed);
     setInput("");
+  }
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    submitInput();
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      const trimmed = input.trim();
-      if (trimmed && !isLoading) {
-        onSend(trimmed);
-        setInput("");
-      }
+      submitInput();
     }
   }
 
@@ -137,6 +170,14 @@ export function ChatPanel({ messages, onSend, isLoading, placeholder, className 
                 <span className="typingDot" />
                 <span className="typingDot" />
               </div>
+            </div>
+          </div>
+        )}
+        {dogVisible && (
+          <div className="chatDogEgg" data-agent-proof="dog-easter-egg" aria-live="polite">
+            <div className="chatDogEggCard">
+              <PawPrint size={18} />
+              <span>tiny dog incoming</span>
             </div>
           </div>
         )}
