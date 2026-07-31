@@ -610,10 +610,18 @@ async function dispatchKey(client, key, onKeyDown) {
     process.platform === "linux"
   ) {
     if (
-      await dispatchLinuxDesktopKey(key, browserPid, execFileAsync, () => {
-        observationStarted = true;
-        onKeyDown?.();
-      })
+      await dispatchLinuxDesktopKey(
+        key,
+        browserPid,
+        execFileAsync,
+        () => {
+          observationStarted = true;
+          onKeyDown?.();
+        },
+        (reason) => {
+          process.stderr.write(`AGENT_BROWSER_NATIVE_KEY_FALLBACK ${reason}\n`);
+        }
+      )
     ) {
       return;
     }
@@ -640,7 +648,8 @@ export async function dispatchLinuxDesktopKey(
   key,
   browserPid,
   run = execFileAsync,
-  onDispatch
+  onDispatch,
+  onFallback
 ) {
   const names = {
     Backspace: "BackSpace",
@@ -667,20 +676,21 @@ set -eu
 if [ -f /var/lib/crabbox/desktop.env ]; then . /var/lib/crabbox/desktop.env; fi
 export DISPLAY="\${DISPLAY:-:99}"
 case "$1" in
-  ''|*[!0-9]*) exit 126 ;;
+  ''|*[!0-9]*) exit 120 ;;
 esac
 if command -v xdotool >/dev/null 2>&1; then
   visible_windows="$(
     xdotool search --onlyvisible --pid "$1" 2>/dev/null | sort -un
   )"
   case "$visible_windows" in
-    ''|*'
-'*) exit 126 ;;
+    '') exit 121 ;;
+    *'
+'*) exit 122 ;;
   esac
-  printf '%s\\n' "$visible_windows" | grep -Eq '^[1-9][0-9]*$' || exit 126
+  printf '%s\\n' "$visible_windows" | grep -Eq '^[1-9][0-9]*$' || exit 123
   active_window="$visible_windows"
-  xdotool windowactivate --sync "$active_window" || exit 126
-  [ "$(xdotool getactivewindow 2>/dev/null || true)" = "$active_window" ] || exit 126
+  xdotool windowactivate --sync "$active_window" || exit 124
+  [ "$(xdotool getactivewindow 2>/dev/null || true)" = "$active_window" ] || exit 125
   active_class="$(xdotool getwindowclassname "$active_window" 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
   case "$active_class" in
     *chrome*|*chromium*) ;;
@@ -703,7 +713,20 @@ exit 127
     );
     activeWindow = match?.[1];
   } catch (error) {
-    if ([126, 127].includes(error?.code)) return false;
+    const fallbackReasons = {
+      120: "invalid-browser-pid",
+      121: "no-visible-pid-window",
+      122: "ambiguous-visible-pid-window",
+      123: "invalid-window-id",
+      124: "window-activation-failed",
+      125: "window-activation-mismatch",
+      126: "window-class-mismatch",
+      127: "xdotool-unavailable"
+    };
+    if (fallbackReasons[error?.code]) {
+      onFallback?.(fallbackReasons[error.code]);
+      return false;
+    }
     fail(`native browser key failed: ${error?.code ?? "unknown"}`);
   }
   if (!activeWindow) {
@@ -731,7 +754,12 @@ exec xdotool key --clearmodifiers "$2"
     );
     return true;
   } catch (error) {
-    if ([126, 127].includes(error?.code)) return false;
+    if ([126, 127].includes(error?.code)) {
+      onFallback?.(
+        error.code === 126 ? "window-focus-changed" : "xdotool-dispatch-unavailable"
+      );
+      return false;
+    }
     fail(`native browser key failed: ${error?.code ?? "unknown"}`);
   }
 }

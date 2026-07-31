@@ -669,13 +669,20 @@ test("Linux desktop key dispatch uses the unique visible Crabbox browser window"
 });
 
 test("Linux desktop key dispatch falls back only before sending input", async () => {
+  const fallbackReasons = [];
   const unavailable = Object.assign(new Error("missing desktop input"), {
     code: 127
   });
   assert.equal(
-    await dispatchLinuxDesktopKey("ArrowDown", 777, async () => {
-      throw unavailable;
-    }),
+    await dispatchLinuxDesktopKey(
+      "ArrowDown",
+      777,
+      async () => {
+        throw unavailable;
+      },
+      undefined,
+      (reason) => fallbackReasons.push(reason)
+    ),
     false
   );
   await assert.rejects(
@@ -690,19 +697,36 @@ test("Linux desktop key dispatch falls back only before sending input", async ()
   );
   let dispatchAttempt = 0;
   assert.equal(
-    await dispatchLinuxDesktopKey("Enter", 777, async () => {
-      dispatchAttempt += 1;
-      if (dispatchAttempt === 1) return { stdout: "xdotool:4242\n" };
-      throw Object.assign(new Error("focus changed"), { code: 126 });
-    }),
+    await dispatchLinuxDesktopKey(
+      "Enter",
+      777,
+      async () => {
+        dispatchAttempt += 1;
+        if (dispatchAttempt === 1) return { stdout: "xdotool:4242\n" };
+        throw Object.assign(new Error("focus changed"), { code: 126 });
+      },
+      undefined,
+      (reason) => fallbackReasons.push(reason)
+    ),
     false
   );
   assert.equal(
-    await dispatchLinuxDesktopKey("Enter", 777, async () => {
-      throw Object.assign(new Error("browser window missing"), { code: 126 });
-    }),
+    await dispatchLinuxDesktopKey(
+      "Enter",
+      777,
+      async () => {
+        throw Object.assign(new Error("browser window missing"), { code: 126 });
+      },
+      undefined,
+      (reason) => fallbackReasons.push(reason)
+    ),
     false
   );
+  assert.deepEqual(fallbackReasons, [
+    "xdotool-unavailable",
+    "window-focus-changed",
+    "window-class-mismatch"
+  ]);
 });
 
 test("press rejects keys without truthful DOM metadata", async () => {
