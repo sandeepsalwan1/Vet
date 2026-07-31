@@ -343,7 +343,10 @@ test("visual behavior plan covers every sealed clause and GIF transition", () =>
       {
         clauseIds: ["AC1", "AC2"],
         route: "/proof/loading",
-        actions: [{ type: "navigate", path: "/proof/loading" }],
+        actions: [
+          { type: "navigate", path: "/proof/loading" },
+          { type: "click", selector: "[data-agent-proof='start']" }
+        ],
         intermediateAssertions: [
           { type: "visible", selector: "[data-agent-proof-state='loading']" }
         ],
@@ -416,7 +419,10 @@ test("browser clauses that name a sealed route cannot use another page", () => {
   const task = {
     clauseIds: ["AC1"],
     route: "/proof/loading",
-    actions: [{ type: "navigate", path: "/proof/loading" }],
+    actions: [
+      { type: "navigate", path: "/proof/loading" },
+      { type: "click", selector: "[data-agent-proof='start']" }
+    ],
     intermediateAssertions: [{ type: "visible", selector: "main" }],
     finalAssertions: [{ type: "visible", selector: "main" }]
   };
@@ -442,7 +448,10 @@ test("browser clauses that name a sealed route cannot use another page", () => {
           {
             ...task,
             route: "/",
-            actions: [{ type: "navigate", path: "/" }]
+            actions: [
+              { type: "navigate", path: "/" },
+              { type: "click", selector: "[data-agent-proof='start']" }
+            ]
           }
         ]
       }
@@ -491,7 +500,10 @@ test("browser clauses that name a sealed route cannot use another page", () => {
           {
             ...task,
             route: "/experiment",
-            actions: [{ type: "navigate", path: "/experiment" }]
+            actions: [
+              { type: "navigate", path: "/experiment" },
+              { type: "click", selector: "[data-agent-proof='start']" }
+            ]
           }
         ]
       }
@@ -841,7 +853,10 @@ test("published GIF proof is downloaded, digest-bound, exact-head, and playable"
         {
           clauseIds: ["AC1"],
           route: "/proof/loading",
-          actions: [{ type: "navigate", path: "/proof/loading" }],
+          actions: [
+            { type: "navigate", path: "/proof/loading" },
+            { type: "click", selector: "[data-agent-proof='start']" }
+          ],
           intermediateAssertions: [
             { type: "visible", selector: "[data-agent-proof='opening']" }
           ],
@@ -1162,12 +1177,30 @@ test("proof workflow dispatches automerge only after terminal success is publish
   const statusIndex = workflow.indexOf("gh api \"repos/$GITHUB_REPOSITORY/statuses/$STATUS_SHA\"");
   const blockerIndex = workflow.indexOf("name: Reconcile terminal proof blocker");
   const repairIndex = workflow.indexOf("gh workflow run agent-review.yml");
+  const recoveryIndex = workflow.indexOf("name: Reconcile review after proof recovery");
   const dispatchIndex = workflow.indexOf("gh workflow run agent-automerge.yml");
 
   assert.ok(statusIndex >= 0);
   assert.ok(blockerIndex > statusIndex);
   assert.ok(repairIndex > statusIndex);
+  assert.ok(recoveryIndex > statusIndex);
   assert.ok(dispatchIndex > statusIndex);
+  assert.match(
+    workflow.slice(recoveryIndex, dispatchIndex),
+    /select\(\.context == "agent-review" and \.creator\.login == "github-actions\[bot\]"\)/
+  );
+  assert.match(
+    workflow.slice(recoveryIndex, dispatchIndex),
+    /test "\$current_sha" = "\$STATUS_SHA"/
+  );
+  assert.match(
+    workflow.slice(recoveryIndex, dispatchIndex),
+    /if \[ "\$review_state" != failure \]/
+  );
+  assert.match(
+    workflow.slice(recoveryIndex, dispatchIndex),
+    /-f expected-head-sha="\$STATUS_SHA"/
+  );
   assert.match(finalizeJob, /pull-requests: write/);
   assert.match(workflow, /uses: \.\/trusted\/\.github\/actions\/setup-crabbox/);
   assert.match(workflow, /name: disposable service proof/);

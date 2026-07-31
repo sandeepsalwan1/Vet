@@ -23,6 +23,7 @@ import {
   newestManagedComment,
   parseArgs,
   parseImplementationMetadata,
+  privilegedCandidatePolicy,
   privilegedCandidatePaths,
   publisherEnvironment,
   readText,
@@ -50,6 +51,8 @@ import {
 
 const IMPLEMENTATION_PROOF_PLAN_CHECK =
   "trusted implementation proof-plan validation";
+const IMPLEMENTATION_PATCH_PREPARATION_CHECK =
+  "trusted implementation patch preparation";
 
 function fetchIssue(config, issueNumber) {
   const issue = ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/issues/${issueNumber}`);
@@ -70,6 +73,16 @@ function writePrompt(config, issueNumber, outputPath) {
     repoOwner: config.repo.owner
   });
   const prompt = `${readText(join(repoRoot(), ".agent/prompts/implement.md"))}
+
+## Trusted Candidate Boundary
+
+The trusted publisher rejects any changed or renamed path matching this policy.
+Inspect protected paths only as context.
+For repository-wide requests, keep the candidate complete within the allowed surface and record excluded protected work in the intent addendum.
+
+\`\`\`json
+${JSON.stringify(privilegedCandidatePolicy(), null, 2)}
+\`\`\`
 
 ## Sealed Intent Capsule
 
@@ -101,6 +114,7 @@ export function readValidationFeedback(path, config) {
   }
   const expectedKeys = ["command", "exitCode", "ok", "stderr", "stdout", "version"];
   const allowedCommands = new Set([
+    IMPLEMENTATION_PATCH_PREPARATION_CHECK,
     IMPLEMENTATION_PROOF_PLAN_CHECK,
     ...config.commands.defaultImplementChecks
   ]);
@@ -681,6 +695,33 @@ function writeValidationFeedback(
   );
 }
 
+function repairablePreparationError(message, details = undefined) {
+  const error = new AgentError(message, 1, details);
+  error.repairablePreparation = true;
+  return error;
+}
+
+function writePreparationFeedback(feedbackPath, error) {
+  if (!feedbackPath || error?.repairablePreparation !== true) return false;
+  const paths = Array.isArray(error?.details?.paths)
+    ? error.details.paths.filter((path) => typeof path === "string")
+    : [];
+  const stderr = [
+    error?.message ?? String(error),
+    paths.length ? `Protected paths:\n${paths.join("\n")}` : "",
+    error?.details?.stderr
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  writeValidationFeedback(feedbackPath, {
+    command: IMPLEMENTATION_PATCH_PREPARATION_CHECK,
+    exitCode: 1,
+    stdout: error?.details?.stdout ?? "",
+    stderr
+  });
+  return true;
+}
+
 function stagedChangedPaths(cwd) {
   return runCommand("git", ["diff", "--cached", "--no-renames", "--name-only"], { cwd }).stdout
     .split("\n")
@@ -714,7 +755,8 @@ export function preparePatchValidation(
   preparedPath,
   candidateDir,
   cwd = repoRoot(),
-  intentPath = join(dirname(patchPath), "implementation-intent.json")
+  intentPath = join(dirname(patchPath), "implementation-intent.json"),
+  feedbackPath = ""
 ) {
   if (typeof patchPath !== "string" || !existsSync(patchPath)) throw new AgentError(`patch not found: ${patchPath}`, 2);
   if (typeof codexOutputPath !== "string" || !existsSync(codexOutputPath)) {
@@ -737,12 +779,45 @@ export function preparePatchValidation(
   const implementationAddendum = implementationAddendumEnvelope(
     implementationResult
   );
-  const patchAction = applyPatchIdempotently(patchPath, cwd);
-  if (patchAction !== "applied") throw new AgentError("validation patch must apply cleanly to the exact base", 1);
-  const changed = stagedChangedPaths(cwd);
-  const blockedPaths = privilegedPatchPaths(changed);
-  if (blockedPaths.length) throw new AgentError("agent patch touches privileged paths", 1, { paths: blockedPaths });
-  runCommand("git", ["diff", "--cached", "--check"], { cwd });
+  try {
+    const patchAction = applyPatchIdempotently(patchPath, cwd);
+    if (patchAction !== "applied") {
+      throw new AgentError(
+        "validation patch must apply cleanly to the exact base",
+        1
+      );
+    }
+  } catch (error) {
+    if (!(error instanceof AgentError)) throw error;
+    const preparationError = repairablePreparationError(error.message);
+    writePreparationFeedback(feedbackPath, preparationError);
+    throw preparationError;
+  }
+  let changed;
+  try {
+    changed = stagedChangedPaths(cwd);
+    const blockedPaths = privilegedPatchPaths(changed);
+    if (blockedPaths.length) {
+      throw repairablePreparationError(
+        "agent patch touches privileged paths",
+        { paths: blockedPaths }
+      );
+    }
+    const diffCheck = runCommand(
+      "git",
+      ["diff", "--cached", "--check"],
+      { cwd, check: false }
+    );
+    if (diffCheck.status !== 0) {
+      throw repairablePreparationError(
+        "agent patch fails git diff --check",
+        { stdout: diffCheck.stdout, stderr: diffCheck.stderr }
+      );
+    }
+  } catch (error) {
+    writePreparationFeedback(feedbackPath, error);
+    throw error;
+  }
   const unstaged = runCommand("git", ["diff", "--no-renames", "--name-only"], { cwd }).stdout.trim();
   if (unstaged) throw new AgentError("patch preparation produced unstaged changes", 1);
   const resultTree = gitOutput(["write-tree"], { cwd });
@@ -1268,7 +1343,12 @@ export async function main() {
       args["prepare-validation"],
       args["codex-output"],
       args["prepared-metadata"],
-      args["candidate-dir"]
+      args["candidate-dir"],
+      repoRoot(),
+      join(dirname(args["prepare-validation"]), "implementation-intent.json"),
+      args["validation-feedback"] === true
+        ? ""
+        : String(args["validation-feedback"] ?? "")
     );
     finish(
       { ok: true, message: `prepared isolated implementation validation for #${issueNumber}`, result },

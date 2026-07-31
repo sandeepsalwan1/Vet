@@ -908,6 +908,17 @@ A post-merge GIF replay then restored the sealed source labels, but the closed i
 Proof result labels are now excluded from stable intent labels, so workflow outcome state cannot invalidate the already sealed source request during finalization.
 Intent capsule v6 applies that rule while legacy v1 through v5 reconstruction accepts the exact historical state across proof-result and implementation-label transitions.
 
+Recorded correction on 2026-07-30:
+Issue 95 produced a reasonable repository-wide cleanup patch that crossed the protected automation boundary.
+Trusted validation rejected the patch before candidate checks, but no bounded feedback existed at that stage, so the automatic repair lane was skipped.
+Implementation now receives the exact protected-path policy used by validation, and repairable patch-preparation failures publish bounded feedback for one unpublished repair.
+The repaired candidate still passes the same fail-closed protected-path validation before publication.
+
+Issue 94 then exercised a separate source-blind GIF path and exposed browser-runner defects before the product interaction ran.
+Navigation assertions could race a replaced execution context, textarea filling used an input-only value setter, and initial navigation could satisfy an intermediate assertion before the user trigger.
+The browser runner now waits for navigation to settle, focuses and fills each selected form control through its native setter and value, and observes intermediate state only after form-input, click, or key-press triggers.
+Triggerless GIF plans are rejected before publication, and the runner cannot omit an unobserved requested intermediate from its result.
+
 ## Baseline Health And Workflow Approval
 
 Do not spend implementation or review tokens when `main` cannot satisfy a required gate.

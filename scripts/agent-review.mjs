@@ -56,6 +56,7 @@ import {
 export const MAX_REVIEW_DIFF_BYTES = 50000;
 export const MAX_REVIEW_REPAIR_ATTEMPTS = MAX_SEMANTIC_REVISIONS;
 export const REVIEW_WORKFLOW_FAILURE_MARKER = "<!-- agent-review-workflow-failure:v1 -->";
+export const REVIEW_BLOCKER_OWNERSHIP_MARKER = "<!-- agent-review-blocker:v1";
 
 export function reviewReplayNextGate({
   config,
@@ -454,6 +455,7 @@ function writePrompt(config, prNumber, outputPath, expectedHeadSha, dependencies
     sourceLabels: issueLabels(sourceIssue),
     proofFindings,
   });
+  const replayReady = Boolean(replayNextGate);
   const prompt = buildReviewPrompt({
     template: readText(join(repoRoot(), ".agent/prompts/review.md")),
     pull,
@@ -470,6 +472,12 @@ function writePrompt(config, prNumber, outputPath, expectedHeadSha, dependencies
   setGitHubOutput({
     "skip-model": skipModel,
     "replay-next-gate": replayNextGate,
+    "replay-add-automerge":
+      replayReady &&
+      metadata.automergeEligible === true &&
+      issueLabels(sourceIssue).includes(config.labels.automerge),
+    "replay-remove-blocked":
+      replayReady && reviewOwnedBlockedLabel(comments, config),
     "semantic-input-digest": inputDigest,
     "shared-revision-count": repairLedger.revisionCount,
   });
@@ -737,6 +745,19 @@ export function reviewFailureOwnedBlockedLabel(comments, config) {
   );
 }
 
+export function reviewOwnedBlockedLabel(comments, config) {
+  const prior = newestManagedComment(comments, config.comments.review, config.repo.owner);
+  const markerIndex = String(prior?.body ?? "").lastIndexOf(
+    REVIEW_BLOCKER_OWNERSHIP_MARKER,
+  );
+  if (markerIndex >= 0) {
+    return String(prior.body)
+      .slice(markerIndex)
+      .startsWith(`${REVIEW_BLOCKER_OWNERSHIP_MARKER} owns-blocked-label=true -->`);
+  }
+  return reviewFailureOwnedBlockedLabel(comments, config);
+}
+
 export function markReviewWorkflowFailure(
   config,
   prNumber,
@@ -772,7 +793,7 @@ export function markReviewWorkflowFailure(
     dependencies.fetchComments?.(prNumber) ??
     getIssueComments(config, prNumber);
   const ownsBlockedLabel =
-    reviewFailureOwnedBlockedLabel(comments, config) ||
+    reviewOwnedBlockedLabel(comments, config) ||
     !issueLabels(pullIssue).includes(config.labels.blocked);
   const actionsRun =
     process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
@@ -859,7 +880,7 @@ export function validateReviewRemoteRecord(config, path) {
   };
 }
 
-function reviewBody(review, cycle, remote) {
+function reviewBody(review, cycle, remote, ownsBlockedLabel) {
   return `## Agent Review
 
 Findings:
@@ -885,7 +906,9 @@ Crabbox duration: ${remote.totalMs} ms
 ${review.humanQuestion ? `Human question:\n\n${review.humanQuestion}\n` : ""}
 
 Structured review:
-${markdownJsonBlock(review)}`;
+${markdownJsonBlock(review)}
+
+${REVIEW_BLOCKER_OWNERSHIP_MARKER} owns-blocked-label=${ownsBlockedLabel} -->`;
 }
 
 export function normalizeReviewPolicy(review) {
@@ -1275,18 +1298,23 @@ function applyReview(
     ciPassed: patchApplied ? false : ciPassed
   });
   const policy = reviewCycleLabelChanges(config, review, cycle, { automergeEligible });
+  const priorReviewOwnedBlockedLabel = reviewOwnedBlockedLabel(comments, config);
   if (
     ["ready", "retry"].includes(cycle.state) &&
-    reviewFailureOwnedBlockedLabel(comments, config)
+    priorReviewOwnedBlockedLabel
   ) {
     policy.remove = [...new Set([...policy.remove, config.labels.blocked])];
   }
+  const ownsBlockedLabel =
+    policy.add.includes(config.labels.blocked) &&
+    (priorReviewOwnedBlockedLabel ||
+      !issueLabels(issue).includes(config.labels.blocked));
 
   const comment = upsertManagedComment({
     config,
     number: prNumber,
     marker: config.comments.review,
-    body: reviewBody(review, cycle, remote),
+    body: reviewBody(review, cycle, remote, ownsBlockedLabel),
     dryRun
   });
   const labels = {

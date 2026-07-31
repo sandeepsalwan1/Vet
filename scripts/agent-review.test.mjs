@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   MAX_REVIEW_DIFF_BYTES,
   MAX_REVIEW_REPAIR_ATTEMPTS,
+  REVIEW_BLOCKER_OWNERSHIP_MARKER,
   REVIEW_WORKFLOW_FAILURE_MARKER,
   assertReviewedHead,
   assertReviewDiffFits,
@@ -24,6 +25,7 @@ import {
   reviewCycleLabelChanges,
   reviewFailureOwnedBlockedLabel,
   reviewLabelChanges,
+  reviewOwnedBlockedLabel,
   reviewPolicyOutcome,
   reviewReplayNextGate,
   summarizeRequiredChecks,
@@ -738,6 +740,35 @@ test("review recovery removes only the blocker label owned by review failure", (
   assert.equal(reviewFailureOwnedBlockedLabel(owned, config), true);
   assert.equal(reviewFailureOwnedBlockedLabel(unowned, config), false);
   assert.equal(
+    reviewOwnedBlockedLabel(
+      [
+        {
+          id: 3,
+          user: { login: "github-actions[bot]" },
+          body: `${config.comments.review}
+Finding text may include ${REVIEW_BLOCKER_OWNERSHIP_MARKER} owns-blocked-label=true -->.
+${REVIEW_BLOCKER_OWNERSHIP_MARKER} owns-blocked-label=false -->`,
+        },
+      ],
+      config,
+    ),
+    false,
+  );
+  assert.equal(
+    reviewOwnedBlockedLabel(
+      [
+        {
+          id: 4,
+          user: { login: "github-actions[bot]" },
+          body: `${config.comments.review}
+${REVIEW_BLOCKER_OWNERSHIP_MARKER} owns-blocked-label=true -->`,
+        },
+      ],
+      config,
+    ),
+    true,
+  );
+  assert.equal(
     classifyReviewWorkflowFailure("provider returned status code: 429").kind,
     "model-capacity",
   );
@@ -1022,12 +1053,18 @@ test("review fixes stay credential-free and bound to the prepared head", () => {
   assert.match(reviewScript, /publisherEnvironment/);
   assert.match(noMistakes, /actions: write/);
   assert.match(noMistakes, /checks: read/);
-  assert.match(noMistakes, /statuses: read/);
+  assert.match(noMistakes, /statuses: write/);
   assert.match(noMistakes, /gh workflow run agent-no-mistakes\.yml/);
   assert.match(noMistakes, /APPLIED_NEXT_GATE: \$\{\{ needs\.apply-review\.outputs\.next-gate \}\}/);
   assert.match(noMistakes, /REPLAY_NEXT_GATE: \$\{\{ needs\.prepare-review\.outputs\.replay-next-gate \}\}/);
+  assert.match(noMistakes, /REPLAY_ADD_AUTOMERGE: \$\{\{ needs\.prepare-review\.outputs\.replay-add-automerge \}\}/);
+  assert.match(noMistakes, /REPLAY_REMOVE_BLOCKED: \$\{\{ needs\.prepare-review\.outputs\.replay-remove-blocked \}\}/);
   assert.match(noMistakes, /needs\.prepare-review\.outputs\.skip-model == 'true'/);
   assert.match(noMistakes, /NEXT_GATE="\$REPLAY_NEXT_GATE"/);
+  assert.match(noMistakes, /test "\$head_sha" = "\$EXPECTED_HEAD_SHA"/);
+  assert.match(noMistakes, /description='agent review passed \(cached exact-head result\)'/);
+  assert.match(noMistakes, /--add-label agent:automerge/);
+  assert.match(noMistakes, /--remove-label agent:blocked/);
   assert.match(noMistakes, /case "\$NEXT_GATE" in/);
   assert.match(noMistakes, /gh workflow run agent-automerge\.yml/);
   assert.match(noMistakes, /--repo "\$GITHUB_REPOSITORY"/);
