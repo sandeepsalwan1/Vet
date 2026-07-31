@@ -343,6 +343,23 @@ async function dispatchKey(client, key, onKeyDown) {
   });
 }
 
+async function selectAllText(client) {
+  const { text: _text, ...metadata } = keyEventMetadata("a");
+  await client.send("Input.dispatchKeyEvent", {
+    type: "rawKeyDown",
+    modifiers: 2,
+    ...metadata,
+    autoRepeat: false,
+    isKeypad: false,
+    commands: ["selectAll"]
+  });
+  await client.send("Input.dispatchKeyEvent", {
+    type: "keyUp",
+    modifiers: 0,
+    ...metadata
+  });
+}
+
 async function waitForStableInputValue(
   client,
   selector,
@@ -424,6 +441,7 @@ export async function runAction(client, baseUrl, action, onTriggered) {
       client,
       `(element => { ` +
         `element.focus(); ` +
+        `if (document.activeElement !== element) return "unfocused"; ` +
         `if (element.matches("select")) { ` +
         `const matched = Array.from(element.options).some(option => option.value === ${JSON.stringify(action.value)}); ` +
         `if (!matched) return "missing-option"; ` +
@@ -436,14 +454,6 @@ export async function runAction(client, baseUrl, action, onTriggered) {
         `"textarea,input:not([type]),input[type=text],input[type=email],input[type=number],` +
         `input[type=password],input[type=search],input[type=tel],input[type=url]"); ` +
         `if (!typeable) return "unsupported"; ` +
-        `const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set; ` +
-        `if (setter) setter.call(element, ${JSON.stringify(action.value)}); ` +
-        `else element.value = ${JSON.stringify(action.value)}; ` +
-        `const inputEvent = typeof InputEvent === "function" ` +
-        `? new InputEvent("input", { bubbles: true, inputType: "insertText", data: ${JSON.stringify(action.value)} }) ` +
-        `: new Event("input", { bubbles: true }); ` +
-        `element.dispatchEvent(inputEvent); ` +
-        `element.dispatchEvent(new Event("change", { bubbles: true })); ` +
         `return "text"; ` +
         `})(document.querySelector(${selector}))`
     );
@@ -453,7 +463,26 @@ export async function runAction(client, baseUrl, action, onTriggered) {
     if (inputKind === "missing-option") {
       fail(`browser fill option was not found: ${action.selector}`);
     }
-    const triggeredObservation = onTriggered?.();
+    if (inputKind === "unfocused") {
+      fail(`browser fill target could not be focused: ${action.selector}`);
+    }
+    let triggeredObservation;
+    if (inputKind === "text") {
+      await selectAllText(client);
+      if (action.value === "") {
+        await dispatchKey(client, "Backspace", () => {
+          triggeredObservation = onTriggered?.();
+        });
+      } else {
+        const insertion = client.send("Input.insertText", {
+          text: action.value
+        });
+        triggeredObservation = onTriggered?.();
+        await insertion;
+      }
+    } else {
+      triggeredObservation = onTriggered?.();
+    }
     if (
       ["select", "text"].includes(inputKind) &&
       !(await waitForStableInputValue(client, action.selector, action.value))

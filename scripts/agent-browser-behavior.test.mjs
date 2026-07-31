@@ -147,7 +147,7 @@ test("text proof binds a select assertion to its selected value", () => {
   assert.equal(result, false);
 });
 
-test("fill uses the native setter and waits for the controlled value to persist", async () => {
+test("fill uses browser-native insertion and waits for controlled state", async () => {
   const calls = [];
   let persistenceChecks = 0;
   let triggeredAtPersistenceCheck;
@@ -194,15 +194,30 @@ test("fill uses the native setter and waits for the controlled value to persist"
       ({ method, params }) =>
         method === "Runtime.evaluate" &&
         params.expression.includes("element.focus()") &&
-        params.expression.includes("Object.getOwnPropertyDescriptor") &&
-        params.expression.includes('setter.call(element, "Hello")') &&
-        params.expression.includes('new InputEvent("input"')
+        params.expression.includes('return "text"')
     )
   );
   assert.equal(triggeredAtPersistenceCheck, 0);
   assert.ok(persistenceChecks >= 5);
-  assert.ok(calls.every(({ method }) => method !== "Input.dispatchKeyEvent"));
-  assert.ok(calls.every(({ method }) => method !== "Input.insertText"));
+  assert.deepEqual(
+    calls
+      .filter(({ method }) => method === "Input.insertText")
+      .map(({ params }) => params.text),
+    ["Hello"]
+  );
+  assert.deepEqual(
+    calls
+      .filter(({ method }) => method === "Input.dispatchKeyEvent")
+      .map(({ params }) => ({
+        type: params.type,
+        key: params.key,
+        commands: params.commands
+      })),
+    [
+      { type: "rawKeyDown", key: "a", commands: ["selectAll"] },
+      { type: "keyUp", key: "a", commands: undefined }
+    ]
+  );
 });
 
 test("fill fails before the next action when controlled state rejects the value", async () => {
@@ -268,7 +283,48 @@ test("select fill waits for the controlled value to persist", async () => {
   assert.ok(persistenceChecks >= 5);
 });
 
-test("empty fill clears a controlled input through its native value setter", async () => {
+test("number fill uses browser selection without invalid DOM selection APIs", async () => {
+  const calls = [];
+  const client = {
+    async send(method, params = {}) {
+      calls.push({ method, params });
+      if (
+        method === "Runtime.evaluate" &&
+        params.expression.includes('return "text"')
+      ) {
+        return { result: { value: "text" } };
+      }
+      return { result: { value: true } };
+    }
+  };
+
+  await runAction(client, "", {
+    type: "fill",
+    selector: "input[type=number]",
+    value: "42"
+  });
+
+  assert.ok(
+    calls
+      .filter(({ method }) => method === "Runtime.evaluate")
+      .every(({ params }) => !params.expression.includes("element.select()"))
+  );
+  assert.ok(
+    calls.some(
+      ({ method, params }) =>
+        method === "Input.dispatchKeyEvent" &&
+        params.commands?.includes("selectAll")
+    )
+  );
+  assert.ok(
+    calls.some(
+      ({ method, params }) =>
+        method === "Input.insertText" && params.text === "42"
+    )
+  );
+});
+
+test("empty fill clears controlled state with a browser-native Backspace", async () => {
   const calls = [];
   const client = {
     async send(method, params = {}) {
@@ -293,14 +349,21 @@ test("empty fill clears a controlled input through its native value setter", asy
     calls.some(
       ({ method, params }) =>
         method === "Runtime.evaluate" &&
-        params.expression.includes("Object.getOwnPropertyDescriptor") &&
-        params.expression.includes('setter.call(element, "")') &&
-        params.expression.includes('new InputEvent("input"')
+        params.expression.includes("element.focus()")
     )
   );
-  assert.ok(
-    calls.every(({ method }) => method !== "Input.insertText")
+  assert.deepEqual(
+    calls
+      .filter(({ method }) => method === "Input.dispatchKeyEvent")
+      .map(({ params }) => ({ type: params.type, key: params.key })),
+    [
+      { type: "rawKeyDown", key: "a" },
+      { type: "keyUp", key: "a" },
+      { type: "rawKeyDown", key: "Backspace" },
+      { type: "keyUp", key: "Backspace" }
+    ]
   );
+  assert.ok(calls.every(({ method }) => method !== "Input.insertText"));
 });
 
 test("fill rejects non-text inputs instead of invoking invalid selection APIs", async () => {
@@ -322,6 +385,38 @@ test("fill rejects non-text inputs instead of invoking invalid selection APIs", 
         value: "anything"
       }),
     /browser fill target is unsupported/
+  );
+});
+
+test("fill never sends native input when the requested control cannot focus", async () => {
+  const calls = [];
+  const client = {
+    async send(method, params = {}) {
+      calls.push({ method, params });
+      if (
+        method === "Runtime.evaluate" &&
+        params.expression.includes('return "unfocused"')
+      ) {
+        return { result: { value: "unfocused" } };
+      }
+      return { result: { value: true } };
+    }
+  };
+
+  await assert.rejects(
+    () =>
+      runAction(client, "", {
+        type: "fill",
+        selector: "textarea[hidden]",
+        value: "must not leak"
+      }),
+    /browser fill target could not be focused/
+  );
+  assert.ok(
+    calls.every(
+      ({ method }) =>
+        method !== "Input.dispatchKeyEvent" && method !== "Input.insertText"
+    )
   );
 });
 
@@ -566,7 +661,11 @@ test("rejected controlled fill cannot authorize a later action or assertion", as
   };
   const client = {
     async send(method, params = {}) {
-      if (method === "Input.dispatchKeyEvent") {
+      if (
+        method === "Input.dispatchKeyEvent" &&
+        params.type === "keyDown" &&
+        params.key === "Enter"
+      ) {
         pressed = true;
         return {};
       }
