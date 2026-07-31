@@ -657,10 +657,10 @@ test("Linux desktop key dispatch uses the unique visible Crabbox browser window"
   assert.match(calls[1][1][1], /xdotool getwindowpid "\$active_window"/);
   assert.match(calls[1][1][1], /xdotool getwindowfocus/);
   assert.doesNotMatch(calls[1][1][1], /focus_attempt/);
-  assert.match(
-    calls[1][1][1],
-    /exec xdotool key --clearmodifiers --delay 50 "\$2"/
-  );
+  assert.match(calls[1][1][1], /xdotool keydown --clearmodifiers "\$2"/);
+  assert.match(calls[1][1][1], /xdotool keyup "\$2"/);
+  assert.match(calls[1][1][1], /trap 'xdotool keyup "\$2"/);
+  assert.doesNotMatch(calls[1][1][1], /xdotool key --/);
   assert.equal(calls[1][1][3], "4242");
   assert.equal(calls[1][1][4], "Return");
   assert.equal(calls[1][1][5], "777");

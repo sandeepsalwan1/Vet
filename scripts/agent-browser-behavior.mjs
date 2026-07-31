@@ -743,11 +743,16 @@ exit 127
 set -eu
 if [ -f /var/lib/crabbox/desktop.env ]; then . /var/lib/crabbox/desktop.env; fi
 export DISPLAY="\${DISPLAY:-:99}"
+sleep 0.05
 active_window="$(xdotool getactivewindow)"
 [ "$active_window" = "$1" ] || exit 126
 [ "$(xdotool getwindowpid "$active_window" 2>/dev/null || true)" = "$3" ] || exit 126
 [ "$(xdotool getwindowfocus 2>/dev/null || true)" = "$active_window" ] || exit 126
-exec xdotool key --clearmodifiers --delay 50 "$2"
+trap 'xdotool keyup "$2" >/dev/null 2>&1 || true' 0
+xdotool keydown --clearmodifiers "$2"
+sleep 0.05
+xdotool keyup "$2"
+trap - 0
 `;
   try {
     await run(
