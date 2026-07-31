@@ -755,6 +755,52 @@ test("last user action observes transient final state without intermediate asser
   assert.equal(finalChecks, 1);
 });
 
+test("key-triggered final state is observed before a slow keyup completes", async () => {
+  let visible = false;
+  const task = {
+    clauseIds: ["AC1"],
+    route: "/request",
+    session: "none",
+    actions: [{ type: "press", key: "Enter" }],
+    intermediateAssertions: [],
+    finalAssertions: [
+      { type: "visible", selector: "[data-state='toast']" }
+    ]
+  };
+  const client = {
+    async send(method, params = {}) {
+      if (
+        method === "Input.dispatchKeyEvent" &&
+        params.type === "keyDown"
+      ) {
+        visible = true;
+        setTimeout(() => {
+          visible = false;
+        }, 20);
+        return {};
+      }
+      if (
+        method === "Input.dispatchKeyEvent" &&
+        params.type === "keyUp"
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return {};
+      }
+      if (
+        method === "Runtime.evaluate" &&
+        params.expression.includes("[data-state='toast']")
+      ) {
+        return { result: { value: visible } };
+      }
+      return {};
+    }
+  };
+
+  const result = await runTask(client, payload, task);
+
+  assert.equal(result.status, "pass");
+});
+
 test("last user trigger retains a delayed transient final state before a trailing wait", async () => {
   let triggeredAt = 0;
   const task = {

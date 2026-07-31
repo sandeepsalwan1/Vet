@@ -323,7 +323,7 @@ function keyEventMetadata(key) {
   fail(`unsupported browser key: ${JSON.stringify(key)}`);
 }
 
-async function dispatchKey(client, key) {
+async function dispatchKey(client, key, onKeyDown) {
   const { text, ...metadata } = keyEventMetadata(key);
   await client.send("Input.dispatchKeyEvent", {
     type: text ? "keyDown" : "rawKeyDown",
@@ -334,6 +334,7 @@ async function dispatchKey(client, key) {
     isKeypad: metadata.location === 3,
     commands: []
   });
+  onKeyDown?.();
   await client.send("Input.dispatchKeyEvent", {
     type: "keyUp",
     modifiers: 0,
@@ -351,7 +352,7 @@ async function typeText(client, value) {
   }
 }
 
-export async function runAction(client, baseUrl, action) {
+export async function runAction(client, baseUrl, action, onTriggered) {
   if (action.type === "navigate") {
     await navigate(client, baseUrl, action.path);
     return `Navigate to ${action.path}`;
@@ -361,7 +362,7 @@ export async function runAction(client, baseUrl, action) {
     return `Wait ${action.milliseconds}ms`;
   }
   if (action.type === "press") {
-    await dispatchKey(client, action.key);
+    await dispatchKey(client, action.key, onTriggered);
     return `Press ${action.key}`;
   }
   const selector = JSON.stringify(action.selector);
@@ -374,6 +375,7 @@ export async function runAction(client, baseUrl, action) {
         `})(document.querySelector(${selector}))`
     );
     if (!clicked) fail(`browser action target was not found: ${action.selector}`);
+    onTriggered?.();
     return `Click ${action.selector}`;
   }
   if (action.type === "clickText") {
@@ -390,6 +392,7 @@ export async function runAction(client, baseUrl, action) {
     if (!clicked) {
       fail(`browser action text was not found: ${action.selector} ${JSON.stringify(action.value)}`);
     }
+    onTriggered?.();
     return `Click ${action.selector} containing ${JSON.stringify(action.value)}`;
   }
   if (action.type === "fill") {
@@ -435,6 +438,7 @@ export async function runAction(client, baseUrl, action) {
     if (inputKind === "text") {
       await typeText(client, action.value);
     }
+    onTriggered?.();
     return `Fill ${action.selector}`;
   }
   fail(`unsupported browser action: ${action.type}`);
@@ -519,43 +523,67 @@ export async function runTask(client, payload, task) {
     );
     if (sessionStep) reproductionSteps.push(sessionStep);
     for (const [actionIndex, action] of actions.entries()) {
-      reproductionSteps.push(await runAction(client, payload.baseUrl, action));
-      if (["fill", "click", "clickText", "press"].includes(action.type)) {
-        const pendingIntermediateIndexes = intermediate
-          .map((result, index) => (result.passed ? -1 : index))
-          .filter((index) => index !== -1);
-        const pendingFinalIndexes =
-          actionIndex === lastTriggerActionIndex
-            ? final
-                .map((result, index) => (result.passed ? -1 : index))
-                .filter((index) => index !== -1)
-            : [];
-        const pending = [
-          ...pendingIntermediateIndexes.map((index) => ({
-            phase: "intermediate",
-            index,
-            assertion: task.intermediateAssertions[index]
-          })),
-          ...pendingFinalIndexes.map((index) => ({
-            phase: "final",
-            index,
-            assertion: task.finalAssertions[index]
-          }))
-        ];
-        if (!pending.length) continue;
-        let observed;
-        try {
-          observed = await waitForAssertions(
-            client,
-            pending.map((entry) => entry.assertion),
-            intermediateAssertionTimeout(lastTriggerActionIndex + 1, actionIndex)
-          );
-        } catch (error) {
-          throw new BrowserAssertionError(error);
+      const isTrigger = ["fill", "click", "clickText", "press"].includes(
+        action.type
+      );
+      const pendingIntermediateIndexes = isTrigger
+        ? intermediate
+            .map((result, index) => (result.passed ? -1 : index))
+            .filter((index) => index !== -1)
+        : [];
+      const pendingFinalIndexes =
+        actionIndex === lastTriggerActionIndex
+          ? final
+              .map((result, index) => (result.passed ? -1 : index))
+              .filter((index) => index !== -1)
+          : [];
+      const pending = [
+        ...pendingIntermediateIndexes.map((index) => ({
+          phase: "intermediate",
+          index,
+          assertion: task.intermediateAssertions[index]
+        })),
+        ...pendingFinalIndexes.map((index) => ({
+          phase: "final",
+          index,
+          assertion: task.finalAssertions[index]
+        }))
+      ];
+      let observationPromise;
+      const observeTriggeredState = pending.length
+        ? () => {
+            if (observationPromise) return;
+            observationPromise = waitForAssertions(
+              client,
+              pending.map((entry) => entry.assertion),
+              intermediateAssertionTimeout(
+                lastTriggerActionIndex + 1,
+                actionIndex
+              )
+            ).then(
+              (observed) => ({ observed }),
+              (error) => ({ error })
+            );
+          }
+        : undefined;
+      reproductionSteps.push(
+        await runAction(
+          client,
+          payload.baseUrl,
+          action,
+          observeTriggeredState
+        )
+      );
+      if (observeTriggeredState) {
+        observeTriggeredState();
+        const observation = await observationPromise;
+        if (observation.error) {
+          throw new BrowserAssertionError(observation.error);
         }
-        for (const [observedIndex, result] of observed.entries()) {
+        for (const [observedIndex, result] of observation.observed.entries()) {
           const entry = pending[observedIndex];
-          const target = entry.phase === "intermediate" ? intermediate : final;
+          const target =
+            entry.phase === "intermediate" ? intermediate : final;
           target[entry.index] = {
             ...target[entry.index],
             passed: result.passed
