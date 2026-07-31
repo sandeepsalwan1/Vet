@@ -15,6 +15,23 @@ export const IMPLEMENTATION_RESULT_VERSION = 1;
 export const IMPLEMENTATION_ADDENDUM_MARKER =
   "<!-- agent-intent-addendum:v1 -->";
 export const PROOF_KINDS = Object.freeze(["none", "CI", "UI", "GIF", "service"]);
+const PROOF_NAMED_KEYS = new Set([
+  "Backspace",
+  "Tab",
+  "Enter",
+  "Escape",
+  "Space",
+  "PageUp",
+  "PageDown",
+  "End",
+  "Home",
+  "ArrowLeft",
+  "ArrowUp",
+  "ArrowRight",
+  "ArrowDown",
+  "Insert",
+  "Delete"
+]);
 export const PROOF_SESSIONS = Object.freeze([
   "none",
   "demo-admin",
@@ -223,7 +240,11 @@ function validateProofAction(action) {
     return { type: action.type, milliseconds: action.milliseconds };
   }
   if (action.type === "press") {
-    return { type: action.type, key: boundedProofValue(action.key, "implementation proof key") };
+    const key = boundedProofValue(action.key, "implementation proof key");
+    if (!PROOF_NAMED_KEYS.has(key) && !/^[A-Za-z0-9]$/.test(key)) {
+      throw new AgentError("implementation proof key is unsupported", 1);
+    }
+    return { type: action.type, key: key === "Space" ? " " : key };
   }
   const normalized = {
     type: action.type,

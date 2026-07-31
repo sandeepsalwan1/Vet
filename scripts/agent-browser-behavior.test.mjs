@@ -167,6 +167,50 @@ test("fill uses the selected control's value setter", async () => {
   assert.doesNotMatch(expression, /HTMLInputElement\.prototype/);
 });
 
+test("press emits complete browser key metadata", async () => {
+  const calls = [];
+  const client = {
+    async send(method, params = {}) {
+      calls.push({ method, params });
+      return {};
+    }
+  };
+
+  await runAction(client, "", { type: "press", key: "Enter" });
+
+  assert.deepEqual(calls, [
+    {
+      method: "Input.dispatchKeyEvent",
+      params: {
+        type: "keyDown",
+        key: "Enter",
+        code: "Enter",
+        windowsVirtualKeyCode: 13,
+        nativeVirtualKeyCode: 13,
+        text: "\r",
+        unmodifiedText: "\r"
+      }
+    },
+    {
+      method: "Input.dispatchKeyEvent",
+      params: {
+        type: "keyUp",
+        key: "Enter",
+        code: "Enter",
+        windowsVirtualKeyCode: 13,
+        nativeVirtualKeyCode: 13
+      }
+    }
+  ]);
+});
+
+test("press rejects keys without truthful DOM metadata", async () => {
+  await assert.rejects(
+    () => runAction({ send: async () => ({}) }, "", { type: "press", key: "." }),
+    /unsupported browser key/
+  );
+});
+
 test("browser payload accepts bounded demo sessions and rejects unknown sessions", () => {
   const authenticated = {
     ...payload,

@@ -688,6 +688,22 @@ test("proof plan rejects unsafe routes and unbounded waits", () => {
       }),
     /proof wait is invalid/
   );
+  assert.throws(
+    () =>
+      validateProofPlan({
+        version: 1,
+        tasks: [
+          {
+            clauseIds: ["AC1"],
+            route: "/staff/tasks",
+            actions: [{ type: "press", key: "." }],
+            intermediateAssertions: [],
+            finalAssertions: []
+          }
+        ]
+      }),
+    /proof key is unsupported/
+  );
 });
 
 test("browser proof plans declare protected sessions and executable interactions", () => {

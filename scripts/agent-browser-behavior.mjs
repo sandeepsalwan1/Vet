@@ -274,6 +274,48 @@ async function navigate(client, baseUrl, path) {
   if (!settled) fail(`browser navigation did not settle: ${path}`);
 }
 
+function keyEventMetadata(key) {
+  const namedKeys = {
+    Backspace: { code: "Backspace", virtualKeyCode: 8 },
+    Tab: { code: "Tab", virtualKeyCode: 9 },
+    Enter: { code: "Enter", virtualKeyCode: 13, text: "\r" },
+    Escape: { code: "Escape", virtualKeyCode: 27 },
+    " ": { code: "Space", virtualKeyCode: 32, text: " " },
+    PageUp: { code: "PageUp", virtualKeyCode: 33 },
+    PageDown: { code: "PageDown", virtualKeyCode: 34 },
+    End: { code: "End", virtualKeyCode: 35 },
+    Home: { code: "Home", virtualKeyCode: 36 },
+    ArrowLeft: { code: "ArrowLeft", virtualKeyCode: 37 },
+    ArrowUp: { code: "ArrowUp", virtualKeyCode: 38 },
+    ArrowRight: { code: "ArrowRight", virtualKeyCode: 39 },
+    ArrowDown: { code: "ArrowDown", virtualKeyCode: 40 },
+    Insert: { code: "Insert", virtualKeyCode: 45 },
+    Delete: { code: "Delete", virtualKeyCode: 46 }
+  };
+  const named = namedKeys[key];
+  if (named) {
+    return {
+      key,
+      code: named.code,
+      windowsVirtualKeyCode: named.virtualKeyCode,
+      nativeVirtualKeyCode: named.virtualKeyCode,
+      ...(named.text ? { text: named.text } : {})
+    };
+  }
+  const characters = [...key];
+  if (characters.length === 1 && /^[A-Za-z0-9]$/.test(key)) {
+    const upper = key.toUpperCase();
+    return {
+      key,
+      code: /^[A-Za-z]$/.test(key) ? `Key${upper}` : `Digit${key}`,
+      windowsVirtualKeyCode: upper.charCodeAt(0),
+      nativeVirtualKeyCode: upper.charCodeAt(0),
+      text: key
+    };
+  }
+  fail(`unsupported browser key: ${JSON.stringify(key)}`);
+}
+
 export async function runAction(client, baseUrl, action) {
   if (action.type === "navigate") {
     await navigate(client, baseUrl, action.path);
@@ -284,13 +326,15 @@ export async function runAction(client, baseUrl, action) {
     return `Wait ${action.milliseconds}ms`;
   }
   if (action.type === "press") {
+    const { text, ...metadata } = keyEventMetadata(action.key);
     await client.send("Input.dispatchKeyEvent", {
       type: "keyDown",
-      key: action.key
+      ...metadata,
+      ...(text ? { text, unmodifiedText: text } : {})
     });
     await client.send("Input.dispatchKeyEvent", {
       type: "keyUp",
-      key: action.key
+      ...metadata
     });
     return `Press ${action.key}`;
   }
