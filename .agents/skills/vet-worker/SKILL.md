@@ -22,6 +22,8 @@ Deliver the requested user outcome, not a shallow literal diff.
 - Preserve tenant, authentication, and data boundaries.
 - Prefer quality, simplicity, robustness, and maintainability.
 - Keep routes shallow and behavior in typed modules.
+- Follow the exact trusted candidate boundary in the implementation prompt.
+  Broad repository work may inspect protected control-plane paths but must keep its patch outside them.
 - Update docs or project memory only when behavior or a durable rule changes.
 - Never invent successful access, proof, deployment, or database results.
 - Use only scoped credentials supplied by trusted orchestration.

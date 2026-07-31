@@ -34,7 +34,9 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
    Read-only GitHub API calls use bounded exponential retries, managed comments and pull metadata use GitHub GraphQL with independent REST read fallbacks, PR file inventories use head-bound paginated GraphQL with immutable rename verification, diffs use exact commit comparison, and PR creation or updates use GraphQL mutations.
 4. Expensive proposer, implementation, review, no-mistakes, and proof jobs share deterministic slot groups from `.agent/config.json`.
 5. Implementation selects its allowed backend from `.agent/config.json`, runs without write credentials, uploads a patch plus bounded implementation addendum and proof plan, then applies the sealed patch in a separate write-token job and opens a draft PR.
+   The implementation prompt receives the exact protected-path policy used by trusted validation, so broad repository work can inspect the control plane without accidentally changing it.
    If credential-free trusted checks reject the unpublished candidate, one fresh Crabbox lease receives the sealed intent, prior patch, and bounded deterministic failure output, then repairs the candidate once before the full validator reruns.
+   Repairable patch-preparation failures, including protected paths and `git diff --check`, enter that same bounded repair path instead of ending before feedback exists.
    The candidate checkout remains read-only during validation; only a separate credential-free feedback mount is writable, and trusted code copies that bounded output into the repair artifact.
    Both attempts retain separate model and provider cost records, and a second validation failure blocks without publishing a branch or pull request.
    Trusted branch pushes and pull request mutations use only the repository-scoped `AGENT_GITHUB_TOKEN`; routine statuses, comments, and workflow dispatch keep the built-in workflow token.
@@ -259,6 +261,9 @@ For visible text assertions whose model-generated selector is one heading level,
 The heading level is a locator preference; the sealed route and acceptance text remain exact.
 Bounded implementation repair receives a trusted browser-clause allowlist and may not move deterministic-only or service-only clauses into browser proof.
 For GIF proof, recording starts before browser navigation or user action so transient states are captured instead of only the settled page.
+Browser navigation waits through execution-context replacement, form filling focuses the selected control and uses its native value setter, and text assertions read form values instead of static child text.
+Intermediate assertions begin only after an actual user trigger such as form input, click, or key press, never after initial navigation.
+GIF plans without a user trigger are rejected, and requested intermediate assertions remain failing unless the runner actually observes them.
 Each intermediate assertion stops polling once observed, so later actions cannot wait away a transient final state.
 The lane checks each planned execution route, desktop health, actual provider, lease, route-bound media, every acceptance clause, intermediate assertion, final assertion, and anti-cheat observation.
 Proof selection keeps the strongest compatible tier from trusted source triage, target triage, and review metadata.

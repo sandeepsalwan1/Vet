@@ -21,6 +21,8 @@ export const DEMO_SESSION_CREDENTIALS = Object.freeze({
     password: "demo1234"
   })
 });
+const NAVIGATION_MARKER = "__agentProofNavigationMarkerV1";
+let navigationSequence = 0;
 
 function parseArgs(argv = process.argv.slice(2)) {
   const result = {};
@@ -149,9 +151,16 @@ export function assertionExpression(assertion) {
   if (assertion.type === "visible") return `${visible}(${element})`;
   if (assertion.type === "hidden") return `!${visible}(${element})`;
   if (assertion.type === "text") {
+    const text =
+      `(element => String(element.matches("input,textarea,select") ? ` +
+      `element.value ?? "" : element.textContent ?? ""))`;
+    const textMatches =
+      assertion.value === ""
+        ? `${text}(element) === ""`
+        : `${text}(element).includes(${JSON.stringify(assertion.value)})`;
     const matches =
       `(element => Boolean(element && ${visible}(element) && ` +
-      `String(element.textContent ?? "").includes(${JSON.stringify(assertion.value)})))`;
+      `${textMatches}))`;
     if (isHeadingSelector(assertion.selector)) {
       return (
         `(${matches}(${element}) || ` +
@@ -180,31 +189,47 @@ export function assertionLabel(assertion) {
   return `${assertion.selector} is ${assertion.type}`;
 }
 
-async function evaluate(client, expression) {
-  const result = await client.send("Runtime.evaluate", {
-    expression,
-    returnByValue: true,
-    awaitPromise: true
-  });
-  if (result.exceptionDetails) fail("browser assertion evaluation failed");
+async function evaluate(client, expression, tolerateExceptions = false) {
+  let result;
+  try {
+    result = await client.send("Runtime.evaluate", {
+      expression,
+      returnByValue: true,
+      awaitPromise: true
+    });
+  } catch (error) {
+    if (tolerateExceptions) return false;
+    throw error;
+  }
+  if (result.exceptionDetails) {
+    if (tolerateExceptions) return false;
+    fail("browser assertion evaluation failed");
+  }
   return result.result?.value;
 }
 
-async function waitForEvaluation(client, expression, timeoutMs = 5_000) {
+async function waitForEvaluation(
+  client,
+  expression,
+  timeoutMs = 5_000,
+  tolerateExceptions = false
+) {
   const deadline = Date.now() + timeoutMs;
   do {
-    if (await evaluate(client, expression)) return true;
+    if (await evaluate(client, expression, tolerateExceptions)) return true;
     await sleep(50);
   } while (Date.now() < deadline);
   return false;
 }
 
-async function assertionResults(client, assertions) {
+async function assertionResults(client, assertions, tolerateExceptions = false) {
   const values = [];
   for (const assertion of assertions) {
     values.push({
       assertion: assertionLabel(assertion),
-      passed: Boolean(await evaluate(client, assertionExpression(assertion)))
+      passed: Boolean(
+        await evaluate(client, assertionExpression(assertion), tolerateExceptions)
+      )
     });
   }
   return values;
@@ -214,7 +239,7 @@ async function waitForAssertions(client, assertions, timeoutMs) {
   const observed = assertions.map(() => false);
   const deadline = Date.now() + timeoutMs;
   do {
-    const results = await assertionResults(client, assertions);
+    const results = await assertionResults(client, assertions, true);
     for (const [index, result] of results.entries()) {
       if (result.passed) observed[index] = true;
     }
@@ -228,7 +253,25 @@ async function waitForAssertions(client, assertions, timeoutMs) {
 }
 
 async function navigate(client, baseUrl, path) {
-  await client.send("Page.navigate", { url: `${baseUrl}${path}` });
+  const marker = `${Date.now()}:${++navigationSequence}`;
+  const marked = await waitForEvaluation(
+    client,
+    `globalThis[${JSON.stringify(NAVIGATION_MARKER)}] = ${JSON.stringify(marker)}; true`,
+    8_000,
+    true
+  );
+  if (!marked) fail("browser navigation could not bind the current document");
+  const result = await client.send("Page.navigate", { url: `${baseUrl}${path}` });
+  if (result.errorText) fail(`browser navigation failed: ${result.errorText}`);
+  const settled = await waitForEvaluation(
+    client,
+    `location.pathname === ${JSON.stringify(path)} && ` +
+      `document.readyState !== "loading" && ` +
+      `globalThis[${JSON.stringify(NAVIGATION_MARKER)}] !== ${JSON.stringify(marker)}`,
+    8_000,
+    true
+  );
+  if (!settled) fail(`browser navigation did not settle: ${path}`);
 }
 
 export async function runAction(client, baseUrl, action) {
@@ -283,7 +326,8 @@ export async function runAction(client, baseUrl, action) {
     const filled = await waitForEvaluation(
       client,
       `(element => { if (!element) return false; ` +
-        `const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; ` +
+        `element.focus(); ` +
+        `const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set; ` +
         `if (setter) setter.call(element, ${JSON.stringify(action.value)}); else element.value = ${JSON.stringify(action.value)}; ` +
         `element.dispatchEvent(new Event("input", { bubbles: true })); ` +
         `element.dispatchEvent(new Event("change", { bubbles: true })); return true; ` +
@@ -351,7 +395,10 @@ export function intermediateAssertionTimeout(actionCount, actionIndex) {
 
 export async function runTask(client, payload, task) {
   const reproductionSteps = [];
-  let intermediate = [];
+  const intermediate = task.intermediateAssertions.map((assertion) => ({
+    assertion: assertionLabel(assertion),
+    passed: false
+  }));
   const actions = task.actions.length
     ? task.actions
     : [{ type: "navigate", path: task.route }];
@@ -367,14 +414,8 @@ export async function runTask(client, payload, task) {
       reproductionSteps.push(await runAction(client, payload.baseUrl, action));
       if (
         task.intermediateAssertions.length &&
-        ["navigate", "click", "clickText", "press"].includes(action.type)
+        ["fill", "click", "clickText", "press"].includes(action.type)
       ) {
-        if (!intermediate.length) {
-          intermediate = task.intermediateAssertions.map((assertion) => ({
-            assertion: assertionLabel(assertion),
-            passed: false
-          }));
-        }
         const pendingIndexes = intermediate
           .map((result, index) => (result.passed ? -1 : index))
           .filter((index) => index !== -1);
@@ -402,7 +443,10 @@ export async function runTask(client, payload, task) {
       status: "fail",
       evidence: `Browser interaction failed: ${error?.message ?? String(error)}`,
       reproductionSteps,
-      assertions: []
+      assertions: intermediate.map((result) => ({
+        phase: "intermediate",
+        ...result
+      }))
     };
   }
   let final;

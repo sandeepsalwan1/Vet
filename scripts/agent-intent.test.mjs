@@ -766,6 +766,24 @@ test("browser proof plans declare protected sessions and executable interactions
       }),
     /without first changing a form control/
   );
+  assert.throws(
+    () =>
+      validateBrowserProofPlan({
+        proofKind: "GIF",
+        routes: ["/staff"],
+        behaviorContract,
+        proofPlan: {
+          version: 1,
+          tasks: [
+            {
+              ...task,
+              actions: [{ type: "navigate", path: "/staff" }]
+            }
+          ]
+        }
+      }),
+    /has no user trigger action/
+  );
   for (const selector of [
     "button:has-text('Notifications')",
     "button:text('Notifications')",

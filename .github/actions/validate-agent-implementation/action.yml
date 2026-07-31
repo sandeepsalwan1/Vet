@@ -71,17 +71,22 @@ runs:
         path: .agent-output
     - name: Prepare pristine candidate tree
       id: prepare
+      continue-on-error: true
       shell: bash
-      run: >-
-        node scripts/agent-implement.mjs
-        --issue-number "${{ inputs.issue-number }}"
-        --prepare-validation .agent-output/codex.patch
-        --codex-output .agent-output/implementation.md
-        --prepared-metadata "$RUNNER_TEMP/implementation-prepared.json"
-        --candidate-dir "$RUNNER_TEMP/implementation-candidate"
-        --json
+      run: |
+        feedback_dir="$RUNNER_TEMP/implementation-validation-feedback"
+        mkdir -p "$feedback_dir"
+        node scripts/agent-implement.mjs \
+          --issue-number "${{ inputs.issue-number }}" \
+          --prepare-validation .agent-output/codex.patch \
+          --codex-output .agent-output/implementation.md \
+          --prepared-metadata "$RUNNER_TEMP/implementation-prepared.json" \
+          --candidate-dir "$RUNNER_TEMP/implementation-candidate" \
+          --validation-feedback "$feedback_dir/validation-feedback.json" \
+          --json
     - name: Run candidate checks in isolated container
       id: candidate-checks
+      if: steps.prepare.outcome == 'success'
       continue-on-error: true
       shell: bash
       env:
@@ -143,12 +148,18 @@ runs:
         include-hidden-files: true
         if-no-files-found: error
     - name: Prepare bounded repair context
-      if: steps.candidate-checks.outcome == 'failure' && inputs.allow-repair == 'true'
+      if: >-
+        inputs.allow-repair == 'true' &&
+        (steps.prepare.outcome == 'failure' ||
+        steps.candidate-checks.outcome == 'failure')
       shell: bash
       run: cp "$RUNNER_TEMP/implementation-validation-feedback/validation-feedback.json" .agent-output/validation-feedback.json
     - name: Upload bounded repair context
       id: repair-context
-      if: steps.candidate-checks.outcome == 'failure' && inputs.allow-repair == 'true'
+      if: >-
+        inputs.allow-repair == 'true' &&
+        (steps.prepare.outcome == 'failure' ||
+        steps.candidate-checks.outcome == 'failure')
       uses: actions/upload-artifact@v4
       with:
         name: agent-implementation-repair-context-${{ inputs.issue-number }}
@@ -168,15 +179,17 @@ runs:
       shell: bash
       env:
         ALLOW_REPAIR: ${{ inputs.allow-repair }}
+        PREPARE_OUTCOME: ${{ steps.prepare.outcome }}
         CHECK_OUTCOME: ${{ steps.candidate-checks.outcome }}
         REPAIR_CONTEXT_OUTCOME: ${{ steps.repair-context.outcome }}
         VALIDATED_ARTIFACT_OUTCOME: ${{ steps.validated-artifact.outcome }}
       run: |
-        if [ "$CHECK_OUTCOME" = success ] && [ "$VALIDATED_ARTIFACT_OUTCOME" = success ]; then
+        if [ "$PREPARE_OUTCOME" = success ] && [ "$CHECK_OUTCOME" = success ] && [ "$VALIDATED_ARTIFACT_OUTCOME" = success ]; then
           printf 'validated=true\nrepair-needed=false\n' >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        if [ "$ALLOW_REPAIR" = true ] && [ "$CHECK_OUTCOME" = failure ] && [ "$REPAIR_CONTEXT_OUTCOME" = success ]; then
+        if [ "$ALLOW_REPAIR" = true ] && [ "$REPAIR_CONTEXT_OUTCOME" = success ] && \
+          { [ "$PREPARE_OUTCOME" = failure ] || [ "$CHECK_OUTCOME" = failure ]; }; then
           printf 'validated=false\nrepair-needed=true\n' >> "$GITHUB_OUTPUT"
           exit 0
         fi

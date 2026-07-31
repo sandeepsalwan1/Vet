@@ -25,6 +25,8 @@ Rules:
 - Update docs/changelog only for user-visible behavior changes.
 - Do not edit secrets or create repo `.env` files.
 - Do not run no-mistakes here; it is a final gate after review.
+- Follow the trusted candidate boundary appended to this prompt.
+  Repository-wide work may inspect protected paths, but routine candidates must not edit them or move their contents through a rename.
 - Do not load `.agent/AFK-AUTOMATION-INTENT.md` for a routine product issue.
   It is the maintainer rebuild contract and is included only when the approved issue changes AFK automation.
 - Return the configured structured implementation result.

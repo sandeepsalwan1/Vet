@@ -22,6 +22,7 @@ import {
   isTrustedAgentPublisher,
   newestManagedComment,
   parseImplementationMetadata,
+  privilegedCandidatePolicy,
   privilegedCandidatePaths,
   publisherEnvironment,
   removeLabels,
@@ -831,6 +832,13 @@ test("privileged candidate policy covers nested instructions, agent roots, packa
     "skills/local/SKILL.md",
     "scripts/agent-new.mjs"
   ]);
+  assert.deepEqual(privilegedCandidatePolicy().pathPrefixes, [
+    "scripts/agent-"
+  ]);
+  assert.ok(
+    privilegedCandidatePolicy().directorySegments.includes(".github")
+  );
+  assert.ok(privilegedCandidatePolicy().basenames.includes("package.json"));
 });
 
 test("trusted agent pull requires exact trusted-publisher implementation provenance", () => {

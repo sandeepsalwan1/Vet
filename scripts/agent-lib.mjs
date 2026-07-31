@@ -312,19 +312,32 @@ export function candidatePaths(candidates) {
   return [...new Set((candidates ?? []).flatMap(candidatePathValues).filter(Boolean))];
 }
 
+export function privilegedCandidatePolicy() {
+  return {
+    basenames: [
+      "AGENTS.md",
+      "CLAUDE.md",
+      ".no-mistakes.yaml",
+      ".no-mistakes.yml",
+      ...PRIVILEGED_PACKAGE_FILES
+    ].sort(),
+    directorySegments: [...PRIVILEGED_AGENT_DIRECTORIES].sort(),
+    pathPrefixes: ["scripts/agent-"]
+  };
+}
+
 export function privilegedCandidatePaths(candidates) {
+  const policy = privilegedCandidatePolicy();
+  const basenames = new Set(policy.basenames);
+  const directorySegments = new Set(policy.directorySegments);
   return candidatePaths(candidates).filter((candidate) => {
     const path = candidate.replaceAll("\\", "/").replace(/^\.\//, "");
     const segments = path.split("/").filter(Boolean);
     const basename = segments.at(-1) ?? "";
     return (
-      basename === "AGENTS.md" ||
-      basename === "CLAUDE.md" ||
-      basename === ".no-mistakes.yaml" ||
-      basename === ".no-mistakes.yml" ||
-      PRIVILEGED_PACKAGE_FILES.has(basename) ||
-      segments.some((segment) => PRIVILEGED_AGENT_DIRECTORIES.has(segment)) ||
-      path.startsWith("scripts/agent-")
+      basenames.has(basename) ||
+      segments.some((segment) => directorySegments.has(segment)) ||
+      policy.pathPrefixes.some((prefix) => path.startsWith(prefix))
     );
   });
 }

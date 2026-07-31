@@ -490,6 +490,12 @@ export function validateBrowserProofPlan({
     if (proofKind === "GIF" && !task.intermediateAssertions.length) {
       throw new AgentError("GIF proof task has no intermediate assertion", 1);
     }
+    if (
+      proofKind === "GIF" &&
+      !task.actions.some((action) => !["navigate", "wait"].includes(action.type))
+    ) {
+      throw new AgentError("GIF proof task has no user trigger action", 1);
+    }
     validateProofTaskInteraction(task);
     for (const clauseId of task.clauseIds) {
       if (!expected.has(clauseId)) {

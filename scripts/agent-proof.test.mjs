@@ -343,7 +343,10 @@ test("visual behavior plan covers every sealed clause and GIF transition", () =>
       {
         clauseIds: ["AC1", "AC2"],
         route: "/proof/loading",
-        actions: [{ type: "navigate", path: "/proof/loading" }],
+        actions: [
+          { type: "navigate", path: "/proof/loading" },
+          { type: "click", selector: "[data-agent-proof='start']" }
+        ],
         intermediateAssertions: [
           { type: "visible", selector: "[data-agent-proof-state='loading']" }
         ],
@@ -416,7 +419,10 @@ test("browser clauses that name a sealed route cannot use another page", () => {
   const task = {
     clauseIds: ["AC1"],
     route: "/proof/loading",
-    actions: [{ type: "navigate", path: "/proof/loading" }],
+    actions: [
+      { type: "navigate", path: "/proof/loading" },
+      { type: "click", selector: "[data-agent-proof='start']" }
+    ],
     intermediateAssertions: [{ type: "visible", selector: "main" }],
     finalAssertions: [{ type: "visible", selector: "main" }]
   };
@@ -442,7 +448,10 @@ test("browser clauses that name a sealed route cannot use another page", () => {
           {
             ...task,
             route: "/",
-            actions: [{ type: "navigate", path: "/" }]
+            actions: [
+              { type: "navigate", path: "/" },
+              { type: "click", selector: "[data-agent-proof='start']" }
+            ]
           }
         ]
       }
@@ -491,7 +500,10 @@ test("browser clauses that name a sealed route cannot use another page", () => {
           {
             ...task,
             route: "/experiment",
-            actions: [{ type: "navigate", path: "/experiment" }]
+            actions: [
+              { type: "navigate", path: "/experiment" },
+              { type: "click", selector: "[data-agent-proof='start']" }
+            ]
           }
         ]
       }
@@ -841,7 +853,10 @@ test("published GIF proof is downloaded, digest-bound, exact-head, and playable"
         {
           clauseIds: ["AC1"],
           route: "/proof/loading",
-          actions: [{ type: "navigate", path: "/proof/loading" }],
+          actions: [
+            { type: "navigate", path: "/proof/loading" },
+            { type: "click", selector: "[data-agent-proof='start']" }
+          ],
           intermediateAssertions: [
             { type: "visible", selector: "[data-agent-proof='opening']" }
           ],

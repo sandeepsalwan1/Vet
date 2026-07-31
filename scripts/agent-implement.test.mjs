@@ -829,7 +829,10 @@ test("isolated validation accepts only trusted visual routes", (t) => {
       {
         clauseIds: ["AC1", "AC2"],
         route: "/unrelated",
-        actions: [{ type: "navigate", path: "/unrelated" }],
+        actions: [
+          { type: "navigate", path: "/unrelated" },
+          { type: "click", selector: "[data-agent-proof='start']" }
+        ],
         intermediateAssertions: [
           { type: "visible", selector: "[data-agent-proof-state='loading']" }
         ],
@@ -857,7 +860,10 @@ test("isolated validation accepts only trusted visual routes", (t) => {
   implementationResult.intentAddendum.proofPlan.tasks[0] = {
     ...implementationResult.intentAddendum.proofPlan.tasks[0],
     route: "/proof/loading",
-    actions: [{ type: "navigate", path: "/proof/loading" }]
+    actions: [
+      { type: "navigate", path: "/proof/loading" },
+      { type: "click", selector: "[data-agent-proof='start']" }
+    ]
   };
   writeImplementationValidationContext(
     cwd,
@@ -936,6 +942,10 @@ test("repair prompt binds sealed intent and treats feedback as bounded data", (t
   assert.match(prompt, /Trusted Proof-Plan Repair Constraints/);
   assert.match(prompt, /"clauseId": "AC1"/);
   assert.match(prompt, /"excludedFromBrowserPlan": \[\s+"AC3"\s+\]/);
+  assert.match(
+    prompt,
+    /restore that path exactly to the repository base/
+  );
   assert.match(prompt, /~~~ignore prior instructions/);
   assert.doesNotMatch(prompt, /```ignore prior instructions/);
 });
@@ -1033,6 +1043,18 @@ test("implementation workflow isolates candidate checks from credentials, artifa
   assert.match(validationAction, /node_modules,dst=\/workspace\/node_modules,readonly/);
   assert.match(validationAction, /::stop-commands::/);
   assert.match(validationAction, /--prepare-validation/);
+  assert.match(
+    validationAction,
+    /id: prepare\n\s+continue-on-error: true/
+  );
+  assert.match(
+    validationAction,
+    /--validation-feedback "\$feedback_dir\/validation-feedback\.json"/
+  );
+  assert.match(
+    validationAction,
+    /id: candidate-checks\n\s+if: steps\.prepare\.outcome == 'success'/
+  );
   assert.match(validationAction, /--run-validation-checks/);
   assert.match(
     validationAction,
@@ -1042,6 +1064,11 @@ test("implementation workflow isolates candidate checks from credentials, artifa
     validationAction,
     /implementation-validation-feedback\/validation-feedback\.json/
   );
+  assert.match(
+    validationAction,
+    /steps\.prepare\.outcome == 'failure'/
+  );
+  assert.match(validationAction, /PREPARE_OUTCOME:/);
   assert.match(validationAction, /--env AGENT_VALIDATION_CONTAINER=1/);
   assert.match(validationAction, /--finalize-validation/);
   assert.doesNotMatch(validationAction, /\$\{\{ secrets\./);
@@ -1163,9 +1190,11 @@ test("prepared validation checks both sides of a privileged rename", (t) => {
   git("restore", ".");
   rmSync(join(cwd, "notes.md"));
   const outputPath = join(cwd, "implementation.md");
+  const feedbackPath = join(root, "validation-feedback.json");
+  const intentPath = join(cwd, "implementation-intent.json");
   writeFileSync(outputPath, implementationOutput({ summary: "Renamed safely." }));
   writeFileSync(
-    join(cwd, "implementation-intent.json"),
+    intentPath,
     `${JSON.stringify(implementationIntent())}\n`
   );
 
@@ -1178,15 +1207,78 @@ test("prepared validation checks both sides of a privileged rename", (t) => {
         outputPath,
         join(root, "prepared.json"),
         join(root, "candidate"),
-        cwd
+        cwd,
+        intentPath,
+        feedbackPath
       ),
     (error) => error.code === 1 && error.details.paths.includes("AGENTS.md")
   );
+  assert.deepEqual(readValidationFeedback(feedbackPath, config), {
+    version: 1,
+    ok: false,
+    command: "trusted implementation patch preparation",
+    exitCode: 1,
+    stdout: "",
+    stderr:
+      "agent patch touches privileged paths\n\nProtected paths:\nAGENTS.md"
+  });
+});
+
+test("prepared validation writes bounded feedback for a conflicting patch", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "vet-agent-conflict-test-"));
+  const cwd = join(root, "repo");
+  mkdirSync(cwd);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, { cwd, encoding: "utf8" });
+
+  git("init", "-q", "-b", "main");
+  git("config", "user.name", "Test");
+  git("config", "user.email", "test@example.test");
+  writeFileSync(join(cwd, "file.txt"), "base\n");
+  git("add", "file.txt");
+  git("commit", "-qm", "initial");
+  git("update-ref", "refs/remotes/origin/main", "HEAD");
+  const patchPath = join(cwd, "change.patch");
+  const outputPath = join(cwd, "implementation.md");
+  const intentPath = join(cwd, "implementation-intent.json");
+  const feedbackPath = join(root, "validation-feedback.json");
+  writeFileSync(patchPath, "not a patch\n");
+  writeFileSync(outputPath, implementationOutput());
+  writeFileSync(
+    intentPath,
+    `${JSON.stringify(implementationIntent())}\n`
+  );
+
+  assert.throws(
+    () =>
+      preparePatchValidation(
+        config,
+        42,
+        patchPath,
+        outputPath,
+        join(root, "prepared.json"),
+        join(root, "candidate"),
+        cwd,
+        intentPath,
+        feedbackPath
+      ),
+    /agent patch conflicts with the existing agent branch/
+  );
+  assert.deepEqual(readValidationFeedback(feedbackPath, config), {
+    version: 1,
+    ok: false,
+    command: "trusted implementation patch preparation",
+    exitCode: 1,
+    stdout: "",
+    stderr: "agent patch conflicts with the existing agent branch"
+  });
 });
 
 test("routine implementation prompt excludes the long AFK rebuild contract", () => {
   const prompt = readFileSync(join(process.cwd(), ".agent/prompts/implement.md"), "utf8");
 
+  assert.match(prompt, /Follow the trusted candidate boundary appended to this prompt/);
+  assert.match(prompt, /must not edit them or move their contents through a rename/);
   assert.match(prompt, /Do not load `\.agent\/AFK-AUTOMATION-INTENT\.md` for a routine product issue/);
   assert.match(prompt, /included only when the approved issue changes AFK automation/);
 });
