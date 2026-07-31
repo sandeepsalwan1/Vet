@@ -3737,13 +3737,14 @@ textarea:not([data-slot]):focus {
   box-shadow: 0 10px 24px rgba(17, 43, 30, 0.12);
   font-size: 12px;
   font-weight: 700;
+  opacity: 1;
   animation: dogEggPop 1.6s ease both;
 }
 
 @keyframes dogEggPop {
-  0% { opacity: 0; transform: translateY(10px) scale(0.92); }
-  15% { opacity: 1; transform: translateY(0) scale(1); }
-  75% { opacity: 1; transform: translateY(0) scale(1); }
+  0% { transform: translateY(10px) scale(0.92); }
+  15% { transform: translateY(0) scale(1); }
+  75% { transform: translateY(0) scale(1); }
   100% { opacity: 0; transform: translateY(-6px) scale(0.98); }
 }
 
