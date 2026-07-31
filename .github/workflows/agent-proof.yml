@@ -643,6 +643,36 @@ jobs:
           --retry-reason initial
           --effect proof
           --json
+      - name: Reconcile review after proof recovery
+        if: inputs.target-kind == 'pr' && steps.terminal.outputs.state == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.target-number }}
+          STATUS_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$STATUS_SHA" =~ ^[0-9a-f]{40}$ ]]
+          current_sha="$(
+            gh pr view "$PR_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json headRefOid \
+              --jq .headRefOid
+          )"
+          test "$current_sha" = "$STATUS_SHA"
+          review_state="$(
+            gh api "repos/$GITHUB_REPOSITORY/commits/$STATUS_SHA/statuses?per_page=100" \
+              --jq '[.[] | select(.context == "agent-review" and .creator.login == "github-actions[bot]")] | sort_by(.created_at, .id) | last | .state // "missing"'
+          )"
+          if [ "$review_state" != failure ]; then
+            echo "Agent review is $review_state; no proof recovery reconciliation needed."
+            exit 0
+          fi
+          gh workflow run agent-review.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f pr-number="$PR_NUMBER" \
+            -f expected-head-sha="$STATUS_SHA" \
+            -f repair-attempt=1
       - name: Re-evaluate automerge after proof success
         if: inputs.target-kind == 'pr' && steps.terminal.outputs.state == 'success'
         env:

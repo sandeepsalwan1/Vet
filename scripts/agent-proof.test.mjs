@@ -1177,12 +1177,30 @@ test("proof workflow dispatches automerge only after terminal success is publish
   const statusIndex = workflow.indexOf("gh api \"repos/$GITHUB_REPOSITORY/statuses/$STATUS_SHA\"");
   const blockerIndex = workflow.indexOf("name: Reconcile terminal proof blocker");
   const repairIndex = workflow.indexOf("gh workflow run agent-review.yml");
+  const recoveryIndex = workflow.indexOf("name: Reconcile review after proof recovery");
   const dispatchIndex = workflow.indexOf("gh workflow run agent-automerge.yml");
 
   assert.ok(statusIndex >= 0);
   assert.ok(blockerIndex > statusIndex);
   assert.ok(repairIndex > statusIndex);
+  assert.ok(recoveryIndex > statusIndex);
   assert.ok(dispatchIndex > statusIndex);
+  assert.match(
+    workflow.slice(recoveryIndex, dispatchIndex),
+    /select\(\.context == "agent-review" and \.creator\.login == "github-actions\[bot\]"\)/
+  );
+  assert.match(
+    workflow.slice(recoveryIndex, dispatchIndex),
+    /test "\$current_sha" = "\$STATUS_SHA"/
+  );
+  assert.match(
+    workflow.slice(recoveryIndex, dispatchIndex),
+    /if \[ "\$review_state" != failure \]/
+  );
+  assert.match(
+    workflow.slice(recoveryIndex, dispatchIndex),
+    /-f expected-head-sha="\$STATUS_SHA"/
+  );
   assert.match(finalizeJob, /pull-requests: write/);
   assert.match(workflow, /uses: \.\/trusted\/\.github\/actions\/setup-crabbox/);
   assert.match(workflow, /name: disposable service proof/);
