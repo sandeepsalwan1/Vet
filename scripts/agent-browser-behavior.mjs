@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 export const BROWSER_BEHAVIOR_MARKER = "AGENT_BROWSER_BEHAVIOR_V1 ";
@@ -22,6 +23,47 @@ export const DEMO_SESSION_CREDENTIALS = Object.freeze({
   })
 });
 const NAVIGATION_MARKER = "__agentProofNavigationMarkerV1";
+const EVENT_TRACE_KEY = `__agentProofEventTraceV1_${randomUUID()}`;
+const EVENT_TRACE_BINDING = `__agentProofEventBindingV1_${randomUUID().replaceAll("-", "")}`;
+const EVENT_TRACE_WORLD = `agent-proof-events-${randomUUID()}`;
+const EVENT_TYPES = new Set([
+  "beforeinput",
+  "input",
+  "change",
+  "keydown",
+  "keyup",
+  "pointerdown",
+  "pointerup",
+  "click",
+  "submit"
+]);
+const EVENT_KEYS = new Set([
+  "",
+  "printable",
+  "Backspace",
+  "Tab",
+  "Enter",
+  "Escape",
+  "PageUp",
+  "PageDown",
+  "End",
+  "Home",
+  "ArrowLeft",
+  "ArrowUp",
+  "ArrowRight",
+  "ArrowDown",
+  "Insert",
+  "Delete"
+]);
+const EVENT_INPUT_TYPES = new Set([
+  "",
+  "insertText",
+  "insertLineBreak",
+  "insertParagraph",
+  "deleteContentBackward",
+  "deleteContentForward"
+]);
+const browserEventCollectors = new WeakMap();
 let navigationSequence = 0;
 
 function parseArgs(argv = process.argv.slice(2)) {
@@ -111,10 +153,21 @@ async function cdpClient(webSocketDebuggerUrl) {
   if (typeof WebSocket !== "function") fail("Node WebSocket support is unavailable");
   const socket = new WebSocket(webSocketDebuggerUrl);
   const pending = new Map();
+  const listeners = new Map();
   let sequence = 0;
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(String(event.data));
-    if (!message.id || !pending.has(message.id)) return;
+    if (!message.id) {
+      for (const listener of listeners.get(message.method) ?? []) {
+        try {
+          listener(message.params ?? {});
+        } catch {
+          // Diagnostic events must not interrupt the command channel.
+        }
+      }
+      return;
+    }
+    if (!pending.has(message.id)) return;
     const { resolve, reject } = pending.get(message.id);
     pending.delete(message.id);
     if (message.error) reject(new Error(message.error.message));
@@ -132,6 +185,15 @@ async function cdpClient(webSocketDebuggerUrl) {
       const result = new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
       socket.send(JSON.stringify({ id, method, params }));
       return result;
+    },
+    on(method, listener) {
+      const methodListeners = listeners.get(method) ?? new Set();
+      methodListeners.add(listener);
+      listeners.set(method, methodListeners);
+      return () => {
+        methodListeners.delete(listener);
+        if (!methodListeners.size) listeners.delete(method);
+      };
     },
     close() {
       socket.close();
@@ -259,6 +321,181 @@ async function waitForAssertions(client, assertions, timeoutMs) {
   }));
 }
 
+function sanitizedBrowserEvent(value) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    value.trusted !== true ||
+    !EVENT_TYPES.has(value.type)
+  ) {
+    return undefined;
+  }
+  const safeTag = (tag) =>
+    typeof tag === "string" && /^[a-z][a-z0-9-]{0,31}$/.test(tag)
+      ? tag
+      : "";
+  return {
+    type: value.type,
+    trusted: true,
+    prevented: value.prevented === true,
+    key: EVENT_KEYS.has(value.key) ? value.key : "",
+    inputType: EVENT_INPUT_TYPES.has(value.inputType) ? value.inputType : "",
+    targetTag: safeTag(value.targetTag),
+    activeTag: safeTag(value.activeTag)
+  };
+}
+
+function browserEventTraceInstallerSource() {
+  return (
+    `(() => { ` +
+    `const key = ${JSON.stringify(EVENT_TRACE_KEY)}; ` +
+    `const publish = globalThis[${JSON.stringify(EVENT_TRACE_BINDING)}]; ` +
+    `if (globalThis[key]) return true; ` +
+    `const events = []; ` +
+    `const api = Object.freeze({ ` +
+    `reset: () => { events.length = 0; return true; }, ` +
+    `read: () => events.slice(-64).map(event => ({ ...event })) ` +
+    `}); ` +
+    `Object.defineProperty(globalThis, key, { value: api }); ` +
+    `const namedKeys = new Set(${JSON.stringify([
+      "Backspace",
+      "Tab",
+      "Enter",
+      "Escape",
+      "PageUp",
+      "PageDown",
+      "End",
+      "Home",
+      "ArrowLeft",
+      "ArrowUp",
+      "ArrowRight",
+      "ArrowDown",
+      "Insert",
+      "Delete"
+    ])}); ` +
+    `const inputTypes = new Set(["insertText", "insertLineBreak", "insertParagraph", ` +
+    `"deleteContentBackward", "deleteContentForward"]); ` +
+    `for (const type of ["beforeinput", "input", "change", "keydown", "keyup", "pointerdown", "pointerup", "click", "submit"]) { ` +
+    `document.addEventListener(type, event => { ` +
+    `if (!event.isTrusted) return; ` +
+    `queueMicrotask(() => { ` +
+    `const eventKey = typeof event.key === "string" ` +
+    `? (namedKeys.has(event.key) ? event.key : event.key.length === 1 ? "printable" : "") : ""; ` +
+    `const inputType = inputTypes.has(event.inputType) ? event.inputType : ""; ` +
+    `events.push({ ` +
+    `type: event.type, trusted: event.isTrusted, prevented: event.defaultPrevented, ` +
+    `key: eventKey, inputType, ` +
+    `targetTag: String(event.target?.tagName ?? "").toLowerCase(), ` +
+    `activeTag: String(document.activeElement?.tagName ?? "").toLowerCase()` +
+    `}); ` +
+    `if (typeof publish === "function") publish(JSON.stringify(events.at(-1))); ` +
+    `if (events.length > 64) events.shift(); ` +
+    `}); ` +
+    `}, true); ` +
+    `} ` +
+    `return true; ` +
+    `})()`
+  );
+}
+
+export async function installBrowserEventCollector(client) {
+  if (typeof client.on !== "function") return undefined;
+  const events = [];
+  const removeListener = client.on("Runtime.bindingCalled", (params) => {
+    if (
+      params.name !== EVENT_TRACE_BINDING ||
+      typeof params.payload !== "string" ||
+      params.payload.length > 512
+    ) {
+      return;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(params.payload);
+    } catch {
+      return;
+    }
+    const event = sanitizedBrowserEvent(parsed);
+    if (!event) return;
+    events.push(event);
+    if (events.length > 64) events.shift();
+  });
+  let scriptIdentifier;
+  try {
+    await client.send("Runtime.addBinding", {
+      name: EVENT_TRACE_BINDING,
+      executionContextName: EVENT_TRACE_WORLD
+    });
+    const script = await client.send("Page.addScriptToEvaluateOnNewDocument", {
+      source: browserEventTraceInstallerSource(),
+      worldName: EVENT_TRACE_WORLD,
+      runImmediately: true
+    });
+    scriptIdentifier = script.identifier;
+  } catch (error) {
+    removeListener();
+    throw error;
+  }
+  const collector = {
+    reset() {
+      events.length = 0;
+    },
+    read() {
+      return events.map((event) => ({ ...event }));
+    },
+    async dispose() {
+      removeListener();
+      const cleanup = [
+        client.send("Runtime.removeBinding", { name: EVENT_TRACE_BINDING })
+      ];
+      if (scriptIdentifier) {
+        cleanup.push(
+          client.send("Page.removeScriptToEvaluateOnNewDocument", {
+            identifier: scriptIdentifier
+          })
+        );
+      }
+      await Promise.allSettled(cleanup);
+    }
+  };
+  browserEventCollectors.set(client, collector);
+  return collector;
+}
+
+async function ensureBrowserEventTrace(client) {
+  if (browserEventCollectors.has(client)) return true;
+  return await evaluate(client, browserEventTraceInstallerSource());
+}
+
+async function resetBrowserEventTrace(client) {
+  const collector = browserEventCollectors.get(client);
+  if (collector) {
+    collector.reset();
+    return;
+  }
+  await evaluate(
+    client,
+    `globalThis[${JSON.stringify(EVENT_TRACE_KEY)}]?.reset?.() ?? false`,
+    true
+  );
+}
+
+async function browserEventTrace(client) {
+  const collected = browserEventCollectors.get(client)?.read();
+  if (collected) return collected;
+  const events = await evaluate(
+    client,
+    `globalThis[${JSON.stringify(EVENT_TRACE_KEY)}]?.read?.() ?? []`,
+    true
+  );
+  return Array.isArray(events)
+    ? events
+        .slice(-64)
+        .map(sanitizedBrowserEvent)
+        .filter(Boolean)
+    : [];
+}
+
 async function navigate(client, baseUrl, path) {
   const marker = `${Date.now()}:${++navigationSequence}`;
   const marked = await waitForEvaluation(
@@ -374,6 +611,65 @@ async function selectAllText(client) {
   });
 }
 
+async function dispatchClick(client, targetExpression, onMouseDown) {
+  const deadline = Date.now() + 5_000;
+  let point;
+  do {
+    point = await evaluate(
+      client,
+      `(element => { ` +
+        `if (!element || element.disabled || !element.getClientRects().length) return null; ` +
+        `element.scrollIntoView({ block: "center", inline: "center" }); ` +
+        `const rect = element.getBoundingClientRect(); ` +
+        `const x = rect.left + rect.width / 2; ` +
+        `const y = rect.top + rect.height / 2; ` +
+        `const hit = document.elementFromPoint(x, y); ` +
+        `return hit && (hit === element || element.contains(hit)) ? { x, y } : null; ` +
+        `})(${targetExpression})`,
+      true
+    );
+    if (
+      point &&
+      Number.isFinite(point.x) &&
+      Number.isFinite(point.y)
+    ) {
+      break;
+    }
+    point = undefined;
+    await sleep(50);
+  } while (Date.now() < deadline);
+  if (!point) return false;
+  await client.send("Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    x: point.x,
+    y: point.y,
+    button: "none",
+    buttons: 0,
+    modifiers: 0
+  });
+  const mouseDown = client.send("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    x: point.x,
+    y: point.y,
+    button: "left",
+    buttons: 1,
+    clickCount: 1,
+    modifiers: 0
+  });
+  onMouseDown?.();
+  await mouseDown;
+  await client.send("Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    x: point.x,
+    y: point.y,
+    button: "left",
+    buttons: 0,
+    clickCount: 1,
+    modifiers: 0
+  });
+  return true;
+}
+
 async function waitForStableInputValue(
   client,
   selector,
@@ -415,32 +711,28 @@ export async function runAction(client, baseUrl, action, onTriggered) {
   }
   const selector = JSON.stringify(action.selector);
   if (action.type === "click") {
-    const clicked = await waitForEvaluation(
+    const clicked = await dispatchClick(
       client,
-      `(element => { ` +
-        `if (!element || element.disabled || !element.getClientRects().length) return false; ` +
-        `element.click(); return true; ` +
-        `})(document.querySelector(${selector}))`
+      `document.querySelector(${selector})`,
+      onTriggered
     );
     if (!clicked) fail(`browser action target was not found: ${action.selector}`);
-    onTriggered?.();
     return `Click ${action.selector}`;
   }
   if (action.type === "clickText") {
-    const clicked = await waitForEvaluation(
+    const clicked = await dispatchClick(
       client,
       `(elements => { ` +
         `const value = ${JSON.stringify(action.value)}; ` +
-        `const element = Array.from(elements).find(candidate => ` +
+        `return Array.from(elements).find(candidate => ` +
         `!candidate.disabled && candidate.getClientRects().length && ` +
-        `String(candidate.textContent ?? "").includes(value)); ` +
-        `if (!element) return false; element.click(); return true; ` +
-        `})(document.querySelectorAll(${selector}))`
+        `String(candidate.textContent ?? "").includes(value)) ?? null; ` +
+        `})(document.querySelectorAll(${selector}))`,
+      onTriggered
     );
     if (!clicked) {
       fail(`browser action text was not found: ${action.selector} ${JSON.stringify(action.value)}`);
     }
-    onTriggered?.();
     return `Click ${action.selector} containing ${JSON.stringify(action.value)}`;
   }
   if (action.type === "fill") {
@@ -535,6 +827,7 @@ export async function establishDemoSession(
     8_000
   );
   if (!emailVisible) fail(`browser demo sign-in form was not found for ${session}`);
+  await ensureBrowserEventTrace(client);
   await runAction(client, "", {
     type: "fill",
     selector: "input[type='email']",
@@ -564,6 +857,7 @@ export function intermediateAssertionTimeout(actionCount, actionIndex) {
 }
 
 export async function runTask(client, payload, task) {
+  await resetBrowserEventTrace(client);
   const reproductionSteps = [];
   const intermediate = task.intermediateAssertions.map((assertion) => ({
     assertion: assertionLabel(assertion),
@@ -586,11 +880,15 @@ export async function runTask(client, payload, task) {
       payload.baseUrl,
       task.route
     );
-    if (sessionStep) reproductionSteps.push(sessionStep);
+    if (sessionStep) {
+      reproductionSteps.push(sessionStep);
+      await resetBrowserEventTrace(client);
+    }
     for (const [actionIndex, action] of actions.entries()) {
       const isTrigger = ["fill", "click", "clickText", "press"].includes(
         action.type
       );
+      if (isTrigger) await ensureBrowserEventTrace(client);
       const pendingIntermediateIndexes = isTrigger
         ? intermediate
             .map((result, index) => (result.passed ? -1 : index))
@@ -665,6 +963,7 @@ export async function runTask(client, payload, task) {
       status: "fail",
       evidence: `Browser ${assertionFailure ? "assertion" : "interaction"} failed: ${error?.message ?? String(error)}`,
       reproductionSteps,
+      browserEvents: await browserEventTrace(client),
       assertions: [
         ...intermediate.map((result) => ({
           phase: "intermediate",
@@ -704,6 +1003,7 @@ export async function runTask(client, payload, task) {
       status: "fail",
       evidence: `Browser assertion failed: ${error?.message ?? String(error)}`,
       reproductionSteps,
+      browserEvents: await browserEventTrace(client),
       assertions: [
         ...intermediate.map((result) => ({
           phase: "intermediate",
@@ -729,6 +1029,7 @@ export async function runTask(client, payload, task) {
       ? "All deterministic rendered-state assertions were observed."
       : `Missing observations: ${assertions.filter((result) => !result.passed).map((result) => result.assertion).join(", ")}.`,
     reproductionSteps,
+    browserEvents: await browserEventTrace(client),
     assertions
   };
 }
@@ -740,6 +1041,7 @@ export async function runBrowserBehavior(payload) {
   try {
     await client.send("Page.enable");
     await client.send("Runtime.enable");
+    await installBrowserEventCollector(client);
     const taskResults = [];
     for (const task of payload.tasks) {
       taskResults.push(await runTask(client, payload, task));
@@ -775,6 +1077,7 @@ export async function runBrowserBehavior(payload) {
       ]
     };
   } finally {
+    await browserEventCollectors.get(client)?.dispose();
     client.close();
   }
 }

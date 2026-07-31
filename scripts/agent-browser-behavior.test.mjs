@@ -5,6 +5,7 @@ import {
   assertionLabel,
   assertionExpression,
   establishDemoSession,
+  installBrowserEventCollector,
   intermediateAssertionTimeout,
   runAction,
   runTask,
@@ -420,6 +421,63 @@ test("fill never sends native input when the requested control cannot focus", as
   );
 });
 
+test("click uses browser-native pointer input at the visible target", async () => {
+  const calls = [];
+  const client = {
+    async send(method, params = {}) {
+      calls.push({ method, params });
+      if (
+        method === "Runtime.evaluate" &&
+        params.expression.includes("getBoundingClientRect")
+      ) {
+        return { result: { value: { x: 24.5, y: 48.25 } } };
+      }
+      return {};
+    }
+  };
+
+  await runAction(client, "", {
+    type: "click",
+    selector: "button[data-save]"
+  });
+
+  assert.doesNotMatch(calls[0].params.expression, /element\.click/);
+  assert.deepEqual(
+    calls
+      .filter(({ method }) => method === "Input.dispatchMouseEvent")
+      .map(({ params }) => ({
+        type: params.type,
+        x: params.x,
+        y: params.y,
+        button: params.button,
+        buttons: params.buttons
+      })),
+    [
+      {
+        type: "mouseMoved",
+        x: 24.5,
+        y: 48.25,
+        button: "none",
+        buttons: 0
+      },
+      {
+        type: "mousePressed",
+        x: 24.5,
+        y: 48.25,
+        button: "left",
+        buttons: 1
+      },
+      {
+        type: "mouseReleased",
+        x: 24.5,
+        y: 48.25,
+        button: "left",
+        buttons: 0
+      }
+    ]
+  );
+});
+
 test("press emits complete browser key metadata", async () => {
   const calls = [];
   const client = {
@@ -512,6 +570,9 @@ test("demo session setup clears ambient state before visible login", async () =>
     async send(method, params = {}) {
       calls.push({ method, params });
       if (method === "Runtime.evaluate") {
+        if (params.expression.includes("getBoundingClientRect")) {
+          return { result: { value: { x: 20, y: 20 } } };
+        }
         if (params.expression.includes('return "text"')) {
           return { result: { value: "text" } };
         }
@@ -741,6 +802,274 @@ test("rejected controlled fill cannot authorize a later action or assertion", as
   ]);
 });
 
+test("failed tasks retain bounded content-free native browser event evidence", async () => {
+  let traceInstaller = "";
+  const nativeEvents = [
+    {
+      type: "input",
+      trusted: true,
+      prevented: false,
+      key: "",
+      inputType: "insertText",
+      targetTag: "textarea",
+      activeTag: "textarea"
+    },
+    {
+      type: "keydown",
+      trusted: true,
+      prevented: true,
+      key: "Enter",
+      inputType: "",
+      targetTag: "textarea",
+      activeTag: "textarea"
+    }
+  ];
+  const task = {
+    clauseIds: ["AC1"],
+    route: "/proof/dog-egg",
+    session: "none",
+    actions: [
+      { type: "press", key: "Enter" },
+      { type: "unsupported" }
+    ],
+    intermediateAssertions: [],
+    finalAssertions: [
+      { type: "visible", selector: "[data-agent-proof='dog-easter-egg']" }
+    ]
+  };
+  const client = {
+    async send(method, params = {}) {
+      if (method !== "Runtime.evaluate") return {};
+      if (params.expression.includes("__agentProofEventTraceV1") &&
+          params.expression.includes(".read?.()")) {
+        return { result: { value: nativeEvents } };
+      }
+      if (params.expression.includes("__agentProofEventTraceV1")) {
+        traceInstaller = params.expression;
+        return { result: { value: true } };
+      }
+      return { result: { value: true } };
+    }
+  };
+
+  const result = await runTask(client, payload, task);
+
+  assert.equal(result.status, "fail");
+  assert.deepEqual(result.browserEvents, nativeEvents);
+  assert.ok(
+    Object.values(result.browserEvents[0]).every(
+      (value) => value !== "I NEED A DOG IMAGE NOW"
+    )
+  );
+  assert.match(traceInstaller, /if \(!event\.isTrusted\) return/);
+  assert.match(traceInstaller, /namedKeys\.has\(event\.key\)/);
+  assert.match(traceInstaller, /inputTypes\.has\(event\.inputType\)/);
+  assert.match(traceInstaller, /length > 64\) events\.shift/);
+  assert.match(traceInstaller, /Object\.defineProperty\(globalThis, key/);
+  assert.match(traceInstaller, /publish\(JSON\.stringify\(events\.at\(-1\)\)\)/);
+  assert.match(traceInstaller, /}, true\)/);
+});
+
+test("browser event evidence resets before each task", async () => {
+  const keyup = {
+    type: "keyup",
+    trusted: true,
+    prevented: false,
+    key: "Enter",
+    inputType: "",
+    targetTag: "textarea",
+    activeTag: "textarea"
+  };
+  let events = [{ ...keyup, type: "keydown" }];
+  let resetCount = 0;
+  const client = {
+    async send(method, params = {}) {
+      if (method !== "Runtime.evaluate") return {};
+      if (
+        params.expression.includes("__agentProofEventTraceV1") &&
+        params.expression.includes(".reset?.()")
+      ) {
+        events = [];
+        resetCount += 1;
+        return { result: { value: true } };
+      }
+      if (
+        params.expression.includes("__agentProofEventTraceV1") &&
+        params.expression.includes(".read?.()")
+      ) {
+        return { result: { value: structuredClone(events) } };
+      }
+      if (params.expression.includes("__agentProofEventTraceV1")) {
+        events.push(keyup);
+        return { result: { value: true } };
+      }
+      return { result: { value: true } };
+    }
+  };
+  const task = {
+    clauseIds: ["AC1"],
+    route: "/proof/dog-egg",
+    session: "none",
+    actions: [
+      { type: "press", key: "Enter" },
+      { type: "unsupported" }
+    ],
+    intermediateAssertions: [],
+    finalAssertions: [
+      { type: "visible", selector: "[data-agent-proof='dog-easter-egg']" }
+    ]
+  };
+
+  const first = await runTask(client, payload, task);
+  events.push({
+    type: "input",
+    trusted: true,
+    prevented: false,
+    key: "",
+    inputType: "insertText",
+    targetTag: "textarea",
+    activeTag: "textarea"
+  });
+  const second = await runTask(client, payload, task);
+
+  assert.equal(resetCount, 2);
+  assert.deepEqual(first.browserEvents, [keyup]);
+  assert.deepEqual(second.browserEvents, [keyup]);
+});
+
+test("runner event collector retains only bounded sanitized navigation-safe events", async () => {
+  let bindingListener;
+  let disposed = false;
+  let bindingName = "";
+  const calls = [];
+  const client = {
+    on(method, listener) {
+      assert.equal(method, "Runtime.bindingCalled");
+      bindingListener = listener;
+      return () => {
+        disposed = true;
+      };
+    },
+    async send(method, params = {}) {
+      calls.push({ method, params });
+      if (method === "Runtime.addBinding") bindingName = params.name;
+      if (method === "Page.addScriptToEvaluateOnNewDocument") {
+        return { identifier: "event-trace-script" };
+      }
+      return {};
+    }
+  };
+
+  const collector = await installBrowserEventCollector(client);
+  const binding = calls.find(({ method }) => method === "Runtime.addBinding");
+  const script = calls.find(
+    ({ method }) => method === "Page.addScriptToEvaluateOnNewDocument"
+  );
+  assert.equal(binding.params.executionContextName, script.params.worldName);
+  assert.equal(script.params.runImmediately, true);
+  assert.match(script.params.source, /if \(!event\.isTrusted\) return/);
+  bindingListener({
+    name: bindingName,
+    payload: JSON.stringify({
+      type: "click",
+      trusted: true,
+      prevented: false,
+      key: "secret page text",
+      inputType: "secret input type",
+      targetTag: "button",
+      activeTag: "body"
+    })
+  });
+  bindingListener({
+    name: bindingName,
+    payload: JSON.stringify({
+      type: "keydown",
+      trusted: false,
+      key: "Enter"
+    })
+  });
+  bindingListener({
+    name: bindingName,
+    payload: "x".repeat(513)
+  });
+
+  assert.deepEqual(collector.read(), [
+    {
+      type: "click",
+      trusted: true,
+      prevented: false,
+      key: "",
+      inputType: "",
+      targetTag: "button",
+      activeTag: "body"
+    }
+  ]);
+  collector.reset();
+  assert.deepEqual(collector.read(), []);
+  await collector.dispose();
+  assert.equal(disposed, true);
+  assert.ok(
+    calls.some(({ method }) => method === "Runtime.removeBinding")
+  );
+  assert.ok(
+    calls.some(
+      ({ method, params }) =>
+        method === "Page.removeScriptToEvaluateOnNewDocument" &&
+        params.identifier === "event-trace-script"
+    )
+  );
+});
+
+test("successful demo setup events are cleared before task actions", async () => {
+  let events = [];
+  let resetCount = 0;
+  const client = {
+    async send(method, params = {}) {
+      if (method === "Runtime.evaluate") {
+        if (
+          params.expression.includes("__agentProofEventTraceV1") &&
+          params.expression.includes(".reset?.()")
+        ) {
+          events = [];
+          resetCount += 1;
+          return { result: { value: true } };
+        }
+        if (
+          params.expression.includes("__agentProofEventTraceV1") &&
+          params.expression.includes(".read?.()")
+        ) {
+          return { result: { value: structuredClone(events) } };
+        }
+        if (params.expression.includes("__agentProofEventTraceV1")) {
+          events.push({ type: "input", inputType: "insertText" });
+          return { result: { value: true } };
+        }
+        if (params.expression.includes('return "text"')) {
+          return { result: { value: "text" } };
+        }
+        if (params.expression.includes("getBoundingClientRect")) {
+          return { result: { value: { x: 20, y: 20 } } };
+        }
+        return { result: { value: true } };
+      }
+      return {};
+    }
+  };
+  const task = {
+    clauseIds: ["AC1"],
+    route: "/staff",
+    session: "demo-staff",
+    actions: [{ type: "unsupported" }],
+    intermediateAssertions: [],
+    finalAssertions: [{ type: "visible", selector: "main" }]
+  };
+
+  const result = await runTask(client, payload, task);
+
+  assert.equal(resetCount, 2);
+  assert.deepEqual(result.browserEvents, []);
+});
+
 test("requested intermediate state cannot disappear without a user trigger", async () => {
   const task = {
     clauseIds: ["AC1"],
@@ -898,8 +1227,8 @@ test("browser task does not wait away a transient final state by rechecking prov
   const client = {
     async send(method, params = {}) {
       if (method !== "Runtime.evaluate") return {};
-      if (params.expression.includes("element.click()")) {
-        return { result: { value: true } };
+      if (params.expression.includes("getBoundingClientRect")) {
+        return { result: { value: { x: 20, y: 20 } } };
       }
       if (params.expression.startsWith("!")) {
         hiddenChecks += 1;
@@ -932,8 +1261,8 @@ test("last user action observes transient final state while intermediate state s
   const client = {
     async send(method, params = {}) {
       if (method !== "Runtime.evaluate") return {};
-      if (params.expression.includes("element.click()")) {
-        return { result: { value: true } };
+      if (params.expression.includes("getBoundingClientRect")) {
+        return { result: { value: { x: 20, y: 20 } } };
       }
       if (params.expression.includes("[data-state='saved']")) {
         intermediateChecks += 1;
@@ -969,8 +1298,8 @@ test("last user action observes transient final state without intermediate asser
   const client = {
     async send(method, params = {}) {
       if (method !== "Runtime.evaluate") return {};
-      if (params.expression.includes("element.click()")) {
-        return { result: { value: true } };
+      if (params.expression.includes("getBoundingClientRect")) {
+        return { result: { value: { x: 20, y: 20 } } };
       }
       if (params.expression.includes("[data-state='toast']")) {
         finalChecks += 1;
@@ -1050,9 +1379,9 @@ test("last user trigger retains a delayed transient final state before a trailin
   const client = {
     async send(method, params = {}) {
       if (method !== "Runtime.evaluate") return {};
-      if (params.expression.includes("element.click()")) {
+      if (params.expression.includes("getBoundingClientRect")) {
         triggeredAt = Date.now();
-        return { result: { value: true } };
+        return { result: { value: { x: 20, y: 20 } } };
       }
       if (params.expression.includes("[data-state='toast']")) {
         const elapsed = Date.now() - triggeredAt;
@@ -1080,9 +1409,9 @@ test("final assertion errors after a user trigger remain assertion failures", as
     async send(method, params = {}) {
       if (
         method === "Runtime.evaluate" &&
-        params.expression.includes("element.click()")
+        params.expression.includes("getBoundingClientRect")
       ) {
-        return { result: { value: true } };
+        return { result: { value: { x: 20, y: 20 } } };
       }
       return {};
     }
