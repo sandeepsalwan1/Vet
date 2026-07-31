@@ -755,7 +755,7 @@ test("last user action observes transient final state without intermediate asser
   assert.equal(finalChecks, 1);
 });
 
-test("key-triggered final state is observed before a slow keyup completes", async () => {
+test("key-triggered final state is observed before a slow keydown response", async () => {
   let visible = false;
   const task = {
     clauseIds: ["AC1"],
@@ -777,13 +777,13 @@ test("key-triggered final state is observed before a slow keyup completes", asyn
         setTimeout(() => {
           visible = false;
         }, 20);
+        await new Promise((resolve) => setTimeout(resolve, 50));
         return {};
       }
       if (
         method === "Input.dispatchKeyEvent" &&
         params.type === "keyUp"
       ) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
         return {};
       }
       if (

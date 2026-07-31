@@ -325,7 +325,7 @@ function keyEventMetadata(key) {
 
 async function dispatchKey(client, key, onKeyDown) {
   const { text, ...metadata } = keyEventMetadata(key);
-  await client.send("Input.dispatchKeyEvent", {
+  const keyDown = client.send("Input.dispatchKeyEvent", {
     type: text ? "keyDown" : "rawKeyDown",
     modifiers: 0,
     ...metadata,
@@ -335,6 +335,7 @@ async function dispatchKey(client, key, onKeyDown) {
     commands: []
   });
   onKeyDown?.();
+  await keyDown;
   await client.send("Input.dispatchKeyEvent", {
     type: "keyUp",
     modifiers: 0,
