@@ -35,7 +35,8 @@ export type AccountSession = {
 };
 
 export const ACCOUNTS_KEY = "central-vet-accounts";
-export const SESSION_KEY = "central-vet-session";
+export const SESSION_KEY = "central-vet-account-session";
+export const LEGACY_SESSION_KEY = "central-vet-session";
 
 export const DEMO_PASSCODES = {
   admin: "246810",

@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 export const BROWSER_BEHAVIOR_MARKER = "AGENT_BROWSER_BEHAVIOR_V1 ";
+export const BROWSER_CAPTURE_MARKER = "AGENT_BROWSER_CAPTURE_V1 ";
+export const MAX_BROWSER_TASKS_PER_ROUTE = 8;
+export const MAX_BROWSER_CAPTURE_BASE64_BYTES = 8_000_000;
 export const DEMO_SESSION_CREDENTIALS = Object.freeze({
   "demo-admin": Object.freeze({
     email: "admin@clinic.demo",
@@ -102,6 +105,7 @@ export function validateBrowserPayload(payload) {
     !/^\/[A-Za-z0-9/_-]*$/.test(payload.route) ||
     !Array.isArray(payload.tasks) ||
     payload.tasks.length === 0 ||
+    payload.tasks.length > MAX_BROWSER_TASKS_PER_ROUTE ||
     payload.tasks.some(
       (task) =>
         task?.route !== payload.route ||
@@ -240,8 +244,19 @@ export function assertionExpression(assertion) {
   }
   const element = selectorExpression(assertion.selector);
   const visible =
-    `(element => Boolean(element && element.getClientRects().length && ` +
-    `getComputedStyle(element).visibility !== "hidden" && getComputedStyle(element).display !== "none"))`;
+    `(element => { ` +
+    `if (!element || !element.getClientRects().length) return false; ` +
+    `const style = getComputedStyle(element); ` +
+    `if (style.visibility === "hidden" || style.visibility === "collapse" || ` +
+    `style.display === "none" || Number.parseFloat(style.opacity || "1") <= 0) return false; ` +
+    `if (typeof element.checkVisibility === "function" && ` +
+    `!element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false; ` +
+    `const width = globalThis.innerWidth ?? document.documentElement?.clientWidth ?? Number.POSITIVE_INFINITY; ` +
+    `const height = globalThis.innerHeight ?? document.documentElement?.clientHeight ?? Number.POSITIVE_INFINITY; ` +
+    `return Array.from(element.getClientRects()).some(rect => ` +
+    `rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0 && ` +
+    `rect.left < width && rect.top < height); ` +
+    `})`;
   if (assertion.type === "visible") return `${visible}(${element})`;
   if (assertion.type === "hidden") return `!${visible}(${element})`;
   if (assertion.type === "text") {
@@ -281,6 +296,26 @@ export function assertionLabel(assertion) {
     return `${assertion.selector} has expected ${assertion.name} attribute`;
   }
   return `${assertion.selector} is ${assertion.type}`;
+}
+
+export function validateBrowserCapturePng(value) {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > MAX_BROWSER_CAPTURE_BASE64_BYTES ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(value)
+  ) {
+    fail("browser assertion screenshot exceeded its bounded transport");
+  }
+  const png = Buffer.from(value, "base64");
+  if (
+    !png.subarray(0, 8).equals(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    )
+  ) {
+    fail("browser assertion screenshot was not a PNG");
+  }
+  return value;
 }
 
 async function evaluate(client, expression, tolerateExceptions = false) {
@@ -329,11 +364,12 @@ async function assertionResults(client, assertions, tolerateExceptions = false) 
   return values;
 }
 
-async function waitForAssertions(client, assertions, timeoutMs) {
+async function waitForAssertions(client, assertions, timeoutMs, { onSample } = {}) {
   const observed = assertions.map(() => false);
   const deadline = Date.now() + timeoutMs;
   do {
     const results = await assertionResults(client, assertions, true);
+    await onSample?.(results);
     for (const [index, result] of results.entries()) {
       if (result.passed) observed[index] = true;
     }
@@ -995,14 +1031,11 @@ export async function establishDemoSession(
   if (!session || session === "none") return "";
   const credentials = DEMO_SESSION_CREDENTIALS[session];
   if (!credentials) fail(`unsupported browser demo session: ${session}`);
-  const expectedRole = session.replace(/^demo-/, "");
-  const hasExpectedRole =
-    `(value => { try { return JSON.parse(value ?? "null")?.role === ` +
-    `${JSON.stringify(expectedRole)}; } catch { return false; } })` +
-    `(localStorage.getItem("central-vet-session"))`;
+  const sessionReady = demoSessionReadyExpression(session);
   await evaluate(
     client,
-    `localStorage.removeItem("central-vet-session"); true`
+    `localStorage.removeItem("central-vet-account-session"); ` +
+      `localStorage.removeItem("central-vet-session"); true`
   );
   const loginRoute = session === "demo-customer" ? "/" : "/staff";
   await navigate(client, baseUrl, loginRoute);
@@ -1027,21 +1060,60 @@ export async function establishDemoSession(
     type: "click",
     selector: "form button[type='submit']"
   });
-  const signedIn = await waitForEvaluation(
+  const signedIn = await waitForStableEvaluation(
     client,
-    hasExpectedRole,
+    sessionReady,
     8_000
   );
   if (!signedIn) fail(`browser demo sign-in did not complete for ${session}`);
-  if (route !== loginRoute) await navigate(client, baseUrl, route);
+  if (route !== loginRoute) {
+    await navigate(client, baseUrl, route);
+    if (!(await waitForStableEvaluation(client, sessionReady, 8_000))) {
+      fail(`browser demo session was not retained for ${session} after navigation to ${route}`);
+    }
+  }
   return `Sign in with the visible ${session} account`;
+}
+
+export function demoSessionReadyExpression(session) {
+  const expectedRole = String(session ?? "").replace(/^demo-/, "");
+  return (
+    `(() => { try { ` +
+    `const account = JSON.parse(localStorage.getItem("central-vet-account-session") ?? "null"); ` +
+    `const board = JSON.parse(localStorage.getItem("central-vet-session") ?? "null"); ` +
+    `const accountReady = account?.source === "account" && account?.role === ${JSON.stringify(expectedRole)}; ` +
+    `const boardReady = !board || board?.role === ${JSON.stringify(expectedRole)}; ` +
+    `const authVisible = Boolean(document.querySelector("[data-agent-proof='signin']")); ` +
+    `const opening = Boolean(document.querySelector("[data-agent-proof='opening']")); ` +
+    `return accountReady && boardReady && !authVisible && !opening; ` +
+    `} catch { return false; } })()`
+  );
+}
+
+async function waitForStableEvaluation(
+  client,
+  expression,
+  timeoutMs = 5_000,
+  stableMs = 250
+) {
+  const deadline = Date.now() + timeoutMs;
+  let matchingSince;
+  do {
+    if (!(await evaluate(client, expression, true))) matchingSince = undefined;
+    else {
+      matchingSince ??= Date.now();
+      if (Date.now() - matchingSince >= stableMs) return true;
+    }
+    await sleep(50);
+  } while (Date.now() < deadline);
+  return false;
 }
 
 export function intermediateAssertionTimeout(actionCount, actionIndex) {
   return actionIndex === actionCount - 1 ? 4_000 : 250;
 }
 
-export async function runTask(client, payload, task) {
+export async function runTask(client, payload, task, options = {}) {
   await resetBrowserEventTrace(client);
   const reproductionSteps = [];
   const intermediate = task.intermediateAssertions.map((assertion) => ({
@@ -1058,6 +1130,30 @@ export async function runTask(client, payload, task) {
   const lastTriggerActionIndex = actions.findLastIndex((action) =>
     ["fill", "click", "clickText", "press"].includes(action.type)
   );
+  let finalStateObserved = false;
+  let passingStateCaptured = false;
+  const capturePassingState = async (results, pending) => {
+    const finalIndexes = pending
+      .map((entry, index) => (entry.phase === "final" ? index : -1))
+      .filter((index) => index !== -1);
+    if (
+      passingStateCaptured ||
+      finalIndexes.length !== task.finalAssertions.length ||
+      !finalIndexes.every((index) => results[index]?.passed)
+    ) {
+      return;
+    }
+    finalStateObserved = true;
+    await options.capture?.("passed");
+    passingStateCaptured = true;
+  };
+  const captureFailure = async () => {
+    try {
+      await options.capture?.("failed");
+    } catch {
+      // Artifact validation reports a missing diagnostic capture separately.
+    }
+  };
   try {
     const sessionStep = await establishDemoSession(
       client,
@@ -1107,7 +1203,10 @@ export async function runTask(client, payload, task) {
               intermediateAssertionTimeout(
                 lastTriggerActionIndex + 1,
                 actionIndex
-              )
+              ),
+              {
+                onSample: (results) => capturePassingState(results, pending)
+              }
             ).then(
               (observed) => ({ observed }),
               (error) => ({ error })
@@ -1123,6 +1222,20 @@ export async function runTask(client, payload, task) {
           observeTriggeredState
         )
       );
+      if (action.type === "navigate" && task.session && task.session !== "none") {
+        if (
+          !(await waitForStableEvaluation(
+            client,
+            demoSessionReadyExpression(task.session),
+            8_000
+          ))
+        ) {
+          fail(
+            `browser demo session was not retained for ${task.session} ` +
+              `after navigation to ${action.path}`
+          );
+        }
+      }
       if (observeTriggeredState) {
         observeTriggeredState();
         const observation = await observationPromise;
@@ -1141,6 +1254,7 @@ export async function runTask(client, payload, task) {
       }
     }
   } catch (error) {
+    await captureFailure();
     const assertionFailure = error instanceof BrowserAssertionError;
     return {
       clauseIds: task.clauseIds,
@@ -1171,7 +1285,16 @@ export async function runTask(client, payload, task) {
       const observed = await waitForAssertions(
         client,
         pendingFinalIndexes.map((index) => task.finalAssertions[index]),
-        8_000
+        8_000,
+        {
+          onSample: async (results) => {
+            if (!passingStateCaptured && results.every((result) => result.passed)) {
+              finalStateObserved = true;
+              await options.capture?.("passed");
+              passingStateCaptured = true;
+            }
+          }
+        }
       );
       for (const [observedIndex, result] of observed.entries()) {
         const finalIndex = pendingFinalIndexes[observedIndex];
@@ -1182,6 +1305,7 @@ export async function runTask(client, payload, task) {
       }
     }
   } catch (error) {
+    await captureFailure();
     return {
       clauseIds: task.clauseIds,
       route: task.route,
@@ -1205,7 +1329,11 @@ export async function runTask(client, payload, task) {
     ...intermediate.map((result) => ({ phase: "intermediate", ...result })),
     ...final.map((result) => ({ phase: "final", ...result }))
   ];
-  const passed = assertions.length > 0 && assertions.every((result) => result.passed);
+  const passed =
+    assertions.length > 0 &&
+    assertions.every((result) => result.passed) &&
+    finalStateObserved;
+  if (!passed) await captureFailure();
   return {
     clauseIds: task.clauseIds,
     route: task.route,
@@ -1219,7 +1347,7 @@ export async function runTask(client, payload, task) {
   };
 }
 
-export async function runBrowserBehavior(payload) {
+export async function runBrowserBehavior(payload, options = {}) {
   validateBrowserPayload(payload);
   const target = await devtoolsTarget();
   const client = await cdpClient(target.webSocketDebuggerUrl);
@@ -1234,8 +1362,26 @@ export async function runBrowserBehavior(payload) {
     await client.send("Runtime.enable");
     await installBrowserEventCollector(client);
     const taskResults = [];
-    for (const task of payload.tasks) {
-      taskResults.push(await runTask(client, payload, task));
+    for (const [taskIndex, task] of payload.tasks.entries()) {
+      taskResults.push(
+        await runTask(client, payload, task, {
+          capture: options.capture
+            ? async (phase) => {
+                const capture = await client.send("Page.captureScreenshot", {
+                  format: "png",
+                  fromSurface: true,
+                  captureBeyondViewport: false
+                });
+                await options.capture({
+                  route: task.route,
+                  taskIndex: taskIndex + 1,
+                  phase,
+                  pngBase64: validateBrowserCapturePng(capture.data)
+                });
+              }
+            : undefined
+        })
+      );
     }
     const routeObserved = await evaluate(
       client,
@@ -1276,7 +1422,13 @@ export async function runBrowserBehavior(payload) {
 async function main() {
   const args = parseArgs();
   const payload = decodePayload(args["payload-base64"]);
-  const observation = await runBrowserBehavior(payload);
+  const captures = new Map();
+  const observation = await runBrowserBehavior(payload, {
+    capture: async (capture) => captures.set(capture.taskIndex, capture)
+  });
+  for (const capture of [...captures.values()].sort((left, right) => left.taskIndex - right.taskIndex)) {
+    process.stdout.write(`${BROWSER_CAPTURE_MARKER}${JSON.stringify(capture)}\n`);
+  }
   const encoded = Buffer.from(JSON.stringify(observation), "utf8").toString("base64");
   process.stdout.write(`${BROWSER_BEHAVIOR_MARKER}${encoded}\n`);
   if (observation.status !== "pass") process.exitCode = 1;

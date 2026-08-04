@@ -30,7 +30,12 @@ import {
   runCommand,
   secretState
 } from "./agent-lib.mjs";
-import { BROWSER_BEHAVIOR_MARKER } from "./agent-browser-behavior.mjs";
+import {
+  BROWSER_BEHAVIOR_MARKER,
+  BROWSER_CAPTURE_MARKER,
+  MAX_BROWSER_CAPTURE_BASE64_BYTES,
+  MAX_BROWSER_TASKS_PER_ROUTE
+} from "./agent-browser-behavior.mjs";
 
 const VISUAL_LANES = new Set(["visualProof", "gifProof"]);
 const FALLBACK_READINESS_LANE = "fallbackReadinessRemote";
@@ -90,9 +95,15 @@ const EXACT_PARENT_BUNDLE = "no-mistakes-parent.bundle";
 const EXACT_PARENT_REF = "refs/agent/no-mistakes-parent";
 // Crabbox excludes generated directories named "target" from sync by default.
 const DELEGATED_CANDIDATE_DIRECTORY = "candidate";
+const BROWSER_COMMAND_MAX_BUFFER =
+  MAX_BROWSER_CAPTURE_BASE64_BYTES * MAX_BROWSER_TASKS_PER_ROUTE + 8 * 1024 * 1024;
 
 function redactSecrets(text, config, env = process.env) {
   let redacted = String(text ?? "");
+  redacted = redacted.replace(
+    new RegExp(`^${BROWSER_CAPTURE_MARKER}.*$`, "gm"),
+    `${BROWSER_CAPTURE_MARKER}[omitted]`
+  );
   const names = [
     config.secrets.agentAuth,
     "CODEX_API_KEY",
@@ -308,7 +319,7 @@ function validateRegularArtifact(path, bundleDir, label) {
 
 function hasMediaSignature(kind, path) {
   const prefix = readPrefix(path);
-  if (kind === "screenshot" || kind === "contact-sheet") {
+  if (kind === "screenshot" || kind === "contact-sheet" || kind.endsWith("-screenshot")) {
     return prefix.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
   }
   if (kind === "gif") {
@@ -333,7 +344,8 @@ export function validateRouteBinding(
     launchMarker,
     launchEvidence,
     behaviorRequired = false,
-    behaviorStatus = ""
+    behaviorStatus = "",
+    behaviorCaptureCount = 0
   }
 ) {
   const bindingPath = validateRegularArtifact(path, bundleDir, "route binding");
@@ -355,6 +367,7 @@ export function validateRouteBinding(
     (behaviorRequired &&
       (binding?.behaviorRequired !== true ||
         binding?.behaviorStatus !== behaviorStatus ||
+        binding?.behaviorCaptureCount !== behaviorCaptureCount ||
         !binding?.behaviorReportPath)) ||
     (proofKind === "GIF" && binding?.captureStartedBeforeLaunch !== true)
   ) {
@@ -375,7 +388,8 @@ export function validateCollectedArtifacts(
     launchMarker,
     launchEvidence,
     behaviorRequired = false,
-    behaviorStatus = ""
+    behaviorStatus = "",
+    behaviorCaptureCount = 0
   }
 ) {
   if (!bundle || typeof bundle !== "object") throw new AgentError("Crabbox artifact collection did not emit JSON", 1);
@@ -395,7 +409,8 @@ export function validateCollectedArtifacts(
     launchMarker,
     launchEvidence,
     behaviorRequired,
-    behaviorStatus
+    behaviorStatus,
+    behaviorCaptureCount
   });
   const files = Array.isArray(bundle.files) ? bundle.files : [];
   const validated = [];
@@ -416,6 +431,12 @@ export function validateCollectedArtifacts(
   for (const kind of requiredKinds) {
     if (files.filter((file) => file?.kind === kind).length !== 1) {
       throw new AgentError(`Crabbox artifact bundle is missing authentic ${kind} output`, 1);
+    }
+  }
+  if (behaviorRequired) {
+    const captures = files.filter((file) => file?.kind?.endsWith("-screenshot"));
+    if (behaviorCaptureCount === 0 || captures.length !== behaviorCaptureCount) {
+      throw new AgentError("Crabbox artifact bundle is missing assertion-time browser screenshots", 1);
     }
   }
   return [binding, ...validated];
@@ -450,6 +471,14 @@ export function buildRunArgs({
   remoteOutputPath = "."
 }) {
   const args = ["run", "--provider", provider, "--timing-json", "--timing-record", "off"];
+  if (provider === "vercel-sandbox") {
+    args.push(
+      "--vercel-sandbox-timeout-secs",
+      "2400",
+      "--vercel-sandbox-exec-timeout-secs",
+      "1800"
+    );
+  }
   let remoteCommand =
     `agent_crabbox_root="$PWD"; printf '${REMOTE_COMMAND_STARTED_MARKER}\\n' && ` +
     `( ${command} )`;
@@ -1408,6 +1437,55 @@ export function parseBrowserBehaviorObservation(output, route) {
   return observation;
 }
 
+export function parseBrowserCaptures(output, route, observation) {
+  const lines = String(output ?? "")
+    .split(/\r?\n/)
+    .filter((value) => value.startsWith(BROWSER_CAPTURE_MARKER));
+  const captures = lines.map((line) => {
+    let capture;
+    try {
+      capture = JSON.parse(line.slice(BROWSER_CAPTURE_MARKER.length));
+    } catch {
+      throw new AgentError(`Crabbox browser screenshot record is invalid for ${route}`, 1);
+    }
+    if (
+      capture?.route !== route ||
+      !Number.isSafeInteger(capture?.taskIndex) ||
+      capture.taskIndex < 1 ||
+      !["passed", "failed"].includes(capture?.phase) ||
+      typeof capture?.pngBase64 !== "string" ||
+      capture.pngBase64.length === 0 ||
+      capture.pngBase64.length > MAX_BROWSER_CAPTURE_BASE64_BYTES ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(capture.pngBase64)
+    ) {
+      throw new AgentError(`Crabbox browser screenshot record has an invalid shape for ${route}`, 1);
+    }
+    const png = Buffer.from(capture.pngBase64, "base64");
+    if (
+      png.length === 0 ||
+      !png.subarray(0, 8).equals(
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+      )
+    ) {
+      throw new AgentError(`Crabbox browser screenshot is not a PNG for ${route}`, 1);
+    }
+    return { ...capture, png };
+  });
+  const taskResults = observation?.taskResults ?? [];
+  const indexes = new Set(captures.map((capture) => capture.taskIndex));
+  if (
+    captures.length !== taskResults.length ||
+    indexes.size !== captures.length ||
+    captures.some((capture) => {
+      const status = taskResults[capture.taskIndex - 1]?.status;
+      return !status || capture.phase !== (status === "pass" ? "passed" : "failed");
+    })
+  ) {
+    throw new AgentError(`Crabbox browser screenshots do not match behavior tasks for ${route}`, 1);
+  }
+  return captures;
+}
+
 export function gifArtifactArgs({ videoPath, gifPath, trimmedVideoPath }) {
   return [
     "artifacts",
@@ -1632,7 +1710,12 @@ function runCrabboxAttempt({
                     behaviorCommand
                   })
                 ],
-                { check: false, env: childEnv, cwd: workdir }
+                {
+                  check: false,
+                  env: childEnv,
+                  cwd: workdir,
+                  maxBuffer: BROWSER_COMMAND_MAX_BUFFER
+                }
               )
             : runCommand("crabbox", browserLaunchArgs({ provider: selection.provider, leaseId, route }), {
                 check: false,
@@ -1643,22 +1726,31 @@ function runCrabboxAttempt({
         if (launch.status !== 0) throw new AgentError(`Crabbox browser launch failed for ${route}`, 1);
         const launchEvidence = validateBrowserLaunchOutput(launch.stdout, route);
         let behavior = null;
+        let behaviorCaptures = [];
         if (behaviorRequired) {
+          let behaviorOutput = launch.stdout;
           if (proofKind === "GIF") {
-            behavior = parseBrowserBehaviorObservation(launch.stdout, route);
+            behavior = parseBrowserBehaviorObservation(behaviorOutput, route);
           } else {
             const behaviorRun = runCommand("crabbox", behaviorArgs, {
               check: false,
               env: childEnv,
-              cwd: workdir
+              cwd: workdir,
+              maxBuffer: BROWSER_COMMAND_MAX_BUFFER
             });
             writeFileSync(
               logPath,
               redactSecrets(`\n${behaviorRun.stdout}\n${behaviorRun.stderr}`, config, env),
               { flag: "a", mode: 0o600 }
             );
-            behavior = parseBrowserBehaviorObservation(behaviorRun.stdout, route);
+            behaviorOutput = behaviorRun.stdout;
+            behavior = parseBrowserBehaviorObservation(behaviorOutput, route);
           }
+          behaviorCaptures = parseBrowserCaptures(
+            behaviorOutput,
+            route,
+            behavior
+          );
           behaviorObservations.push(behavior);
         }
 
@@ -1708,6 +1800,7 @@ function runCrabboxAttempt({
           captureStartedBeforeLaunch: proofKind === "GIF",
           behaviorRequired,
           behaviorStatus: behavior?.status ?? "",
+          behaviorCaptureCount: behaviorCaptures.length,
           behaviorReportPath
         });
         const collected = runCommand(
@@ -1727,6 +1820,20 @@ function runCrabboxAttempt({
           if (existsSync(contactSheetPath)) bundle.files.push({ kind: "contact-sheet", path: contactSheetPath });
           if (existsSync(trimmedVideoPath)) bundle.files.push({ kind: "trimmed-video", path: trimmedVideoPath });
         }
+        if (bundle) {
+          bundle.files ??= [];
+          for (const capture of behaviorCaptures) {
+            const name =
+              `${capture.phase === "passed" ? "proof-final" : "proof-failure"}-` +
+              `${String(capture.taskIndex).padStart(2, "0")}.png`;
+            const path = join(bundleDir, name);
+            writeFileSync(path, capture.png, { mode: 0o600 });
+            bundle.files.push({
+              kind: capture.phase === "passed" ? "assertion-screenshot" : "failure-screenshot",
+              path
+            });
+          }
+        }
         const routeArtifacts = validateCollectedArtifacts(bundle, {
           provider: selection.provider,
           leaseId,
@@ -1737,7 +1844,8 @@ function runCrabboxAttempt({
           launchMarker,
           launchEvidence,
           behaviorRequired,
-          behaviorStatus: behavior?.status ?? ""
+          behaviorStatus: behavior?.status ?? "",
+          behaviorCaptureCount: behaviorCaptures.length
         });
         if (behaviorReportPath) {
           routeArtifacts.push(

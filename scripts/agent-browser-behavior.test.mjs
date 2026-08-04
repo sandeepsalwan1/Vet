@@ -5,12 +5,14 @@ import {
   assertionLabel,
   assertionExpression,
   browserProcessId,
+  demoSessionReadyExpression,
   dispatchLinuxDesktopKey,
   establishDemoSession,
   installBrowserEventCollector,
   intermediateAssertionTimeout,
   runAction,
   runTask,
+  validateBrowserCapturePng,
   validateBrowserPayload
 } from "./agent-browser-behavior.mjs";
 
@@ -112,7 +114,7 @@ test("text proof reads a button's visible label instead of its value property", 
     matches: () => false,
     value: "",
     textContent: "Submit",
-    getClientRects: () => [{}]
+    getClientRects: () => [{ width: 20, height: 10, left: 0, top: 0, right: 20, bottom: 10 }]
   };
   const result = Function(
     "document",
@@ -136,7 +138,7 @@ test("text proof binds a select assertion to its selected value", () => {
     matches: (selector) => selector.includes("select"),
     value: "normal",
     textContent: "NormalUrgent",
-    getClientRects: () => [{}]
+    getClientRects: () => [{ width: 20, height: 10, left: 0, top: 0, right: 20, bottom: 10 }]
   };
   const result = Function(
     "document",
@@ -148,6 +150,55 @@ test("text proof binds a select assertion to its selected value", () => {
   );
 
   assert.equal(result, false);
+});
+
+test("visible proof rejects transparent and offscreen elements", () => {
+  const expression = assertionExpression({
+    type: "visible",
+    selector: ".frog"
+  });
+  const evaluateVisible = (element, style) =>
+    Function("document", "getComputedStyle", `return ${expression};`)(
+      {
+        documentElement: { clientWidth: 100, clientHeight: 100 },
+        querySelector: () => element
+      },
+      () => style
+    );
+  const element = {
+    getClientRects: () => [
+      { width: 20, height: 20, left: 10, top: 10, right: 30, bottom: 30 }
+    ]
+  };
+
+  assert.equal(
+    evaluateVisible(element, { visibility: "visible", display: "block", opacity: "0" }),
+    false
+  );
+  assert.equal(
+    evaluateVisible(
+      {
+        getClientRects: () => [
+          { width: 20, height: 20, left: 150, top: 10, right: 170, bottom: 30 }
+        ]
+      },
+      { visibility: "visible", display: "block", opacity: "1" }
+    ),
+    false
+  );
+});
+
+test("assertion screenshots require a bounded PNG payload", () => {
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from("proof")
+  ]).toString("base64");
+
+  assert.equal(validateBrowserCapturePng(png), png);
+  assert.throws(
+    () => validateBrowserCapturePng(Buffer.from("not-png").toString("base64")),
+    /not a PNG/
+  );
 });
 
 test("fill uses browser-native insertion and waits for controlled state", async () => {
@@ -761,6 +812,35 @@ test("browser payload accepts bounded demo sessions and rejects unknown sessions
         tasks: [{ ...payload.tasks[0], session: "personal-browser" }]
       }),
     /payload is invalid/
+  );
+});
+
+test("demo session readiness requires durable account and task-board state", () => {
+  const expression = demoSessionReadyExpression("demo-staff");
+  const evaluateReady = (values, selectors = new Set()) =>
+    Function("localStorage", "document", `return ${expression};`)(
+      { getItem: (key) => values[key] ?? null },
+      { querySelector: (selector) => (selectors.has(selector) ? {} : null) }
+    );
+  const ready = {
+    "central-vet-account-session": JSON.stringify({ role: "staff", source: "account" }),
+    "central-vet-session": JSON.stringify({ role: "staff" })
+  };
+
+  assert.equal(evaluateReady(ready), true);
+  assert.equal(
+    evaluateReady({
+      "central-vet-account-session": JSON.stringify({ role: "staff", source: "account" })
+    }),
+    true
+  );
+  assert.equal(
+    evaluateReady({ "central-vet-session": JSON.stringify({ role: "staff" }) }),
+    false
+  );
+  assert.equal(
+    evaluateReady(ready, new Set(["[data-agent-proof='signin']"])),
+    false
   );
 });
 
@@ -1485,6 +1565,7 @@ test("last user action observes transient final state while intermediate state s
 
 test("last user action observes transient final state without intermediate assertions", async () => {
   let finalChecks = 0;
+  const captures = [];
   const task = {
     clauseIds: ["AC1"],
     route: "/request",
@@ -1509,10 +1590,13 @@ test("last user action observes transient final state without intermediate asser
     }
   };
 
-  const result = await runTask(client, payload, task);
+  const result = await runTask(client, payload, task, {
+    capture: async (phase) => captures.push(phase)
+  });
 
   assert.equal(result.status, "pass");
   assert.equal(finalChecks, 1);
+  assert.deepEqual(captures, ["passed"]);
 });
 
 test("key-triggered final state is observed before a slow keydown response", async () => {

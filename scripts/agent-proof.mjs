@@ -755,11 +755,17 @@ export function proofBody(result, routes, timingRecord) {
     ? `${timingRecord.totalMs}ms total, ${timingRecord.commandMs ?? 0}ms command`
     : "none";
   const artifactLabel =
-    result.proofKind === "GIF"
-      ? "Open reviewer GIF/video proof bundle"
-      : result.proofKind === "UI"
-        ? "Open reviewer visual proof bundle"
-        : "Open or download the proof bundle";
+    result.status !== "passed"
+      ? "Open failed capture and diagnostics"
+      : result.proofKind === "GIF"
+        ? "Open reviewer GIF/video proof bundle"
+        : result.proofKind === "UI"
+          ? "Open reviewer visual proof bundle"
+          : "Open or download the proof bundle";
+  const evidenceWarning =
+    result.status === "passed"
+      ? ""
+      : "Evidence result: failed. Included media is diagnostic and does not prove acceptance.\n\n";
   return `## Agent Proof
 
 Status: ${result.status}
@@ -768,7 +774,7 @@ Provider: ${result.provider || "none"}
 Lease: ${result.leaseId || "none"}
 Timing: ${timing}
 
-Routes:
+${evidenceWarning}Routes:
 
 ${routes.length ? routes.map((route) => `- ${route}`).join("\n") : "- none"}
 
