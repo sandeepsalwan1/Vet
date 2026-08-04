@@ -89,9 +89,20 @@ export function deduplicateDatahubRecords(records: DatahubPimsRecord[]) {
       record.entityType,
       record.integrationId
     ]);
-    recordsByIdentity.set(identity, record);
+    const existing = recordsByIdentity.get(identity);
+    if (!existing || isDatahubRecordAtLeastAsRecent(record, existing)) {
+      recordsByIdentity.set(identity, record);
+    }
   }
   return [...recordsByIdentity.values()];
+}
+
+export function isDatahubRecordAtLeastAsRecent(
+  candidate: DatahubPimsRecord,
+  existing: DatahubPimsRecord
+) {
+  if (!candidate.providerUpdatedAt || !existing.providerUpdatedAt) return true;
+  return Date.parse(candidate.providerUpdatedAt) >= Date.parse(existing.providerUpdatedAt);
 }
 
 async function resolveBatchClinic(practiceIds: string[]) {
@@ -165,6 +176,7 @@ export async function ingestDatahubWebhook(input: DatahubWebhookInput) {
       is_deleted: record.isDeleted,
       deleted_at: record.deletedAt,
       provider_updated_at: record.providerUpdatedAt,
+      provider_timestamp: input.timestamp,
       payload: sql.json(record.payload)
     }));
 
@@ -184,6 +196,7 @@ export async function ingestDatahubWebhook(input: DatahubWebhookInput) {
             "is_deleted",
             "deleted_at",
             "provider_updated_at",
+            "provider_timestamp",
             "payload"
           )}
           on conflict (
@@ -199,8 +212,20 @@ export async function ingestDatahubWebhook(input: DatahubWebhookInput) {
             is_deleted = excluded.is_deleted,
             deleted_at = excluded.deleted_at,
             provider_updated_at = excluded.provider_updated_at,
+            provider_timestamp = excluded.provider_timestamp,
             payload = excluded.payload,
             last_received_at = now()
+          where (
+            excluded.provider_updated_at is not null
+            and pims_records.provider_updated_at is not null
+            and excluded.provider_updated_at >= pims_records.provider_updated_at
+          ) or (
+            (
+              excluded.provider_updated_at is null
+              or pims_records.provider_updated_at is null
+            )
+            and excluded.provider_timestamp >= pims_records.provider_timestamp
+          )
         `;
       });
       receipts.push(...validRecords.map(successfulReceipt));

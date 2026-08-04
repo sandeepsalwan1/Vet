@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   deduplicateDatahubRecords,
+  isDatahubRecordAtLeastAsRecent,
   type DatahubPimsRecord
 } from "./datahub";
 
@@ -27,6 +28,24 @@ test("deduplicateDatahubRecords keeps the last payload for one storage identity"
   const result = deduplicateDatahubRecords([record(), after]);
   assert.equal(result.length, 1);
   assert.equal(result[0], after);
+});
+
+test("deduplicateDatahubRecords keeps the newest provider update", () => {
+  const newest = record({
+    providerUpdatedAt: "2026-08-04T12:00:00Z",
+    payload: { firstName: "Newest" }
+  });
+  const result = deduplicateDatahubRecords([
+    newest,
+    record({ providerUpdatedAt: "2026-08-04T11:00:00Z" })
+  ]);
+  assert.equal(result[0], newest);
+});
+
+test("record freshness falls back to delivery order when either update time is absent", () => {
+  const timestamped = record({ providerUpdatedAt: "2026-08-04T12:00:00Z" });
+  assert.equal(isDatahubRecordAtLeastAsRecent(record(), timestamped), true);
+  assert.equal(isDatahubRecordAtLeastAsRecent(timestamped, record()), true);
 });
 
 test("deduplicateDatahubRecords preserves records with different storage identities", () => {

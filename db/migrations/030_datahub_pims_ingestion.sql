@@ -47,6 +47,7 @@ create table if not exists pims_records (
   is_deleted boolean not null default false,
   deleted_at timestamptz,
   provider_updated_at timestamptz,
+  provider_timestamp timestamptz not null,
   payload jsonb not null,
   first_received_at timestamptz not null default now(),
   last_received_at timestamptz not null default now(),
