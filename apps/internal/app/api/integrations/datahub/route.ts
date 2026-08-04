@@ -1,10 +1,13 @@
-import { withDbError } from "../../_apiResponse";
+import { dbError } from "../../_apiResponse";
 import { datahubWebhookResponse } from "./_datahubWebhook";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export const POST = withDbError(
-  "integrations.datahub.post",
-  async (request: Request) => datahubWebhookResponse(request)
-);
+export async function POST(request: Request) {
+  try {
+    return await datahubWebhookResponse(request);
+  } catch (error) {
+    return dbError(error, { route: "integrations.datahub.post" });
+  }
+}
