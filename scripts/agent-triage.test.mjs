@@ -588,6 +588,32 @@ Change only README.md.`,
   assert.equal(result.proofNeeded, "CI");
 });
 
+test("an explicit no-media proof interaction stays proofless", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 104,
+    title: "Harden task date projection across timezones",
+    body: `### Outcome
+
+Task dates project consistently across supported timezones.
+
+### Acceptance criteria
+
+- [ ] Date projection has deterministic timezone coverage.
+- [ ] Automated checks pass.
+
+### Proof
+
+Automated tests and checks
+
+### Proof interaction
+
+No browser proof, screenshots, GIF, or video are required.`,
+    labels: [{ name: config.labels.priorityLow }]
+  });
+
+  assert.equal(result.proofNeeded, "CI");
+});
+
 test("a proof exclusion cannot suppress a positive visual requirement", () => {
   const result = lightweightTriageDecision(config, {
     number: 79,

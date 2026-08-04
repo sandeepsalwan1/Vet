@@ -7,6 +7,7 @@ import {
   evaluateReadiness,
   exactHeadCheckState,
   publishReadiness,
+  recoverPreflightReadiness,
   readinessSummary,
   verifyPublisherAccess,
   waitForBaselineChecks,
@@ -49,6 +50,18 @@ function snapshot() {
   return {
     headSha,
     checks: config.readiness.baselineChecks.map((name) => check(name)),
+    baselineRuns: [
+      {
+        id: 12,
+        name: `CI ${headSha}`,
+        display_title: `CI ${headSha}`,
+        status: "completed",
+        conclusion: "success",
+        event: "push",
+        head_branch: "main",
+        head_sha: headSha
+      }
+    ],
     baselineRunIds: [12],
     branch: {
       protected: true,
@@ -111,6 +124,7 @@ function snapshot() {
         event: "schedule",
         head_branch: "main",
         head_sha: headSha,
+        display_title: `Agent Readiness ${headSha}`,
         updated_at: "2026-07-24T09:00:00Z"
       }
     ]
@@ -233,6 +247,7 @@ test("readiness collection uses only workflow-token-readable repository APIs", (
     },
   });
   assert.equal(collected.branch.protected, true);
+  assert.equal(collected.baselineRuns.length, 1);
   assert.deepEqual(calls, [
     "commits/main",
     `commits/${headSha}/check-runs?per_page=100`,
@@ -292,6 +307,119 @@ test("preflight waits for readiness on the exact current main head", async () =>
   });
   assert.equal(result.ready, true);
   assert.equal(attempts, 2);
+});
+
+test("preflight recovery dispatches missing exact-head baseline and stale readiness once", async () => {
+  let time = Date.parse("2026-07-24T10:00:00Z");
+  let attempts = 0;
+  const dispatches = [];
+  const recoveries = [];
+  const broken = snapshot();
+  broken.checks = [];
+  broken.baselineRuns = [];
+  broken.baselineRunIds = [];
+  broken.readinessRuns[0].updated_at = "2026-07-22T01:00:00Z";
+
+  const result = await waitForPreflightReadiness(config, {
+    timeoutMs: 30_000,
+    pollMs: 1_000,
+    clock: () => time,
+    sleep: async (milliseconds) => {
+      time += milliseconds;
+    },
+    collect: () => {
+      attempts += 1;
+      return attempts === 1 ? broken : snapshot();
+    },
+    recover: (current) =>
+      recoverPreflightReadiness(config, current, {
+        now: new Date(time),
+        dispatchWorkflow: (_config, workflow, fields, dryRun, ref) => {
+          dispatches.push({ workflow, fields, dryRun, ref });
+          return { ok: true };
+        }
+      }),
+    onRecovery: (recovery) => recoveries.push(recovery)
+  });
+
+  assert.equal(result.ready, true);
+  assert.equal(attempts, 2);
+  assert.deepEqual(
+    dispatches.map(({ workflow }) => workflow),
+    ["ci.yml", "agent-readiness.yml"]
+  );
+  assert.deepEqual(dispatches[0].fields, { "main-sha": headSha });
+  assert.deepEqual(dispatches[1].fields, { "expected-head-sha": headSha });
+  assert.ok(dispatches.every(({ dryRun, ref }) => dryRun === false && ref === "main"));
+  assert.equal(recoveries.length, 1);
+  assert.equal(recoveries[0].blocked, false);
+});
+
+test("preflight recovery reuses active exact-head workflows", () => {
+  const current = snapshot();
+  current.checks = [];
+  current.baselineRunIds = [];
+  current.baselineRuns[0].status = "in_progress";
+  current.baselineRuns[0].conclusion = null;
+  current.readinessRuns[0].status = "in_progress";
+  current.readinessRuns[0].conclusion = null;
+  current.readinessRuns[0].updated_at = "2026-07-22T01:00:00Z";
+  let dispatched = false;
+
+  const recovery = recoverPreflightReadiness(config, current, {
+    now: new Date("2026-07-24T10:00:00Z"),
+    dispatchWorkflow: () => {
+      dispatched = true;
+    }
+  });
+
+  assert.equal(recovery.blocked, false);
+  assert.equal(dispatched, false);
+  assert.deepEqual(recovery.existing, ["ci.yml", "agent-readiness.yml"]);
+});
+
+test("preflight recovery ignores candidate CI attached to the main workflow ref", () => {
+  const current = snapshot();
+  current.checks = [];
+  current.baselineRunIds = [];
+  current.baselineRuns[0] = {
+    ...current.baselineRuns[0],
+    status: "in_progress",
+    conclusion: null,
+    name: `CI ${"b".repeat(40)}`,
+    display_title: `CI ${"b".repeat(40)}`
+  };
+  const dispatches = [];
+
+  recoverPreflightReadiness(config, current, {
+    now: new Date("2026-07-24T10:00:00Z"),
+    dispatchWorkflow: (_config, workflow) => {
+      dispatches.push(workflow);
+    }
+  });
+
+  assert.deepEqual(dispatches, ["ci.yml"]);
+});
+
+test("preflight recovery does not dispatch through credential or terminal baseline failures", () => {
+  const current = snapshot();
+  current.credentials.publisher = false;
+  current.checks = current.checks.map((item) =>
+    item.name === "audit" ? { ...item, conclusion: "failure" } : item
+  );
+  let dispatched = false;
+
+  const recovery = recoverPreflightReadiness(config, current, {
+    now: new Date("2026-07-24T10:00:00Z"),
+    dispatchWorkflow: () => {
+      dispatched = true;
+    }
+  });
+
+  assert.equal(recovery.blocked, true);
+  assert.equal(dispatched, false);
+  assert.ok(recovery.findings.some((item) => item.code === "publisher-auth"));
+  assert.ok(recovery.findings.some((item) => item.code === "check-audit"));
 });
 
 test("scheduled readiness waits for exact-head baseline checks to finish", async () => {
@@ -455,9 +583,10 @@ test("implementation preflight blocks before any model-authenticated job", () =>
   const prepare = workflow.match(/\n  prepare-prompt:\n([\s\S]*?)\n  generate-patch-remote:/)?.[1] ?? "";
 
   assert.match(prepare, /--verify-publisher \\\n\s+--json/);
-  assert.match(prepare, /--preflight \\\n\s+--wait-seconds 900 \\\n\s+--json/);
+  assert.match(prepare, /--preflight \\\n\s+--recover \\\n\s+--wait-seconds 900 \\\n\s+--json/);
   assert.match(prepare, /AGENT_GITHUB_TOKEN: \$\{\{ secrets\.AGENT_GITHUB_TOKEN \}\}/);
   assert.match(prepare, /checks: read/);
-  assert.match(prepare, /actions: read/);
+  assert.match(prepare, /group: agent-implement-readiness/);
+  assert.match(prepare, /actions: write/);
   assert.doesNotMatch(prepare, /CODEX_API_KEY|openai\/codex-action/);
 });

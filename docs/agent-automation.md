@@ -366,7 +366,9 @@ It accepts baseline jobs only from the CI run named for that same main SHA, so e
 The scheduled token never calls administration-only repository settings APIs.
 Workflow permission safety is enforced by explicit job permissions and deterministic workflow tests; exact-head automerge separately enforces base freshness.
 It publishes the exact-head `agent-readiness` check and reconciles one actionable drift issue.
-Implementation waits up to 15 minutes for an exact-current-main readiness run, then refuses model spend if readiness is absent or blocked.
+Implementation preparation is serialized across issues and reuses an active exact-head recovery.
+When exact-main checks are missing or readiness is absent or stale, preflight dispatches one exact-SHA CI and readiness recovery before waiting up to 15 minutes.
+Credential, policy, and terminal baseline failures still refuse model spend immediately.
 
 ```bash
 gh workflow run agent-readiness.yml --repo "$REPO" --ref main

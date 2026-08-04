@@ -62,25 +62,36 @@ test("invalid or overcommitted configurations fail closed", () => {
   assert.throws(() => concurrencySlot(base, "proof", ""), /missing concurrency key/);
 });
 
-test("every costly agent job uses its configured global slot with queued admission", () => {
+test("costly jobs use global slots while readiness preparation has one zero-model lock", () => {
   const expectations = [
-    [".github/workflows/agent-propose.yml", "proposer", 1],
-    [".github/workflows/agent-triage.yml", "triage", 1],
-    [".github/workflows/agent-implement.yml", "implement", 2],
-    [".github/workflows/agent-review.yml", "review", 1],
-    [".github/workflows/agent-no-mistakes.yml", "review", 1],
-    [".github/workflows/agent-proof.yml", "proof", 3]
+    [".github/workflows/agent-propose.yml", "proposer", 1, 0],
+    [".github/workflows/agent-triage.yml", "triage", 1, 0],
+    [".github/workflows/agent-implement.yml", "implement", 2, 1],
+    [".github/workflows/agent-review.yml", "review", 1, 0],
+    [".github/workflows/agent-no-mistakes.yml", "review", 1, 0],
+    [".github/workflows/agent-proof.yml", "proof", 3, 0]
   ];
   const wiredLanes = new Set();
 
-  for (const [path, lane, expectedAdmissions] of expectations) {
+  for (const [path, lane, expectedAdmissions, zeroModelLocks] of expectations) {
     const workflow = readFileSync(join(process.cwd(), path), "utf8");
     wiredLanes.add(lane);
     assert.match(workflow, new RegExp(`agent-concurrency-slot\\.mjs --lane ${lane} `));
-    assert.equal(workflow.match(/^    concurrency:$/gm)?.length ?? 0, expectedAdmissions);
+    assert.equal(
+      workflow.match(/^    concurrency:$/gm)?.length ?? 0,
+      expectedAdmissions + zeroModelLocks
+    );
     assert.equal(workflow.match(/^      queue: max$/gm)?.length ?? 0, expectedAdmissions);
   }
 
+  const implementation = readFileSync(
+    join(process.cwd(), ".github/workflows/agent-implement.yml"),
+    "utf8"
+  );
+  assert.equal(
+    implementation.match(/group: agent-implement-readiness/g)?.length ?? 0,
+    1
+  );
   assert.deepEqual(wiredLanes, new Set(Object.keys(config.concurrency.lanes)));
 });
 

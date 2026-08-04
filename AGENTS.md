@@ -44,6 +44,8 @@ Vet: one deployed Next.js app, Postgres-backed npm workspace.
 - No manual branch or push is required.
 - Intentional manual bypass: a repository-owner direct push is outside the AFK loop; `[skip ci]` also skips push-triggered Actions.
 - Return only when `agent:blocked` requests a decision, or `agent:proof-failed` remains after automatic recovery stops.
+- Failure lesson: missing exact-main checks plus stale readiness need one deduplicated exact-head recovery before model spend; explicit no-media wording stays proofless unless positive visual proof overrides it.
+- Failure lesson: do not run `typecheck` and `build` concurrently in one checkout; both touch `.next/types` and can create transient route-validator failures.
 - Full operation, recovery, and exact-head approval steps: `docs/agent-automation.md`.
 
 ## Architecture Rules

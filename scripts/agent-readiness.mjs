@@ -5,6 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
   AgentError,
+  dispatchWorkflow,
   fail,
   finish,
   ghApiJson,
@@ -358,6 +359,7 @@ export function collectReadinessSnapshot(config, options = {}) {
   return {
     headSha,
     checks,
+    baselineRuns,
     baselineRunIds,
     // The branch summary exposes required checks to read-only workflow tokens.
     // Exact-head automerge independently enforces base freshness.
@@ -420,15 +422,25 @@ export async function waitForPreflightReadiness(config, options = {}) {
   const sleep = options.sleep ?? delay;
   const collect =
     options.collect ?? (() => collectReadinessSnapshot(config, options));
+  const recover = options.recover;
+  const onRecovery = options.onRecovery ?? (() => {});
+  const recoveredHeads = new Set();
   const deadline = clock() + timeoutMs;
   let result;
   do {
     const now = clock();
-    result = evaluateReadiness(config, collect(), {
+    const snapshot = collect();
+    result = evaluateReadiness(config, snapshot, {
       mode: "preflight",
       now: new Date(now)
     });
     if (result.ready || now >= deadline) return result;
+    if (recover && !recoveredHeads.has(result.headSha)) {
+      recoveredHeads.add(result.headSha);
+      const recovery = recover(snapshot);
+      onRecovery(recovery);
+      if (recovery.blocked) return result;
+    }
     await sleep(Math.min(pollMs, deadline - now));
   } while (true);
 }
@@ -441,6 +453,129 @@ const PENDING_CHECK_STATES = new Set([
   "waiting",
   "in_progress"
 ]);
+
+function baselineCheckStates(config, snapshot) {
+  return Object.fromEntries(
+    config.readiness.baselineChecks.map((name) => [
+      name,
+      exactHeadCheckState(
+        snapshot.checks,
+        name,
+        snapshot.headSha,
+        config,
+        snapshot.baselineRunIds
+      )
+    ])
+  );
+}
+
+function exactWorkflowRuns(runs, headSha, branch, runName) {
+  return (runs ?? []).filter(
+    (run) =>
+      run?.head_sha === headSha &&
+      run?.head_branch === branch &&
+      run?.event !== "pull_request" &&
+      (run?.name === runName || run?.display_title === runName)
+  );
+}
+
+function activeOrSuccessfulRun(runs) {
+  return (runs ?? []).some(
+    (run) =>
+      run?.status !== "completed" ||
+      run?.conclusion === "success"
+  );
+}
+
+export function recoverPreflightReadiness(config, snapshot, dependencies = {}) {
+  const now = dependencies.now ?? new Date();
+  const result = evaluateReadiness(config, snapshot, {
+    mode: "preflight",
+    now
+  });
+  const states = baselineCheckStates(config, snapshot);
+  const unrecoverable = result.findings.filter((item) => {
+    if (item.category === "baseline") {
+      const name = item.code.replace(/^check-/, "");
+      return !PENDING_CHECK_STATES.has(states[name]);
+    }
+    return !(
+      item.category === "provider" &&
+      ["health-missing", "health-stale"].includes(item.code)
+    );
+  });
+  if (result.ready || unrecoverable.length) {
+    return {
+      headSha: result.headSha,
+      blocked: unrecoverable.length > 0,
+      dispatches: [],
+      existing: [],
+      findings: result.findings
+    };
+  }
+
+  const execute = dependencies.dispatchWorkflow ?? dispatchWorkflow;
+  const branch = config.repo.defaultBranch;
+  const dispatches = [];
+  const existing = [];
+  const baselineRuns = exactWorkflowRuns(
+    snapshot.baselineRuns,
+    result.headSha,
+    branch,
+    `CI ${result.headSha}`
+  );
+  if (Object.values(states).some((state) => state !== "success")) {
+    if (activeOrSuccessfulRun(baselineRuns)) {
+      existing.push(config.readiness.baselineWorkflow);
+    } else {
+      execute(
+        config,
+        config.readiness.baselineWorkflow,
+        { "main-sha": result.headSha },
+        false,
+        branch
+      );
+      dispatches.push(config.readiness.baselineWorkflow);
+    }
+  }
+
+  const needsReadinessRecovery = result.findings.some(
+    (item) =>
+      item.category === "provider" &&
+      ["health-missing", "health-stale"].includes(item.code)
+  );
+  if (needsReadinessRecovery) {
+    const readinessRuns = exactWorkflowRuns(
+      snapshot.readinessRuns,
+      result.headSha,
+      branch,
+      `Agent Readiness ${result.headSha}`
+    );
+    const activeReadiness = readinessRuns.some(
+      (run) => run?.status !== "completed"
+    );
+    if (activeReadiness) {
+      existing.push(config.readiness.workflow);
+    } else {
+      execute(
+        config,
+        config.readiness.workflow,
+        { "expected-head-sha": result.headSha },
+        false,
+        branch
+      );
+      dispatches.push(config.readiness.workflow);
+    }
+  }
+
+  return {
+    headSha: result.headSha,
+    blocked: false,
+    dispatches,
+    existing,
+    findings: result.findings
+  };
+}
 
 export async function waitForBaselineChecks(config, options = {}) {
   const timeoutMs = Number(options.timeoutMs ?? 0);
@@ -462,18 +597,7 @@ export async function waitForBaselineChecks(config, options = {}) {
   const deadline = clock() + timeoutMs;
   do {
     const snapshot = collect();
-    const states = Object.fromEntries(
-      config.readiness.baselineChecks.map((name) => [
-        name,
-        exactHeadCheckState(
-          snapshot.checks,
-          name,
-          snapshot.headSha,
-          config,
-          snapshot.baselineRunIds
-        )
-      ])
-    );
+    const states = baselineCheckStates(config, snapshot);
     const ready = Object.values(states).every((state) => state === "success");
     const terminalFailure = Object.values(states).some(
       (state) => state !== "success" && !PENDING_CHECK_STATES.has(state)
@@ -611,11 +735,19 @@ export async function main() {
     );
     return;
   }
+  if (args.recover && mode !== "preflight") {
+    throw new AgentError("readiness recovery requires preflight mode", 2);
+  }
+  const recoveries = [];
   const result =
     mode === "preflight" && waitSeconds > 0
       ? await waitForPreflightReadiness(config, {
           ...snapshotOptions,
-          timeoutMs: waitSeconds * 1_000
+          timeoutMs: waitSeconds * 1_000,
+          recover: args.recover
+            ? (snapshot) => recoverPreflightReadiness(config, snapshot)
+            : undefined,
+          onRecovery: (recovery) => recoveries.push(recovery)
         })
       : evaluateReadiness(
           config,
@@ -628,7 +760,11 @@ export async function main() {
       detailsUrl: process.env.GITHUB_RUN_URL ?? ""
     });
   }
-  finish({ ok: result.ready, result, publication }, Boolean(args.json), result.ready ? 0 : 1);
+  finish(
+    { ok: result.ready, result, recovery: recoveries, publication },
+    Boolean(args.json),
+    result.ready ? 0 : 1
+  );
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -285,7 +285,7 @@ function requestedProofLines(value) {
         /\b(?:browser|visual|screenshots?|gifs?|videos?|screen recordings?|media|service|deployment)\b/i.test(
           normalized
         ) &&
-        /\bproof\b(?:\s+(?:is|are)\s+(?:needed|required))?[.!]?$/i.test(
+        /(?:\bproof\b(?:\s+(?:is|are)\s+(?:needed|required))?|\b(?:(?:is|are)\s+)?(?:needed|required))(?:\s+for\b[^;]*)?[.!]?$/i.test(
           normalized
         ) &&
         !/[;]|\b(?:but|however|instead)\b/i.test(normalized);
@@ -368,8 +368,8 @@ export function lightweightTriageDecision(config, issue) {
           outcome,
           acceptance,
           requestedProofLines(sections.proof),
-          sections["proof route"],
-          sections["proof interaction"],
+          requestedProofLines(sections["proof route"]),
+          requestedProofLines(sections["proof interaction"]),
         ]
           .filter(Boolean)
           .join("\n");
