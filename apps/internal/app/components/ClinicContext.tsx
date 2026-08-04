@@ -10,7 +10,13 @@ import {
 
 const ClinicContext = createContext<ClinicBrand>(defaultClinicBrand);
 
-export function ClinicLoadingPanel({ failed = false }: { failed?: boolean }) {
+export function ClinicLoadingPanel({
+  failed = false,
+  wordmark
+}: {
+  failed?: boolean;
+  wordmark?: ReactNode;
+}) {
   return (
     <main
       className="entryShell"
@@ -18,7 +24,7 @@ export function ClinicLoadingPanel({ failed = false }: { failed?: boolean }) {
       data-agent-proof-state={failed ? "failed" : "loading"}
     >
       <section className="entryPanel clinicResolutionPanel">
-        <PawPrint aria-hidden="true" />
+        {wordmark ?? <PawPrint aria-hidden="true" />}
         <h1>{failed ? "Clinic unavailable" : "Opening your clinic…"}</h1>
         <p>
           {failed

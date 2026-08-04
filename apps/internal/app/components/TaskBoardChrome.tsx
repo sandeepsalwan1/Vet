@@ -2,7 +2,7 @@
 
 import type { AppRole } from "@central-vet/db";
 import { Check, Pencil, ShieldCheck } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { authenticateActorSession } from "../lib/authClient";
 import { useClinicBrand } from "./ClinicContext";
 import { ClinicWordmark } from "./ClinicWordmark";
@@ -69,14 +69,92 @@ export function SessionNameTag({
 }
 
 export function BootScreen() {
-  const clinic = useClinicBrand();
   return (
     <main className="entryShell">
       <section className="entryPanel bootPanel">
-        <ClinicWordmark name={clinic.name} />
+        <FrogWordmark />
         <div className="bootLine">Opening board</div>
       </section>
     </main>
+  );
+}
+
+export function FrogWordmark() {
+  const clinic = useClinicBrand();
+  const [activationCount, setActivationCount] = useState(0);
+  const [revealed, setRevealed] = useState(false);
+  const activationRef = useRef(0);
+  const idleTimerRef = useRef<number | null>(null);
+  const hideTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
+      if (hideTimerRef.current !== null) window.clearTimeout(hideTimerRef.current);
+    };
+  }, []);
+
+  function resetSequence() {
+    activationRef.current = 0;
+    setActivationCount(0);
+    if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = null;
+  }
+
+  function showFrog() {
+    setRevealed(true);
+    if (hideTimerRef.current !== null) window.clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = window.setTimeout(() => {
+      setRevealed(false);
+      hideTimerRef.current = null;
+    }, 2200);
+  }
+
+  function handleActivation() {
+    const nextCount = activationRef.current + 1;
+    if (nextCount === 5) {
+      activationRef.current = 0;
+      setActivationCount(0);
+      if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+      showFrog();
+      return;
+    }
+
+    activationRef.current = nextCount;
+    setActivationCount(nextCount);
+    if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = window.setTimeout(resetSequence, 1400);
+  }
+
+  return (
+    <div className="clinicWordmarkShell">
+      <button
+        type="button"
+        className="clinicWordmarkButton"
+        onClick={handleActivation}
+        aria-label={`${clinic.name} wordmark`}
+        title={activationCount > 0 ? `${clinic.name} wordmark (${activationCount}/5)` : `${clinic.name} wordmark`}
+      >
+        <ClinicWordmark name={clinic.name} />
+      </button>
+      <div
+        className={`frogEasterEgg${revealed ? " frogEasterEgg--visible" : ""}`}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        aria-hidden={!revealed}
+        data-agent-proof="frog-easter-egg"
+      >
+        <span className="frogEasterEggIcon" aria-hidden="true">
+          🐸
+        </span>
+        <div>
+          <strong>Scrub-cap frog sighted.</strong>
+          <span>Quiet leap, back to tasks.</span>
+        </div>
+      </div>
+    </div>
   );
 }
 

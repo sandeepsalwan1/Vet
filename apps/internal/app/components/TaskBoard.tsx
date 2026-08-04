@@ -17,9 +17,8 @@ import {
 import { TaskActivityPanel, TaskLaneGrid } from "./TaskBoardPanels";
 import { ArrivalDeskPanel } from "./ArrivalDeskPanel";
 import { ClientJourneyStaffPanel } from "./ClientJourneyStaffPanel";
-import { useClinicBrand } from "./ClinicContext";
 import { TaskForm } from "./TaskForm";
-import { BootScreen, EntryScreen, MiniConfetti, SessionNameTag } from "./TaskBoardChrome";
+import { BootScreen, EntryScreen, FrogWordmark, MiniConfetti, SessionNameTag } from "./TaskBoardChrome";
 import { NotificationSettingsMenu } from "./TaskBoardSettings";
 import { InvalidTaskModal, TaskBoardToastBanner } from "./TaskBoardOverlays";
 import { roleLabel } from "./taskBoardDisplay";
@@ -31,7 +30,6 @@ import { useTaskBoardSettings } from "./useTaskBoardSettings";
 import { useTaskBoardTaskActions } from "./useTaskBoardTaskActions";
 
 export function TaskBoard() {
-  const clinic = useClinicBrand();
   const {
     booted,
     session,
@@ -171,7 +169,7 @@ export function TaskBoard() {
     <main className="appShell">
       <header className="topBar">
         <div>
-          <p className="eyebrow">{clinic.name}</p>
+          <FrogWordmark />
           <h1>Clinic Tasks</h1>
         </div>
         <div className="topActions">
