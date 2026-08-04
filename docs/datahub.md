@@ -1,3 +1,10 @@
+---
+summary: "Datahub webhook contract, tenant-safe ingestion, and sandbox rollout runbook."
+read_when:
+  - Changing Datahub webhook ingestion, storage, or authentication
+  - Preparing or verifying a Datahub sandbox or production rollout
+---
+
 # Datahub PIMS Integration
 
 Captured and verified against the live Datahub documentation and GraphQL schemas on 2026-08-04.
@@ -220,6 +227,7 @@ Verify all of the following:
 - Every entity produced a receipt.
 - Failed receipts were retried and eventually succeeded or have an actionable reason.
 - Duplicate delivery does not create duplicate records.
+- Older deliveries do not overwrite newer stored state.
 - Soft-deleted records remain stored with deletion flags.
 - The delivery rate drops to normal incremental traffic.
 - New fake changes arrive on the expected 15-second cycle.
@@ -264,6 +272,8 @@ Likely first adapters:
 
 Keep Datahub `integrationId` as the stable upsert and deduplication key.
 Keep `pimsId` for mapping back to the source PIMS.
+When both copies have a provider update time, keep the newer `updatedAt` or `pimsUpdatedAt` value.
+When either copy lacks that field, use the webhook metadata timestamp to prevent an older delivery from replacing newer stored state.
 
 ## What a webhook is
 
@@ -971,7 +981,8 @@ Source:
 - [x] Tenant practice mapping is required.
 - [x] Cross-tenant batches are rejected.
 - [x] Entity upserts are idempotent by `integrationId`.
-- [x] Duplicate identities inside one batch collapse to the last payload while preserving one receipt per received entity.
+- [x] Duplicate identities inside one batch collapse to the newest provider update, or the last payload when either update time is absent, while preserving one receipt per received entity.
+- [x] Older webhook deliveries do not overwrite newer stored state; provider update time wins when both records have it, otherwise webhook metadata time decides.
 - [x] Soft-delete fields are preserved.
 - [x] Delivery counts and status are audited.
 - [x] Per-entity receipts are returned with HTTP 200 for partial success.
@@ -986,7 +997,7 @@ Local proof:
 - [x] Real local HTTP requests prove `200`, `401`, `400`, `415`, and unmapped-practice `503` behavior.
 - [x] Runtime retry proof keeps two synthetic entities at two rows.
 - [x] Runtime update proof preserves the payload as a JSON object and updates the existing entity.
-- [x] Runtime duplicate-in-one-batch proof returns two success receipts, stores one row, and keeps the last payload.
+- [x] Runtime duplicate-in-one-batch proof returns two success receipts, stores one row, and keeps the last payload when update times are absent.
 - [x] Screenshot OCR finds no credential-length token, UUID, or personal account name.
 
 The complete repository migration chain was not proven in bare Homebrew PostgreSQL because existing migration `024` requires the `vector` extension.
@@ -1032,55 +1043,55 @@ No image was uploaded to an external service.
 
 ### Overview
 
-![Datahub overview](datahub-assets/screenshots/01-overview.webp)
+![Datahub overview](../datahub-assets/screenshots/01-overview.webp)
 
 ### Connecting practices
 
-![Connecting practices](datahub-assets/screenshots/02-connecting-practices.webp)
+![Connecting practices](../datahub-assets/screenshots/02-connecting-practices.webp)
 
 ### Architecture and data flow
 
-![Architecture and data flow](datahub-assets/screenshots/03-architecture-data-flow.webp)
+![Architecture and data flow](../datahub-assets/screenshots/03-architecture-data-flow.webp)
 
 ### Webhook implementation
 
-![Webhook implementation](datahub-assets/screenshots/04-webhook-implementation.webp)
+![Webhook implementation](../datahub-assets/screenshots/04-webhook-implementation.webp)
 
 ### Initial sync
 
-![Initial sync](datahub-assets/screenshots/05-initial-sync.webp)
+![Initial sync](../datahub-assets/screenshots/05-initial-sync.webp)
 
 ### Registry GraphQL
 
-![Registry GraphQL playground](datahub-assets/screenshots/06-registry-graphql.webp)
+![Registry GraphQL playground](../datahub-assets/screenshots/06-registry-graphql.webp)
 
 ### API GraphQL
 
-![API GraphQL playground](datahub-assets/screenshots/07-api-graphql.webp)
+![API GraphQL playground](../datahub-assets/screenshots/07-api-graphql.webp)
 
 ### Webhook OpenAPI
 
-![Webhook OpenAPI](datahub-assets/screenshots/08-webhook-openapi.webp)
+![Webhook OpenAPI](../datahub-assets/screenshots/08-webhook-openapi.webp)
 
 ### Getting Started
 
-![Getting Started](datahub-assets/screenshots/09-getting-started.webp)
+![Getting Started](../datahub-assets/screenshots/09-getting-started.webp)
 
 ### Practices
 
-![Practices](datahub-assets/screenshots/10-practices.webp)
+![Practices](../datahub-assets/screenshots/10-practices.webp)
 
 ### Data Center
 
-![Data Center](datahub-assets/screenshots/11-data-center.webp)
+![Data Center](../datahub-assets/screenshots/11-data-center.webp)
 
 ### Webhooks
 
-![Webhooks](datahub-assets/screenshots/12-webhooks.webp)
+![Webhooks](../datahub-assets/screenshots/12-webhooks.webp)
 
 ### Tickets
 
-![Tickets](datahub-assets/screenshots/13-tickets.webp)
+![Tickets](../datahub-assets/screenshots/13-tickets.webp)
 
 ## Source links
 
