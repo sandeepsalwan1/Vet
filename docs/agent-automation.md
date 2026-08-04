@@ -250,6 +250,8 @@ The trusted behavior contract comes from the sealed issue and implementation add
 The browser driver receives only routes, actions, selectors, and assertions, not source code.
 Every browser task declares `session: none` or one bounded visible demo role.
 Protected staff interactions require a staff-capable demo session.
+Demo authentication must remain present after every planned navigation, with the account session, task-board session, and rendered authenticated surface agreeing on the role.
+A lost session fails before the next selector with the affected role and route in the diagnostic.
 `click` and `fill` use executable CSS selectors; `clickText` selects a CSS element type and visible text without Playwright-only selector syntax.
 A task that clicks save or submit must first exercise the form-control change that enables the action.
 The proof plan may use an existing static app route without modifying that page merely to mark it affected.
@@ -261,6 +263,9 @@ For visible text assertions whose model-generated selector is one heading level,
 The heading level is a locator preference; the sealed route and acceptance text remain exact.
 Bounded implementation repair receives a trusted browser-clause allowlist and may not move deterministic-only or service-only clauses into browser proof.
 For GIF proof, recording starts before browser navigation or user action so transient states are captured instead of only the settled page.
+Visibility assertions require nonzero painted geometry, viewport intersection, visible CSS, and positive opacity.
+Final assertions must hold together in one observation sample, and the driver captures a PNG at that exact passing moment for every browser task.
+Failed tasks capture the current browser state as a diagnostic PNG when possible.
 Browser navigation waits through execution-context replacement, form filling focuses the selected control and uses its native value setter, and text assertions read form values instead of static child text.
 Intermediate assertions begin only after an actual user trigger such as form input, click, or key press, never after initial navigation.
 GIF plans without a user trigger are rejected, and requested intermediate assertions remain failing unless the runner actually observes them.
@@ -276,6 +281,7 @@ Bounded semantic repair may continue while that blocker remains.
 A later passing exact-head proof removes the proof-owned label idempotently from the pull request and its trusted source issue before automerge reevaluates the pull request.
 Published multi-route bundles bind digests by exact artifact-relative path before using a unique-basename fallback, so repeated route-local filenames do not conflict.
 The managed GitHub comment links the downloadable Actions artifact and keeps runner-only paths in a collapsed diagnostic section.
+Failed media links are labeled as diagnostics and explicitly state that the capture does not prove acceptance.
 Visual proof fails closed when the proof plan is incomplete, behavior assertions fail, a clause is missing, or no reviewable artifact URL is published.
 Browser action and assertion exceptions are recorded as structured exact-head failures, so the bounded repair loop receives the actual failed step instead of a missing-report error.
 An actionable exact-head behavior failure automatically returns its failed clauses to the shared bounded reviewer repair loop.

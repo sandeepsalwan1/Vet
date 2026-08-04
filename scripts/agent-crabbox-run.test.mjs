@@ -19,6 +19,7 @@ import {
   gifEncoderBootstrapCommands,
   parseTimingReport,
   parseBrowserBehaviorObservation,
+  parseBrowserCaptures,
   prepareDelegatedWorkspace,
   providerChildEnvironment,
   recordedBrowserLaunchScript,
@@ -552,12 +553,39 @@ test("browser behavior handoff is bounded to the retained lease and route", () =
     ]
   };
   const output = `noise
+AGENT_BROWSER_CAPTURE_V1 ${JSON.stringify({
+    route: "/request",
+    taskIndex: 1,
+    phase: "passed",
+    pngBase64: pngData.toString("base64")
+  })}
 AGENT_BROWSER_BEHAVIOR_V1 ${Buffer.from(JSON.stringify(observation)).toString("base64")}
 `;
   assert.deepEqual(parseBrowserBehaviorObservation(output, "/request"), observation);
+  const captures = parseBrowserCaptures(output, "/request", observation);
+  assert.equal(captures.length, 1);
+  assert.equal(captures[0].phase, "passed");
+  assert.deepEqual(captures[0].png, pngData);
   assert.throws(
     () => parseBrowserBehaviorObservation(output, "/other"),
     /no report|invalid shape/
+  );
+  assert.throws(
+    () =>
+      parseBrowserCaptures(
+        output.replace(
+          /^AGENT_BROWSER_CAPTURE_V1 .*$/m,
+          `AGENT_BROWSER_CAPTURE_V1 ${JSON.stringify({
+            route: "/request",
+            taskIndex: 1,
+            phase: "failed",
+            pngBase64: pngData.toString("base64")
+          })}`
+        ),
+        "/request",
+        observation
+      ),
+    /screenshots do not match|invalid/
   );
 });
 
@@ -620,6 +648,18 @@ test("Vercel implementation uses a bounded stdout handoff instead of unsupported
   );
   assert.equal(vercelArgs.includes("--stop-after"), false);
   assert.equal(vercelArgs.includes("GH_TOKEN"), false);
+  assert.deepEqual(
+    vercelArgs.slice(
+      vercelArgs.indexOf("--vercel-sandbox-timeout-secs"),
+      vercelArgs.indexOf("--vercel-sandbox-timeout-secs") + 4
+    ),
+    [
+      "--vercel-sandbox-timeout-secs",
+      "2400",
+      "--vercel-sandbox-exec-timeout-secs",
+      "1800"
+    ]
+  );
 
   const directArgs = buildRunArgs({
     provider: "hetzner",
@@ -1099,6 +1139,46 @@ test("artifact verification rejects an arbitrary provider or lease claim", (t) =
     })}\n`
   );
   assert.throws(() => validateCollectedArtifacts(bundle, options), /route binding does not match/);
+});
+
+test("behavior proof requires one assertion-time PNG per browser task", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "vet-agent-assertion-capture-test-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const screenshot = join(dir, "screenshot.png");
+  const assertionScreenshot = join(dir, "proof-final-01.png");
+  const behaviorReport = join(dir, "behavior-observation.json");
+  writeFileSync(screenshot, pngData);
+  writeFileSync(assertionScreenshot, pngData);
+  writeFileSync(behaviorReport, "{}\n");
+  const options = artifactOptions(dir, {
+    behaviorRequired: true,
+    behaviorStatus: "pass",
+    behaviorCaptureCount: 1,
+    binding: {
+      behaviorRequired: true,
+      behaviorStatus: "pass",
+      behaviorCaptureCount: 1,
+      behaviorReportPath: behaviorReport
+    }
+  });
+  const bundle = {
+    directory: dir,
+    metadata: { provider: options.provider, leaseId: options.leaseId },
+    files: [
+      { kind: "screenshot", path: screenshot },
+      { kind: "assertion-screenshot", path: assertionScreenshot }
+    ]
+  };
+
+  assert.deepEqual(validateCollectedArtifacts(bundle, options), [
+    options.routeBindingPath,
+    screenshot,
+    assertionScreenshot
+  ]);
+  assert.throws(
+    () => validateCollectedArtifacts({ ...bundle, files: bundle.files.slice(0, 1) }, options),
+    /missing assertion-time browser screenshots/
+  );
 });
 
 test("GIF proof requires authentic video and GIF files from one bundle", (t) => {

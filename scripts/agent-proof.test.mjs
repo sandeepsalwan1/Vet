@@ -801,6 +801,29 @@ test("proof comments link the trusted Actions artifact and collapse runner-only 
   );
 });
 
+test("failed proof media is labeled as diagnostic instead of reviewer proof", () => {
+  const artifactUrl = "https://github.com/sandeepsalwan1/Vet/actions/runs/123/artifacts/456";
+  const body = proofBody(
+    {
+      proofKind: "GIF",
+      status: "failed",
+      commands: [],
+      artifactPaths: [],
+      artifactUrl,
+      provider: "vercel-sandbox",
+      leaseId: "cbx_failed",
+      summary: "Browser assertions failed.",
+      blocker: "Session was not retained."
+    },
+    ["/staff/tasks"],
+    null
+  );
+
+  assert.match(body, new RegExp(`\\[Open failed capture and diagnostics\\]\\(${artifactUrl}\\)`));
+  assert.match(body, /does not prove acceptance/);
+  assert.doesNotMatch(body, /Open reviewer GIF\/video proof bundle/);
+});
+
 test("published GIF proof is downloaded, digest-bound, exact-head, and playable", (t) => {
   const root = mkdtempSync(join(tmpdir(), "vet-published-proof-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
