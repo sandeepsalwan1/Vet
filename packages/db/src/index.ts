@@ -1,4 +1,17 @@
 export { getSql, MissingDatabaseUrlError } from "./connection";
+export {
+  CrossTenantDatahubBatchError,
+  ingestDatahubWebhook,
+  UnmappedDatahubPracticeError
+} from "./datahub";
+export type {
+  DatahubEntityGroup,
+  DatahubJsonObject,
+  DatahubJsonValue,
+  DatahubPimsRecord,
+  DatahubReceipt,
+  DatahubWebhookInput
+} from "./datahub";
 export { UnknownClinicHostnameError } from "./clinicRouting";
 export {
   getClientAnalytics,
