@@ -37,6 +37,7 @@ The database migration has not been applied to a live database.
 The endpoint has not been deployed.
 No Datahub webhook has been registered.
 No initial sync has been triggered.
+No factual rollout email has been sent.
 
 ## What to do, in order
 
@@ -274,6 +275,12 @@ Keep Datahub `integrationId` as the stable upsert and deduplication key.
 Keep `pimsId` for mapping back to the source PIMS.
 When both copies have a provider update time, keep the newer `updatedAt` or `pimsUpdatedAt` value.
 When either copy lacks that field, use the webhook metadata timestamp to prevent an older delivery from replacing newer stored state.
+
+### 10. Send the factual rollout update
+
+Send the requested email only after the applicable sandbox or production proof above is complete.
+State the exact environment, clinic mapping, webhook registration, sync result, incremental-update proof, retry proof, and any remaining blocker.
+Do not describe source or local proof as a completed external rollout.
 
 ## What a webhook is
 
@@ -588,6 +595,7 @@ Response meanings:
 Datahub documentation states that it can send the partner API key in request headers.
 Vet should instead use the hook's configurable headers to send a dedicated inbound secret.
 The implementation uses constant-time secret comparison.
+It accepts `X-Datahub-Webhook-Secret` as the preferred header and `X-Partner-Api-Key` only as a compatibility header; either header value must equal `DATAHUB_WEBHOOK_SECRET`, never the Datahub partner API key.
 
 Additional production controls:
 
@@ -1017,6 +1025,7 @@ External proof:
 - [ ] Production practice approves and completes PIMS onboarding.
 - [ ] Production hook and initial sync proven.
 - [ ] Product-facing adapters proven against real sandbox payloads.
+- [ ] Factual rollout email sent after external proof.
 
 ## Search and AdWords vocabulary
 
