@@ -73,6 +73,16 @@ Their domains, branding, settings, and data must never fall back to one another.
 4. A recovery email is scheduled after the configured pet-check delay.
 5. An unanswered sent email enters the Admin call queue after the configured no-reply delay, while a recorded pet-health response removes it from that queue.
 
+### PIMS Ingestion
+
+1. Datahub sends initial and incremental PIMS batches to the server-only webhook route.
+2. The route authenticates and validates each batch before database work.
+3. Practice mappings resolve the batch to exactly one hospital tenant; incomplete or cross-tenant mappings reject the whole batch.
+4. The database module stores provider-neutral records idempotently, prevents older updates from replacing newer state, and returns one receipt per received entity.
+5. Product flows continue using explicit PIMS adapters rather than reading provider payloads directly.
+
+See `docs/datahub.md` for the webhook contract, persistence rules, and rollout runbook.
+
 ### Agent Workflow
 
 1. The dynamic agent route resolves workflow, auth mode, and intent.

@@ -39,6 +39,7 @@ Migrations are append-only under `db/migrations`. The database client disables p
 - hospital identity, timezone, mock mode, and agent runtime
 - staff passcodes
 - optional Google, E2B, and Apify tools
+- inbound integration authentication
 - notification mode, Resend email transport, Twilio SMS transport, sender, and recipient configuration
 - cron authorization and internal base URL
 
