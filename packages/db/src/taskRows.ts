@@ -120,9 +120,16 @@ export function metadataRole(metadata: Record<string, unknown>, key: string) {
 
 export function taskDateText(value: string | Date | null) {
   if (!value) return null;
-  return value instanceof Date
-    ? value.toISOString().slice(0, 10)
-    : value.split("T")[0] || value;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
 }
 
 export function normalizeTask(row: TaskRow): Task {
