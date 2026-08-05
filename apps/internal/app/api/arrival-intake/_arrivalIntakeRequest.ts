@@ -14,6 +14,10 @@ import { z } from "zod";
 import { canAdmin } from "../../lib/taskWorkflow";
 import { noStoreHeaders } from "../_apiResponse";
 import {
+  agentProofArrivalDesk,
+  agentProofFixturesEnabled
+} from "../_agentProofFixtures";
+import {
   authenticateActor,
   authenticateActorFromQuery,
   actorSchema,
@@ -209,11 +213,22 @@ export async function arrivalIntakeGetResponse(request: Request) {
   const url = new URL(request.url);
   const clinic = await resolveClinicFromRequest(request);
   if (!url.searchParams.has("role")) {
+    if (agentProofFixturesEnabled(request)) {
+      return NextResponse.json(
+        { settings: agentProofArrivalDesk().settings },
+        { headers: noStoreHeaders }
+      );
+    }
     return NextResponse.json(await publicArrivalSettings(clinic.clinicId), { headers: noStoreHeaders });
   }
 
   const auth = await authenticateActorFromQuery(url, request, clinic);
   if ("response" in auth) return auth.response;
+  if (agentProofFixturesEnabled(request)) {
+    return NextResponse.json(agentProofArrivalDesk(), {
+      headers: noStoreHeaders
+    });
+  }
   return NextResponse.json(await arrivalDeskPayload(clinic.clinicId), { headers: noStoreHeaders });
 }
 

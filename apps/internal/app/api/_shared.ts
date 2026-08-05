@@ -11,6 +11,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { canManage } from "../lib/taskWorkflow";
 import { logWarn } from "./_apiResponse";
+import {
+  agentProofActor,
+  agentProofClinic,
+  agentProofFixturesEnabled
+} from "./_agentProofFixtures";
 import { requestHostname } from "./_requestHostname";
 
 const roleSchema = z.enum(["staff", "va", "task_adder", "veterinarian", "admin"]);
@@ -51,6 +56,7 @@ function passcodeMatches(input: string | undefined, ...allowed: Array<string | n
 }
 
 export async function resolveClinicFromRequest(request: Request): Promise<ClinicContext> {
+  if (agentProofFixturesEnabled(request)) return agentProofClinic();
   return resolveClinicForHostname(requestHostname(request));
 }
 
@@ -114,6 +120,17 @@ export async function authenticateActor(
   clinic?: ClinicContext
 ): Promise<{ actor: Actor } | { response: NextResponse }> {
   const clinicContext = clinic ?? await resolveClinicFromRequest(request);
+  if (agentProofFixturesEnabled(request)) {
+    const actorResult = agentProofActor(actor);
+    return actorResult
+      ? { actor: actorResult }
+      : {
+          response: NextResponse.json(
+            { error: "Invalid role or passcode." },
+            { status: 403 }
+          )
+        };
+  }
   if (actor.role !== "staff") {
     const identity = clientIdentity(request, actor.role);
     const limit = await checkAuthAttemptLimit(identity, {

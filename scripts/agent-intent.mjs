@@ -78,6 +78,11 @@ const MAX_IMPLEMENTATION_ITEM_BYTES = 2_000;
 const MAX_PROOF_TASKS = 20;
 const MAX_PROOF_STEPS = 20;
 const MAX_PROOF_VALUE_BYTES = 1_000;
+const LEGACY_PROOF_SELECTOR_ALIASES = new Map([
+  [".miniConfetti", "[data-agent-proof='mini-confetti']"],
+  [".lane .taskStack", "[data-agent-proof='task-board-lanes']"],
+  [".boardGrid", "[data-agent-proof='task-board-lanes']"]
+]);
 
 function normalizedText(value) {
   return String(value ?? "").replace(/\r\n?/g, "\n").trim();
@@ -192,8 +197,45 @@ function boundedProofValue(value, label, { allowEmpty = false } = {}) {
   return boundedText(value, MAX_PROOF_VALUE_BYTES, label);
 }
 
+function hasClassOrIdSelector(selector) {
+  let bracketDepth = 0;
+  let quote = "";
+  let escaped = false;
+  for (const character of selector) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = "";
+      continue;
+    }
+    if (character === "\"" || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+    if (character === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      continue;
+    }
+    if (bracketDepth === 0 && (character === "." || character === "#")) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function boundedProofSelector(value) {
-  const selector = boundedProofValue(value, "implementation proof selector");
+  const requested = boundedProofValue(value, "implementation proof selector");
+  const selector = LEGACY_PROOF_SELECTOR_ALIASES.get(requested) ?? requested;
   if (
     /:(?:has-text|text(?:-is|-matches)?|contains|visible|hidden)(?:\s*\(|\b)/i.test(
       selector
@@ -206,6 +248,12 @@ function boundedProofSelector(value) {
   ) {
     throw new AgentError(
       "implementation proof selector must be CSS; use clickText for visible text",
+      1
+    );
+  }
+  if (hasClassOrIdSelector(selector)) {
+    throw new AgentError(
+      "implementation proof selector must use a stable element, attribute, or data-agent-proof hook instead of a CSS class or id",
       1
     );
   }
@@ -405,9 +453,12 @@ export function validateProofPlan(plan) {
         }
       }
       const actions = task.actions.map(validateProofAction);
+      const finalNavigation = actions.findLast(
+        (action) => action.type === "navigate"
+      );
       const normalized = {
         clauseIds: task.clauseIds,
-        route: safeProofRoute(task.route),
+        route: finalNavigation?.path ?? safeProofRoute(task.route),
         actions: actions.filter(
           (action) => !runnerOwnedDemoSessionAction(action, session)
         ),
@@ -584,7 +635,7 @@ export function validateBrowserProofPlan({
       1
     );
   }
-  return proofPlan;
+  return validatedPlan;
 }
 
 function cleanSectionValue(value) {

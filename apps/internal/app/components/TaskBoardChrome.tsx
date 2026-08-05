@@ -185,7 +185,7 @@ export function EntryScreen({ onSave }: { onSave: (session: Session) => void }) 
 
 export function MiniConfetti() {
   return (
-    <div className="miniConfetti" aria-hidden="true">
+    <div className="miniConfetti" data-agent-proof="mini-confetti" aria-hidden="true">
       {Array.from({ length: 8 }).map((_, index) => (
         <span key={index} />
       ))}

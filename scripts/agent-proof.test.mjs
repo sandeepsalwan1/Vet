@@ -357,14 +357,17 @@ test("visual behavior plan covers every sealed clause and GIF transition", () =>
     ]
   };
 
-  assert.equal(
+  assert.deepEqual(
     validateVisualBehaviorPlan({
       proofKind: "GIF",
       routes: ["/proof/loading"],
       behaviorContract,
       proofPlan
     }),
-    proofPlan
+    {
+      ...proofPlan,
+      tasks: [{ ...proofPlan.tasks[0], session: "none" }]
+    }
   );
   assert.throws(
     () =>
@@ -544,7 +547,7 @@ test("browser plans cover browser clauses while final proof combines determinist
       }
     ]
   };
-  assert.equal(
+  assert.deepEqual(
     validateVisualBehaviorPlan({
       proofKind: "UI",
       routes: ["/staff/tasks"],
@@ -552,7 +555,10 @@ test("browser plans cover browser clauses while final proof combines determinist
       proofPlan,
       evidenceLanes: ["deterministic", "browser"]
     }),
-    proofPlan
+    {
+      ...proofPlan,
+      tasks: [{ ...proofPlan.tasks[0], session: "none" }]
+    }
   );
   assert.throws(
     () =>
@@ -1008,10 +1014,17 @@ test("visual server command requires a direct 2xx from every route before claimi
   assert.match(command, /http:\/\/127\.0\.0\.1:3000\/staff\/tasks/);
   assert.match(command, /AGENT_PROOF_ROUTE_OK \/request/);
   assert.match(command, /AGENT_PROOF_ROUTE_OK \/staff\/tasks/);
+  assert.match(command, /AGENT_PROOF_FIXTURES=task-board/);
   assert.match(command, /%\{http_code\}/);
   assert.match(command, /2\?\?/);
   assert.equal(command.includes(" -L"), false);
   assert.equal(command.includes("then exit 0"), false);
+
+  const requestOnlyCommand = visualServerCommand(
+    { commands: { install: "npm ci", build: "npm run build" } },
+    ["/request"]
+  );
+  assert.equal(requestOnlyCommand.includes("AGENT_PROOF_FIXTURES"), false);
 });
 
 test("remote PR command fetches and verifies the exact prepared head inside Crabbox", () => {

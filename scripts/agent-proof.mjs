@@ -699,6 +699,9 @@ export function visualServerCommand(
   routes,
   { includeDeterministic = false } = {}
 ) {
+  const taskBoardFixtures = routes.some(
+    (route) => route === "/staff" || route === "/staff/tasks"
+  );
   const probes = routes.flatMap((route) => {
     const url = `http://127.0.0.1:3000${route}`;
     return [
@@ -719,7 +722,7 @@ export function visualServerCommand(
     ...(includeDeterministic
       ? ["echo AGENT_PROOF_DETERMINISTIC_OK"]
       : []),
-    "(nohup npm --workspace @central-vet/internal run start -- --port 3000 --hostname 127.0.0.1 >/tmp/vet-agent-proof-next.log 2>&1 </dev/null &)",
+    `(nohup ${taskBoardFixtures ? "env AGENT_PROOF_FIXTURES=task-board " : ""}npm --workspace @central-vet/internal run start -- --port 3000 --hostname 127.0.0.1 >/tmp/vet-agent-proof-next.log 2>&1 </dev/null &)`,
     ...probes
   ].join("; ");
 }

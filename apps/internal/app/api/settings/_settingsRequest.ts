@@ -15,6 +15,7 @@ import { z } from "zod";
 import { canAdmin, canUseNotificationSettings } from "../../lib/taskWorkflow";
 import { doctorName, profileIdFromName } from "../../lib/veterinarianProfile";
 import { logInfo, logWarn, noStoreHeaders } from "../_apiResponse";
+import { agentProofFixturesEnabled } from "../_agentProofFixtures";
 import {
   actorSchema,
   authenticateActor,
@@ -241,6 +242,15 @@ async function applySettingsPatch(
 export async function settingsReadResponse(request: Request) {
   const context = await settingsReadContext(request);
   if ("response" in context) return context.response;
+  if (agentProofFixturesEnabled(request)) {
+    return NextResponse.json({
+      clinic: context.clinic,
+      endOfDayAlertsEnabled: false,
+      recipientProfiles: [],
+      canEditAllProfiles: context.actor.role === "admin",
+      currentProfileId: context.actor.profileId ?? null
+    }, { headers: noStoreHeaders });
+  }
   return NextResponse.json(
     await settingsPayloadForActor(context.actor, context.clinic),
     { headers: noStoreHeaders }
