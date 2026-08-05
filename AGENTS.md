@@ -53,8 +53,6 @@ Vet: one deployed Next.js app, Postgres-backed npm workspace.
 - Failure lesson: a long Vercel command can finish before an idle SDK socket closes; emit a bounded heartbeat, retry the exact bridge socket signature once, and never classify it as a model failure.
 - Failure lesson: replacing a prior sealed intent must reset that pull request's shared repair ledger before review; old-intent evaluations are invalid for the new seal.
 - Failure lesson: demo-session proof already performs visible login; repeating exact sign-in hook actions after setup fails on the authenticated page, so normalize only those runner-owned actions away.
-- Failure lesson: data-backed browser proof needs route-scoped, process-bound loopback read/write/undo fixtures with production role visibility plus stable hooks; reject every class/id selector form, bind the task route to final navigation, and reserve one proof recovery.
-- Failure lesson: local no-mistakes refuses the default branch; validate the exact committed tree from a feature branch.
 - Full operation, recovery, and exact-head approval steps: `docs/agent-automation.md`.
 
 ## Architecture Rules

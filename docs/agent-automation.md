@@ -55,6 +55,7 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
    Before artifact upload, the gate rejects binary changes and any exact credential value inherited by the gate process.
    A separate trusted job verifies the patch digest, paths, tree, original PR head, and explicit force-with-lease before publishing it.
    Published fixes restart exact-head CI, independent review, and no-mistakes.
+   Manual local no-mistakes validation must run from a non-default feature branch containing the exact committed candidate tree.
    Unchanged exact-head evaluations are reused and do not spend a revision.
    Remaining `auto-fix` findings may return to the independent reviewer within the shared three-revision budget, while `ask-user` findings and exhausted repair budgets block.
 8. Proof validates the sealed behavior contract.
