@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Task } from "@central-vet/db";
-import { filterTaskBoardTasks, normalizeTaskSearch, taskSearchText } from "./taskBoardDisplay";
+import { filterTaskBoardTasks, normalizeTaskSearch, taskLaneItems, taskSearchText } from "./taskBoardDisplay";
 
 const baseTask = (overrides: Partial<Task> = {}): Task => ({
   id: "task-1",
@@ -53,6 +53,7 @@ test("task board search matches task text and clears back to the original set", 
     id: "task-2",
     petName: "Mochi",
     request: "Schedule vaccines",
+    requestType: "scheduling",
     notes: "Biscuit follow-up hidden in notes",
     createdAt: "2026-08-05T11:00:00.000Z",
     updatedAt: "2026-08-05T11:00:00.000Z"
@@ -62,5 +63,27 @@ test("task board search matches task text and clears back to the original set", 
   assert.deepEqual(filterTaskBoardTasks(tasks, " biscuit "), [matchingTask]);
   assert.deepEqual(filterTaskBoardTasks(tasks, "  no match  "), []);
   assert.deepEqual(filterTaskBoardTasks(tasks, "follow-up"), []);
+  assert.deepEqual(filterTaskBoardTasks(tasks, "labs"), [matchingTask]);
   assert.deepEqual(filterTaskBoardTasks(tasks, ""), tasks);
+});
+
+test("task board search leaves lane ordering unchanged after filtering", () => {
+  const firstDueTask = baseTask({
+    id: "task-1",
+    request: "Need labs for Biscuit",
+    createdAt: "2026-08-05T10:00:00.000Z",
+    updatedAt: "2026-08-05T10:00:00.000Z"
+  });
+  const secondDueTask = baseTask({
+    id: "task-2",
+    petName: "Mochi",
+    request: "Schedule vaccines",
+    createdAt: "2026-08-05T11:00:00.000Z",
+    updatedAt: "2026-08-05T11:00:00.000Z"
+  });
+  const tasks = [firstDueTask, secondDueTask];
+  const originalLaneOrder = taskLaneItems(tasks, "due", "staff").map((task) => task.id);
+
+  assert.deepEqual(filterTaskBoardTasks(tasks, " biscuit "), [firstDueTask]);
+  assert.deepEqual(taskLaneItems(tasks, "due", "staff").map((task) => task.id), originalLaneOrder);
 });

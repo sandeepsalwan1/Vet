@@ -160,7 +160,8 @@ export function TaskBoard() {
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
     [tasks]
   );
-  const visibleTasks = useMemo(() => filterTaskBoardTasks(tasks, searchQuery), [searchQuery, tasks]);
+  const activeTasks = useMemo(() => tasks.filter((task) => task.status !== "archived"), [tasks]);
+  const visibleTasks = useMemo(() => filterTaskBoardTasks(activeTasks, searchQuery), [activeTasks, searchQuery]);
   const normalizedSearchQuery = searchQuery.trim();
   const hasSearchResults = normalizedSearchQuery.length > 0;
 
@@ -254,10 +255,10 @@ export function TaskBoard() {
         >
           {hasSearchResults ? (
             <p>
-              Showing {visibleTasks.length} of {tasks.length} tasks for &quot;{normalizedSearchQuery}&quot;
+              Showing {visibleTasks.length} of {activeTasks.length} tasks for &quot;{normalizedSearchQuery}&quot;
             </p>
           ) : (
-            <p>Showing all {tasks.length} tasks</p>
+            <p>Showing all {activeTasks.length} tasks</p>
           )}
         </div>
       </section>

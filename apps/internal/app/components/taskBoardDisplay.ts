@@ -111,7 +111,8 @@ export function taskSearchText(task: Task) {
     task.request,
     task.petName,
     task.clientName,
-    task.clarityId
+    task.clarityId,
+    requestTypeLabel(task.requestType)
   ]
     .filter((value): value is string => Boolean(value && value.trim()))
     .join(" ")
