@@ -319,12 +319,12 @@ test("visual execution falls back to sealed and affected routes without a plan",
         ],
         intentCapsule: {
           behaviorContract: {
-            routes: ["/proof/loading"]
+            routes: ["/proof/loading", "/staff/tasks"]
           }
         }
       })
     ),
-    ["/", "/proof/loading"]
+    ["/", "/proof/loading", "/staff"]
   );
 });
 

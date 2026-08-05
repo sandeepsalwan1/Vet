@@ -127,6 +127,77 @@ test("intent capsule binds issue, requirements, clarifications, transcript, and 
   assert.match(capsule.behaviorContract.contractDigest, /^[a-f0-9]{64}$/);
 });
 
+test("managed intent reconstructs pre-canonical version 6 proof routes", () => {
+  const sourceIssue = issue();
+  const sourceDecision = decision();
+  const legacy = createIntentCapsuleVersion({
+    issue: sourceIssue,
+    decision: sourceDecision,
+    version: 6,
+    canonicalizeProofRoutes: false
+  });
+  const managedDecision = {
+    ...sourceDecision,
+    issueSnapshotSha256: legacy.issueSnapshotSha256,
+    ownerClarifications: [],
+    intentDigest: legacy.intentDigest
+  };
+  const triageComment = {
+    body: `<!-- agent-triage:v1 -->
+\`\`\`json
+${JSON.stringify(managedDecision)}
+\`\`\``
+  };
+
+  assert.deepEqual(legacy.behaviorContract.routes, ["/staff/tasks"]);
+  assert.equal(validateIntentCapsule(legacy), legacy);
+  assert.equal(
+    intentCapsuleForManagedTriage({
+      issue: sourceIssue,
+      comments: [triageComment],
+      triageComment,
+      marker: "<!-- agent-triage:v1 -->",
+      repoOwner: "owner"
+    }).capsule.version,
+    6
+  );
+});
+
+test("managed intent reconstructs canonical version 6 proof routes", () => {
+  const sourceIssue = issue();
+  const sourceDecision = decision();
+  const legacy = createIntentCapsuleVersion({
+    issue: sourceIssue,
+    decision: sourceDecision,
+    version: 6
+  });
+  const managedDecision = {
+    ...sourceDecision,
+    issueSnapshotSha256: legacy.issueSnapshotSha256,
+    ownerClarifications: [],
+    intentDigest: legacy.intentDigest
+  };
+  const triageComment = {
+    body: `<!-- agent-triage:v1 -->
+\`\`\`json
+${JSON.stringify(managedDecision)}
+\`\`\``
+  };
+
+  assert.deepEqual(legacy.behaviorContract.routes, ["/staff"]);
+  assert.equal(validateIntentCapsule(legacy), legacy);
+  assert.equal(
+    intentCapsuleForManagedTriage({
+      issue: sourceIssue,
+      comments: [triageComment],
+      triageComment,
+      marker: "<!-- agent-triage:v1 -->",
+      repoOwner: "owner"
+    }).capsule.version,
+    6
+  );
+});
+
 test("acceptance clauses select direct evidence without forcing every UI clause into a browser", () => {
   assert.deepEqual(
     clauseEvidenceLanes("Show the real clinic-opening copy on the page", "GIF"),

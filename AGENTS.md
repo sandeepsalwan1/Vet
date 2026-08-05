@@ -54,6 +54,7 @@ Vet: one deployed Next.js app, Postgres-backed npm workspace.
 - Failure lesson: replacing a prior sealed intent must reset that pull request's shared repair ledger before review; old-intent evaluations are invalid for the new seal.
 - Failure lesson: demo-session proof already performs visible login; repeating exact sign-in hook actions after setup fails on the authenticated page, so normalize only those runner-owned actions away.
 - Failure lesson: browser proof needs canonical routes, intent-scoped loopback fixtures with production visibility, stable hooks, no class/id selectors, and one reserved proof repair.
+- Failure lesson: canonical route changes need a new intent-capsule version plus exact legacy variants; never recalculate old seals with new normalization.
 - Full operation, recovery, and exact-head approval steps: `docs/agent-automation.md`.
 
 ## Architecture Rules
