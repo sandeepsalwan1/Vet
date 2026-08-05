@@ -175,6 +175,10 @@ test("shared revision limit rejects a fourth material head", () => {
     allowProofRecovery: true,
   }).ledger;
   assert.equal(ledger.revisionCount, MAX_TOTAL_REVISIONS);
+  assert.match(
+    repairLedgerBody(ledger),
+    /Semantic revisions: 4\/4 \(3 standard \+ 1 proof recovery\)/,
+  );
   assert.throws(
     () => recordRepairRevision(ledger, {
       lane: "review",

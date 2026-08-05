@@ -1056,6 +1056,25 @@ test("visual server command requires a direct 2xx from every route before claimi
     }
   );
   assert.equal(staffSettingsCommand.includes("AGENT_PROOF_FIXTURES"), false);
+
+  const unquotedTaskBoardCommand = visualServerCommand(
+    { commands: { install: "npm ci", build: "npm run build" } },
+    ["/staff"],
+    {
+      proofPlan: {
+        version: 1,
+        tasks: [{
+          actions: [],
+          intermediateAssertions: [],
+          finalAssertions: [{
+            type: "visible",
+            selector: "[data-agent-proof=task-board-lanes]"
+          }]
+        }]
+      }
+    }
+  );
+  assert.match(unquotedTaskBoardCommand, /AGENT_PROOF_FIXTURES=task-board/);
 });
 
 test("remote PR command fetches and verifies the exact prepared head inside Crabbox", () => {

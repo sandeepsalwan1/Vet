@@ -362,7 +362,7 @@ export function repairLedgerBody(ledgerValue) {
   const openCount = ledger.findings.filter((finding) => finding.status === "open").length;
   return `## Shared Repair Ledger
 
-Semantic revisions: ${ledger.revisionCount}/${MAX_SEMANTIC_REVISIONS}
+Semantic revisions: ${ledger.revisionCount}/${MAX_TOTAL_REVISIONS} (${MAX_SEMANTIC_REVISIONS} standard + ${MAX_PROOF_RECOVERY_REVISIONS} proof recovery)
 Open finding fingerprints: ${openCount}
 
 Infrastructure retries, polling, and unchanged-head reconciliation do not consume this budget.

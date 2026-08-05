@@ -705,7 +705,7 @@ export function visualServerCommand(
       ...task.intermediateAssertions,
       ...task.finalAssertions
     ].some((step) =>
-      /\[data-agent-proof\s*=\s*["']task-board(?:-[^"']+)?["']\]/.test(
+      /\[data-agent-proof\s*=\s*(?:["']task-board(?:-[^"']+)?["']|task-board(?:-[^\]\s]+)?)\]/.test(
         step.selector ?? ""
       )
     )
