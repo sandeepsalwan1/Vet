@@ -31,7 +31,7 @@ Do not ask the user to perform routine debugging, polling, approvals, reruns, or
 
 ## Current Handoff Snapshot
 
-This snapshot was refreshed on 2026-07-29 and must be reverified where state can drift.
+This snapshot was refreshed on 2026-08-05 and must be reverified where state can drift.
 
 - The production implementation is on `main` and uses Crabbox-only model lanes, scoped credential handoffs, structural project-skill discovery, sealed intent capsule v7, and backward-compatible v1 through v6 reconstruction.
 - Review and no-mistakes share one three-revision semantic ledger, and every model lane publishes bounded per-call usage plus provider and issue-level cost accounting.
