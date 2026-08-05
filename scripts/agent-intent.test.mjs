@@ -112,7 +112,7 @@ test("intent capsule binds issue, requirements, clarifications, transcript, and 
   assert.equal(capsule.transcriptContext.sourceDigest, "a".repeat(64));
   assert.equal(capsule.ownerClarifications[0].commentId, 55);
   assert.equal(capsule.version, INTENT_CAPSULE_VERSION);
-  assert.deepEqual(capsule.behaviorContract.routes, ["/staff/tasks"]);
+  assert.deepEqual(capsule.behaviorContract.routes, ["/staff"]);
   assert.deepEqual(
     capsule.behaviorContract.checks.map((check) => check.id),
     ["AC1", "AC2"]
@@ -633,7 +633,7 @@ test("proof plan rejects unsafe routes and unbounded waits", () => {
 
   assert.deepEqual(validateProofPlan(base), {
     ...base,
-    tasks: [{ ...base.tasks[0], session: "none" }]
+    tasks: [{ ...base.tasks[0], route: "/staff", session: "none" }]
   });
   assert.deepEqual(
     validateProofPlan({
@@ -652,7 +652,7 @@ test("proof plan rejects unsafe routes and unbounded waits", () => {
         }
       ]
     }).tasks[0].actions,
-    [{ type: "navigate", path: "/staff/tasks" }]
+    [{ type: "navigate", path: "/staff" }]
   );
   assert.throws(
     () =>
@@ -927,10 +927,10 @@ test("demo session plans omit only runner-owned visible sign-in actions", () => 
     ]
   });
 
-  assert.equal(plan.tasks[0].route, "/staff/tasks");
+  assert.equal(plan.tasks[0].route, "/staff");
   assert.deepEqual(plan.tasks[0].actions, [
     { type: "navigate", path: "/staff" },
-    { type: "navigate", path: "/staff/tasks" },
+    { type: "navigate", path: "/staff" },
     { type: "fill", selector: "[data-agent-proof='task-board-search']", value: "Biscuit" }
   ]);
   assert.deepEqual(plan.tasks[0].intermediateAssertions, [

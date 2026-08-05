@@ -697,10 +697,18 @@ function shellQuote(value) {
 export function visualServerCommand(
   config,
   routes,
-  { includeDeterministic = false } = {}
+  { includeDeterministic = false, proofPlan = null } = {}
 ) {
-  const taskBoardFixtures = routes.some(
-    (route) => route === "/staff" || route === "/staff/tasks"
+  const taskBoardFixtures = proofPlan?.tasks?.some((task) =>
+    [
+      ...task.actions,
+      ...task.intermediateAssertions,
+      ...task.finalAssertions
+    ].some((step) =>
+      /\[data-agent-proof\s*=\s*["']task-board(?:-[^"']+)?["']\]/.test(
+        step.selector ?? ""
+      )
+    )
   );
   const probes = routes.flatMap((route) => {
     const url = `http://127.0.0.1:3000${route}`;
@@ -1427,7 +1435,8 @@ async function executeRemoteMain(args, config) {
     const lane = request.proofKind === "GIF" ? "gifProof" : visual ? "visualProof" : "ciRemote";
     const proofCommand = visual
       ? visualServerCommand(config, request.routes, {
-          includeDeterministic: deterministic
+          includeDeterministic: deterministic,
+          proofPlan: request.proofPlan
         })
       : [config.commands.install, ...config.commands.proof].join(" && ");
     const command = exactRemoteProofCommand(config, request, proofCommand);

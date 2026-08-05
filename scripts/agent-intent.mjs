@@ -83,6 +83,11 @@ const LEGACY_PROOF_SELECTOR_ALIASES = new Map([
   [".lane .taskStack", "[data-agent-proof='task-board-lanes']"],
   [".boardGrid", "[data-agent-proof='task-board-lanes']"]
 ]);
+const PROOF_ROUTE_ALIASES = new Map([["/staff/tasks", "/staff"]]);
+
+function canonicalProofRoute(route) {
+  return PROOF_ROUTE_ALIASES.get(route) ?? route;
+}
 
 function normalizedText(value) {
   return String(value ?? "").replace(/\r\n?/g, "\n").trim();
@@ -111,7 +116,8 @@ function safeProofRoute(value, label = "proof route") {
   ) {
     throw new AgentError(`${label} is invalid`, 1);
   }
-  return route.length > 1 ? route.replace(/\/+$/, "") : route;
+  const normalized = route.length > 1 ? route.replace(/\/+$/, "") : route;
+  return canonicalProofRoute(normalized);
 }
 
 export function normalizeExplicitRoute(route) {
@@ -125,7 +131,8 @@ export function normalizeExplicitRoute(route) {
   ) {
     throw new AgentError(`unsafe or non-UI proof route: ${value}`, 2);
   }
-  return value.length > 1 ? value.replace(/\/+$/, "") : value;
+  const normalized = value.length > 1 ? value.replace(/\/+$/, "") : value;
+  return canonicalProofRoute(normalized);
 }
 
 function routeForPageFile(path) {
@@ -160,7 +167,7 @@ export function deriveAffectedRoutes(files, explicitRoute = "") {
     for (const path of candidatePaths([file])) {
       if (!path) continue;
       const route = routeForPageFile(path);
-      if (route) routes.push(route);
+      if (route) routes.push(canonicalProofRoute(route));
       if (
         /^apps\/internal\/app\/(?:layout\.[jt]sx?|globals\.css)$/.test(path)
       ) {
@@ -486,7 +493,9 @@ function contractCheckEvidenceLanes(check, contract) {
 }
 
 function contractCheckRoutes(check, contract) {
-  const allowed = new Set(contract?.routes ?? []);
+  const allowed = new Set(
+    (contract?.routes ?? []).map((route) => safeProofRoute(route))
+  );
   const routes = [];
   const statement = normalizedText(check?.statement);
   const routePattern =
@@ -494,7 +503,8 @@ function contractCheckRoutes(check, contract) {
   for (const match of statement.matchAll(routePattern)) {
     const candidate =
       match[1].length > 1 ? match[1].replace(/\/+$/, "") : match[1];
-    if (allowed.has(candidate)) routes.push(candidate);
+    const canonical = canonicalProofRoute(candidate);
+    if (allowed.has(canonical)) routes.push(canonical);
   }
   if (
     allowed.has("/") &&
