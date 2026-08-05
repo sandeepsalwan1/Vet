@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -89,6 +90,8 @@ const DELEGATED_INPUTS = new Map([
   ["noMistakesRemote", ["no-mistakes-intent", "no-mistakes-parent.bundle"]]
 ]);
 const MAX_DELEGATED_OUTPUT_BYTES = 2_500_000;
+const MAX_DELEGATED_OUTPUT_ENVELOPE_CHARS = 3_500_000;
+const DELEGATED_OUTPUT_CHUNK_CHARS = 32 * 1024;
 const MAX_DELEGATED_INPUT_BYTES = 2_500_000;
 const MAX_EXACT_PARENT_BUNDLE_BYTES = 25_000_000;
 const EXACT_PARENT_BUNDLE = "no-mistakes-parent.bundle";
@@ -504,7 +507,7 @@ export function buildRunArgs({
   return args;
 }
 
-export function emitDelegatedOutput(lane, workdir = repoRoot()) {
+function delegatedOutputEnvelope(lane, workdir = repoRoot()) {
   const delegated = DELEGATED_OUTPUTS.get(lane);
   if (!delegated) throw new AgentError(`unsupported delegated output lane: ${lane}`, 2);
   const files = {};
@@ -534,7 +537,33 @@ export function emitDelegatedOutput(lane, workdir = repoRoot()) {
     }
     files[name] = readFileSync(path).toString("base64");
   }
-  return `${delegated.marker}${JSON.stringify({ version: 1, lane, files })}`;
+  return { delegated, envelope: { version: 1, lane, files } };
+}
+
+export function delegatedOutputRecords(lane, workdir = repoRoot()) {
+  const { delegated, envelope } = delegatedOutputEnvelope(lane, workdir);
+  const payload = JSON.stringify(envelope);
+  if (payload.length > MAX_DELEGATED_OUTPUT_ENVELOPE_CHARS) {
+    throw new AgentError(`Crabbox ${lane} output envelope exceeds the handoff limit`, 1);
+  }
+  const digest = createHash("sha256").update(payload).digest("hex");
+  const chunks = [];
+  for (let offset = 0; offset < payload.length; offset += DELEGATED_OUTPUT_CHUNK_CHARS) {
+    chunks.push(payload.slice(offset, offset + DELEGATED_OUTPUT_CHUNK_CHARS));
+  }
+  const prefix = delegated.marker.trimEnd();
+  return [
+    `${prefix}_BEGIN ${chunks.length} ${digest}`,
+    ...chunks.map(
+      (chunk, index) =>
+        `${prefix}_CHUNK ${index + 1}/${chunks.length} ${chunk}`
+    ),
+    `${prefix}_END ${digest}`
+  ];
+}
+
+export function emitDelegatedOutput(lane, workdir = repoRoot()) {
+  return delegatedOutputRecords(lane, workdir).join("\n");
 }
 
 function delegatedInputFiles(lane) {
@@ -1104,14 +1133,88 @@ export function restoreDelegatedInput(lane, workdir = repoRoot()) {
   return restored;
 }
 
+function chunkedDelegatedOutputPayload(output, delegated) {
+  const lines = String(output ?? "").split(/\r?\n/);
+  const prefix = delegated.marker.trimEnd();
+  const beginPrefix = `${prefix}_BEGIN `;
+  const chunkPrefix = `${prefix}_CHUNK `;
+  const endPrefix = `${prefix}_END `;
+  const endIndex = lines.findLastIndex((line) => line.startsWith(endPrefix));
+  if (endIndex === -1) return null;
+  const digest = lines[endIndex].slice(endPrefix.length);
+  if (!/^[a-f0-9]{64}$/.test(digest)) {
+    throw new AgentError("Crabbox delegated output handoff digest is invalid", 1);
+  }
+  let beginIndex = -1;
+  let count = 0;
+  for (let index = endIndex - 1; index >= 0; index -= 1) {
+    if (!lines[index].startsWith(beginPrefix)) continue;
+    const [countText, beginDigest, extra] = lines[index]
+      .slice(beginPrefix.length)
+      .split(" ");
+    if (
+      extra === undefined &&
+      beginDigest === digest &&
+      /^[1-9]\d*$/.test(countText)
+    ) {
+      count = Number(countText);
+      beginIndex = index;
+      break;
+    }
+  }
+  if (
+    beginIndex === -1 ||
+    !Number.isSafeInteger(count) ||
+    count > Math.ceil(MAX_DELEGATED_OUTPUT_ENVELOPE_CHARS / DELEGATED_OUTPUT_CHUNK_CHARS) ||
+    endIndex - beginIndex - 1 !== count
+  ) {
+    throw new AgentError("Crabbox delegated output chunk envelope is invalid", 1);
+  }
+  const chunks = lines.slice(beginIndex + 1, endIndex).map((line, index) => {
+    if (!line.startsWith(chunkPrefix)) {
+      throw new AgentError("Crabbox delegated output chunk envelope is invalid", 1);
+    }
+    const value = line.slice(chunkPrefix.length);
+    const separator = value.indexOf(" ");
+    if (separator === -1 || value.slice(0, separator) !== `${index + 1}/${count}`) {
+      throw new AgentError("Crabbox delegated output chunk order is invalid", 1);
+    }
+    const chunk = value.slice(separator + 1);
+    if (
+      !chunk ||
+      chunk.length > DELEGATED_OUTPUT_CHUNK_CHARS ||
+      (index < count - 1 && chunk.length !== DELEGATED_OUTPUT_CHUNK_CHARS)
+    ) {
+      throw new AgentError("Crabbox delegated output chunk size is invalid", 1);
+    }
+    return chunk;
+  });
+  const payload = chunks.join("");
+  if (
+    payload.length > MAX_DELEGATED_OUTPUT_ENVELOPE_CHARS ||
+    createHash("sha256").update(payload).digest("hex") !== digest
+  ) {
+    throw new AgentError("Crabbox delegated output handoff digest mismatch", 1);
+  }
+  return payload;
+}
+
+function delegatedOutputPayload(output, delegated) {
+  const chunked = chunkedDelegatedOutputPayload(output, delegated);
+  if (chunked !== null) return chunked;
+  const markerIndex = String(output ?? "").lastIndexOf(delegated.marker);
+  if (markerIndex === -1) {
+    throw new AgentError("Crabbox delegated output has no trusted handoff marker", 1);
+  }
+  return String(output)
+    .slice(markerIndex + delegated.marker.length)
+    .split(/\r?\n/, 1)[0];
+}
+
 export function restoreDelegatedOutput(lane, output, workdir = repoRoot()) {
   const delegated = DELEGATED_OUTPUTS.get(lane);
   if (!delegated) throw new AgentError(`unsupported delegated output lane: ${lane}`, 2);
-  const markerIndex = String(output ?? "").lastIndexOf(delegated.marker);
-  if (markerIndex === -1) throw new AgentError("Crabbox delegated output has no trusted handoff marker", 1);
-  const encoded = String(output)
-    .slice(markerIndex + delegated.marker.length)
-    .split(/\r?\n/, 1)[0];
+  const encoded = delegatedOutputPayload(output, delegated);
   let envelope;
   try {
     envelope = JSON.parse(encoded);
@@ -2118,9 +2221,12 @@ export async function main() {
     const outputWorkdir = resolveCrabboxWorkdir(
       args["output-workdir"] ?? repoRoot()
     );
-    process.stdout.write(
-      `${emitDelegatedOutput(String(args["emit-output-lane"]), outputWorkdir)}\n`
-    );
+    for (const record of delegatedOutputRecords(
+      String(args["emit-output-lane"]),
+      outputWorkdir
+    )) {
+      process.stdout.write(`${record}\n`);
+    }
     return;
   }
   const config = loadConfig();

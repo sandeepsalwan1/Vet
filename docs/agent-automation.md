@@ -125,6 +125,10 @@ Submission automatically adds `agent:implement`.
 
 Delegated Codex lanes retry once when the Vercel Sandbox SDK reports its exact early-stream transport failure after remote execution started.
 All other command failures remain terminal, and the retry must still return the bounded sealed output handoff before any candidate patch is trusted.
+Delegated output is emitted as separately flushed, ordered 32 KiB records under one SHA-256 envelope so a larger patch never depends on one oversized provider-stream line.
+The receiver verifies record count, order, size, digest, lane, filenames, decoded size, and canonical encoding before restoring files; legacy one-line envelopes remain readable during migration.
+When a new trusted triage seal supersedes an older implementation on the same open agent PR, publication may replace only that GitHub Actions-authored prior-intent branch.
+Replacement starts from the new validated base, requires a different intent digest for the same issue, and uses an exact force-with-lease against the fetched old head.
 
 CLI path:
 

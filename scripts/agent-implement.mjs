@@ -1035,7 +1035,7 @@ export function alignRecoveredAgentBranch(manifest, cwd = repoRoot()) {
   });
   if (basedOnValidatedBase.status === 0) {
     if (tree === baseTree || tree === manifest.resultTree) return { action: "ready", head };
-    throw new AgentError("agent branch does not match the validated base or result tree", 1);
+    return replacePriorIntentBranch(manifest, head, cwd);
   }
 
   const mergeBase = runCommand("git", ["merge-base", "HEAD", manifest.baseSha], { cwd, check: false });
@@ -1045,7 +1045,7 @@ export function alignRecoveredAgentBranch(manifest, cwd = repoRoot()) {
   }
   const mergeBaseTree = gitOutput(["rev-parse", `${mergeBaseSha}^{tree}`], { cwd });
   if (tree !== mergeBaseTree) {
-    throw new AgentError("agent branch does not match the validated base or result tree", 1);
+    return replacePriorIntentBranch(manifest, head, cwd);
   }
 
   runCommand("git", ["merge", "--no-edit", manifest.baseSha], { cwd });
@@ -1053,6 +1053,27 @@ export function alignRecoveredAgentBranch(manifest, cwd = repoRoot()) {
     throw new AgentError("recovered agent branch did not align with the validated base", 1);
   }
   return { action: "merged-validated-base", head };
+}
+
+function replacePriorIntentBranch(manifest, head, cwd) {
+  let priorMetadata;
+  try {
+    priorMetadata = parseImplementationMetadata(
+      gitOutput(["log", "-1", "--format=%B"], { cwd })
+    );
+  } catch {
+    throw new AgentError("agent branch does not match the validated base or result tree", 1);
+  }
+  const authorEmail = gitOutput(["log", "-1", "--format=%ae"], { cwd });
+  if (
+    authorEmail !== "41898282+github-actions[bot]@users.noreply.github.com" ||
+    priorMetadata.sourceIssue !== manifest.issueNumber ||
+    priorMetadata.intentDigest === manifest.intentDigest
+  ) {
+    throw new AgentError("agent branch does not match the validated base or result tree", 1);
+  }
+  runCommand("git", ["switch", "--detach", manifest.baseSha], { cwd });
+  return { action: "replaced-prior-intent", head };
 }
 
 export function privilegedPatchPaths(paths) {
@@ -1236,7 +1257,14 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
     committed = true;
   }
   if (committed || branchAlignment.action === "merged-validated-base" || !remoteExists) {
-    runCommand("git", ["push", "origin", `HEAD:refs/heads/${branch}`], {
+    const pushArgs = ["push"];
+    if (branchAlignment.action === "replaced-prior-intent") {
+      pushArgs.push(
+        `--force-with-lease=refs/heads/${branch}:${branchAlignment.head}`
+      );
+    }
+    pushArgs.push("origin", `HEAD:refs/heads/${branch}`);
+    runCommand("git", pushArgs, {
       env: publishEnv
     });
   }
@@ -1247,6 +1275,19 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
   );
   const prLabels = implementationPullLabels(config, sealedLabels);
   addLabels(config, pull.number, prLabels, false);
+  removeLabels(
+    config,
+    pull.number,
+    [
+      config.labels.automerge,
+      config.labels.priorityHigh,
+      config.labels.priorityTrivial,
+      config.labels.priorityLow,
+      config.labels.proof,
+      config.labels.proofFailed
+    ].filter((label) => label && !prLabels.includes(label)),
+    false
+  );
   if (unresolvedQuestion) {
     addLabels(config, issueNumber, [config.labels.blocked], false);
     addLabels(config, pull.number, [config.labels.blocked], false);

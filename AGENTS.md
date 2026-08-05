@@ -48,6 +48,8 @@ Vet: one deployed Next.js app, Postgres-backed npm workspace.
 - Failure lesson: do not run `typecheck` and `build` concurrently in one checkout; both touch `.next/types` and can create transient route-validator failures.
 - Failure lesson: if no-mistakes self-update returns HTTP 403, use an authenticated checksum-verified release download, then require doctor and AXI success after daemon restart.
 - Failure lesson: Vercel delegated output can report remote success then lose the final stream; retry once only for the exact SDK early-stream signature and still require the sealed handoff marker.
+- Failure lesson: repeated early-stream loss on larger agent output needs digest-bound bounded handoff records, not more paid retries; retain the legacy reader during migration.
+- Failure lesson: resealing an implemented issue can leave its bot branch divergent; replace only a bot-authored same-issue prior intent from the new validated base with an exact force-with-lease.
 - Full operation, recovery, and exact-head approval steps: `docs/agent-automation.md`.
 
 ## Architecture Rules

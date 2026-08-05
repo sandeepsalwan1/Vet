@@ -806,6 +806,58 @@ test("remote review uses the same bounded credential-free Crabbox handoff", (t) 
   assert.equal(readFileSync(join(local, ".agent-output/review.patch"), "utf8"), "");
 });
 
+test("delegated output uses digest-bound bounded records and accepts the legacy envelope", (t) => {
+  const remote = mkdtempSync(join(tmpdir(), "vet-agent-chunked-output-"));
+  const local = mkdtempSync(join(tmpdir(), "vet-agent-chunked-local-"));
+  const legacyLocal = mkdtempSync(join(tmpdir(), "vet-agent-legacy-local-"));
+  t.after(() => {
+    rmSync(remote, { recursive: true, force: true });
+    rmSync(local, { recursive: true, force: true });
+    rmSync(legacyLocal, { recursive: true, force: true });
+  });
+  mkdirSync(join(remote, ".agent-output"));
+  const review = `${"x".repeat(100_000)}\n`;
+  writeFileSync(join(remote, ".agent-output/review.json"), review);
+  writeFileSync(join(remote, ".agent-output/review.patch"), "");
+  writeFileSync(join(remote, ".agent-output/model-usage.json"), '{"complete":true}\n');
+
+  const output = emitDelegatedOutput("reviewRemote", remote);
+  const records = output.split("\n");
+  assert.match(records[0], /^AGENT_CRABBOX_REVIEW_OUTPUT_V1_BEGIN \d+ [a-f0-9]{64}$/);
+  assert.ok(records.filter((line) => line.includes("_CHUNK ")).length > 1);
+  assert.match(records.at(-1), /^AGENT_CRABBOX_REVIEW_OUTPUT_V1_END [a-f0-9]{64}$/);
+  restoreDelegatedOutput("reviewRemote", output, local);
+  assert.equal(readFileSync(join(local, ".agent-output/review.json"), "utf8"), review);
+  assert.throws(
+    () =>
+      restoreDelegatedOutput(
+        "reviewRemote",
+        output.replace('"lane":"reviewRemote"', '"lane":"reviewRemotf"'),
+        local
+      ),
+    /digest mismatch/
+  );
+
+  const legacyEnvelope = {
+    version: 1,
+    lane: "reviewRemote",
+    files: {
+      "review.json": Buffer.from("{}\n").toString("base64"),
+      "review.patch": "",
+      "model-usage.json": Buffer.from('{"complete":true}\n').toString("base64")
+    }
+  };
+  restoreDelegatedOutput(
+    "reviewRemote",
+    `AGENT_CRABBOX_REVIEW_OUTPUT_V1 ${JSON.stringify(legacyEnvelope)}`,
+    legacyLocal
+  );
+  assert.equal(
+    readFileSync(join(legacyLocal, ".agent-output/review.json"), "utf8"),
+    "{}\n"
+  );
+});
+
 test("semantic lanes can sync a trusted sibling while restoring only into the candidate", (t) => {
   const root = mkdtempSync(join(tmpdir(), "vet-agent-semantic-root-"));
   const target = join(root, "target");
@@ -847,7 +899,7 @@ test("semantic lanes can sync a trusted sibling while restoring only into the ca
     encoding: "utf8"
   });
   assert.equal(shellRun.status, 0, shellRun.stderr);
-  assert.match(shellRun.stdout, /AGENT_CRABBOX_REVIEW_OUTPUT_V1 /);
+  assert.match(shellRun.stdout, /AGENT_CRABBOX_REVIEW_OUTPUT_V1_BEGIN /);
 
   const emitted = spawnSync(
     process.execPath,
@@ -865,7 +917,7 @@ test("semantic lanes can sync a trusted sibling while restoring only into the ca
     }
   );
   assert.equal(emitted.status, 0, emitted.stderr);
-  assert.match(emitted.stdout, /^AGENT_CRABBOX_REVIEW_OUTPUT_V1 /);
+  assert.match(emitted.stdout, /^AGENT_CRABBOX_REVIEW_OUTPUT_V1_BEGIN /);
 });
 
 test("delegated workspace seals trusted and target files into one syncable git tree", (t) => {

@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createIntentCapsule } from "./agent-intent.mjs";
-import { AgentError } from "./agent-lib.mjs";
+import { AgentError, implementationCommitMessage } from "./agent-lib.mjs";
 import {
   alignRecoveredAgentBranch,
   applyPatchIdempotently,
@@ -1167,6 +1167,78 @@ test("alignRecoveredAgentBranch rejects a divergent implementation tree", (t) =>
     () => alignRecoveredAgentBranch({ baseSha, resultTree: "0".repeat(40) }, cwd),
     /does not match the validated base or result tree/
   );
+});
+
+test("alignRecoveredAgentBranch replaces only a bot-authored prior intent for the same issue", (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "vet-agent-align-reseal-test-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  const priorIntentDigest = "1".repeat(64);
+  const nextIntentDigest = "2".repeat(64);
+
+  git("init", "-q", "-b", "main");
+  git("config", "user.name", "Test");
+  git("config", "user.email", "test@example.test");
+  writeFileSync(join(cwd, "README.md"), "base\n");
+  git("add", ".");
+  git("commit", "-qm", "base");
+  git("switch", "-qc", "agent/issue-42-test");
+  writeFileSync(join(cwd, "README.md"), "prior implementation\n");
+  git("add", ".");
+  git("config", "user.name", "github-actions[bot]");
+  git(
+    "config",
+    "user.email",
+    "41898282+github-actions[bot]@users.noreply.github.com"
+  );
+  git(
+    "commit",
+    "-qm",
+    implementationCommitMessage("chore: seal prior intent", {
+      sourceIssue: 42,
+      sourceLabels: ["priority:low"],
+      issueSnapshotSha256: "3".repeat(64),
+      intentDigest: priorIntentDigest,
+      implementationAddendumDigest: "4".repeat(64),
+      automergeEligible: true
+    })
+  );
+  git("switch", "-q", "main");
+  writeFileSync(join(cwd, "automation.txt"), "new base\n");
+  git("add", ".");
+  git("commit", "-qm", "advance base");
+  const baseSha = git("rev-parse", "HEAD");
+  const baseTree = git("rev-parse", "HEAD^{tree}");
+  git("switch", "-q", "agent/issue-42-test");
+
+  assert.throws(
+    () =>
+      alignRecoveredAgentBranch(
+        {
+          baseSha,
+          resultTree: "5".repeat(40),
+          issueNumber: 42,
+          intentDigest: priorIntentDigest
+        },
+        cwd
+      ),
+    /does not match the validated base or result tree/
+  );
+
+  const result = alignRecoveredAgentBranch(
+    {
+      baseSha,
+      resultTree: "5".repeat(40),
+      issueNumber: 42,
+      intentDigest: nextIntentDigest
+    },
+    cwd
+  );
+
+  assert.equal(result.action, "replaced-prior-intent");
+  assert.match(result.head, /^[a-f0-9]{40,64}$/);
+  assert.equal(git("rev-parse", "HEAD^{tree}"), baseTree);
+  assert.equal(git("rev-parse", "HEAD"), baseSha);
 });
 
 test("prepared validation checks both sides of a privileged rename", (t) => {
