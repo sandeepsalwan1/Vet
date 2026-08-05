@@ -21,8 +21,14 @@ test("customer landing copy uses the opening clinic panel", () => {
 test("proof loading still reaches the welcome back auth state", () => {
   const proofViewSource = readSource("../proof/loading/ProofLoadingView.tsx");
   const customerAuthSource = readSource("./auth/CustomerAuthForms.tsx");
+  const staffAuthSource = readSource("./auth/StaffAuthForms.tsx");
+  const staffTasksPageSource = readSource("../staff/tasks/page.tsx");
 
   assert.match(proofViewSource, /PROOF_DELAY_MS = 1200/);
   assert.match(proofViewSource, /return <AuthScreen audience="customer" onAuth=\{\(\) => undefined\} onOpenPasscodeBoard=\{\(\) => undefined\} \/>\;/s);
   assert.match(customerAuthSource, /Welcome back/);
+  assert.match(staffAuthSource, /data-agent-proof="signin-email"/);
+  assert.match(staffAuthSource, /dataAgentProof="signin-passcode"/);
+  assert.match(staffAuthSource, /data-agent-proof="signin-submit"/);
+  assert.match(staffTasksPageSource, /return <AppRoot audience="staff" \/>/);
 });

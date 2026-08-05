@@ -122,14 +122,15 @@ export function StaffPortal({ onAuth, onOpenPasscodeBoard }: StaffPortalProps) {
           placeholder="doctor@clinic.example"
           autoFocus
           required
+          data-agent-proof="signin-email"
         />
       </label>
       <label className="authLabel">
         Password
-        <AuthPasswordInput value={password} onChange={setPassword} />
+        <AuthPasswordInput value={password} onChange={setPassword} dataAgentProof="signin-passcode" />
       </label>
       {error && <div className="authError">{error}</div>}
-      <button className="authPrimaryBtn" type="submit" disabled={loading}>
+      <button className="authPrimaryBtn" type="submit" disabled={loading} data-agent-proof="signin-submit">
         <LogIn size={16} />
         {loading ? "Signing in..." : "Sign in"}
       </button>
