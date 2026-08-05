@@ -77,8 +77,8 @@ Security result:
 
 - The screenshots exposed the previous partner key.
 - The Registry API `partnerRekey` mutation returned a replacement key, and the replacement was verified against `partnerPractices`.
-- Datahub continued accepting the previous key immediately after rekey, and the dashboard continued displaying its cached value.
-- Do not treat the previous key as revoked until Datahub confirms its invalidation behavior or grace period.
+- Datahub continued accepting the previous key immediately after rekey while the dashboard displayed its cached value.
+- After propagation, the previous key was rejected, the replacement was accepted, and the two values were verified to differ.
 - The inbound webhook does not use the partner key, so partner-key rotation does not interrupt webhook delivery.
 
 ## What to do, in order
@@ -89,7 +89,7 @@ The supplied screenshots visibly contained the full partner API key.
 Treat that key as compromised.
 The Registry API `partnerRekey` mutation was executed on 2026-08-04.
 The replacement works and is stored in the approved Keychain location.
-The previous key remained accepted immediately afterward, so vendor confirmation is still required before production.
+The previous key remained accepted briefly during propagation and was then verified as rejected.
 
 After rotation:
 
@@ -1020,8 +1020,8 @@ Questions for Datahub support before production:
 9. How are multi-site records assigned when shared client and patient data has no site ID?
 10. Which GraphQL write operations are supported by each PIMS adapter?
 11. Why did generated `patientReminders` omit both `integrationId` and `id`, and what receipt ID should consumers return for those objects?
-12. Does `partnerRekey` revoke the previous key immediately, use a grace period, or create an additional concurrently valid key?
-13. When should the dashboard display the replacement key after `partnerRekey`?
+12. What propagation or grace interval should clients expect after `partnerRekey`?
+13. When should the dashboard refresh its displayed key after `partnerRekey`?
 14. What sandbox, onboarding, per-practice, per-site, per-PIMS, webhook-volume, and writeback pricing applies?
 
 ## Acceptance checklist
@@ -1062,7 +1062,7 @@ The later external rollout applied the migration and verified receipt/storage co
 External proof:
 
 - [x] Registry `partnerRekey` executed and replacement key verified.
-- [ ] Datahub confirms the previous exposed key is revoked or documents its grace period.
+- [x] Previous exposed key rejected after propagation.
 - [x] Migration applied to the intended database.
 - [x] Sandbox practice mapped to one isolated Vet clinic tenant.
 - [x] Receiver deployed with approved secrets.
