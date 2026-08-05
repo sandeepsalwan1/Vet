@@ -102,6 +102,29 @@ export function priorityLabel(value: TaskPriority) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+export function normalizeTaskSearch(value: string) {
+  return value.trim().toLowerCase();
+}
+
+export function taskSearchText(task: Task) {
+  return [
+    task.request,
+    task.petName,
+    task.clientName,
+    task.clarityId,
+    task.notes
+  ]
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .join(" ")
+    .toLowerCase();
+}
+
+export function filterTaskBoardTasks(tasks: Task[], query: string) {
+  const normalizedQuery = normalizeTaskSearch(query);
+  if (!normalizedQuery) return tasks;
+  return tasks.filter((task) => taskSearchText(task).includes(normalizedQuery));
+}
+
 export function formatPhone(value: string | null) {
   return formatPhoneDisplay(value);
 }
