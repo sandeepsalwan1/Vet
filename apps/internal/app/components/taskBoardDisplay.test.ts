@@ -49,10 +49,18 @@ test("task board search normalizes whitespace and case", () => {
 
 test("task board search matches task text and clears back to the original set", () => {
   const matchingTask = baseTask({ id: "task-1", petName: "Biscuit" });
-  const nonMatchingTask = baseTask({ id: "task-2", petName: "Mochi", request: "Schedule vaccines", createdAt: "2026-08-05T11:00:00.000Z", updatedAt: "2026-08-05T11:00:00.000Z" });
+  const nonMatchingTask = baseTask({
+    id: "task-2",
+    petName: "Mochi",
+    request: "Schedule vaccines",
+    notes: "Biscuit follow-up hidden in notes",
+    createdAt: "2026-08-05T11:00:00.000Z",
+    updatedAt: "2026-08-05T11:00:00.000Z"
+  });
   const tasks = [matchingTask, nonMatchingTask];
 
   assert.deepEqual(filterTaskBoardTasks(tasks, " biscuit "), [matchingTask]);
   assert.deepEqual(filterTaskBoardTasks(tasks, "  no match  "), []);
+  assert.deepEqual(filterTaskBoardTasks(tasks, "follow-up"), []);
   assert.deepEqual(filterTaskBoardTasks(tasks, ""), tasks);
 });
