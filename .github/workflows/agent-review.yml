@@ -162,7 +162,7 @@ jobs:
           --dispatch-pr-security
           --json
       - run: cp .agent/schemas/review.schema.json .agent-output/review.schema.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agent-review-context-${{ inputs.pr-number }}
           path: |
@@ -276,7 +276,7 @@ jobs:
           --remote-harness trusted/scripts/agent-crabbox-run.mjs
           --record-file "$RUNNER_TEMP/agent-review-workspace/candidate/.agent-output/review-remote.json"
           --json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agent-review-result-${{ inputs.pr-number }}
           path: |
@@ -288,7 +288,7 @@ jobs:
           if-no-files-found: error
       - name: Upload redacted remote diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-review-remote-diagnostics-${{ inputs.pr-number }}
           path: |
