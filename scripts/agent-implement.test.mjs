@@ -28,6 +28,7 @@ import {
   preferredBranchName,
   privilegedPatchPaths,
   readValidationFeedback,
+  replacementRepairLedger,
   runPatchValidationChecks,
   selectExistingPull,
   upsertPullRequest,
@@ -1239,6 +1240,29 @@ test("alignRecoveredAgentBranch replaces only a bot-authored prior intent for th
   assert.match(result.head, /^[a-f0-9]{40,64}$/);
   assert.equal(git("rev-parse", "HEAD^{tree}"), baseTree);
   assert.equal(git("rev-parse", "HEAD"), baseSha);
+});
+
+test("a safely replaced prior intent starts a fresh shared repair ledger", () => {
+  const intentDigest = "6".repeat(64);
+
+  assert.deepEqual(
+    replacementRepairLedger(
+      { action: "replaced-prior-intent" },
+      intentDigest
+    ),
+    {
+      version: 1,
+      intentDigest,
+      revisionCount: 0,
+      revisions: [],
+      evaluations: [],
+      findings: []
+    }
+  );
+  assert.equal(
+    replacementRepairLedger({ action: "ready" }, intentDigest),
+    null
+  );
 });
 
 test("prepared validation checks both sides of a privileged rename", (t) => {

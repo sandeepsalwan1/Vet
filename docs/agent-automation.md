@@ -123,7 +123,8 @@ Explicit proofless or CI-only wording also prevents database, migration, deploym
 Positive live, disposable-service, migration, deployment, or integration evidence still selects the service lane.
 Submission automatically adds `agent:implement`.
 
-Delegated Codex lanes retry once when the Vercel Sandbox SDK reports its exact early-stream transport failure after remote execution started.
+Delegated Vercel Codex lanes emit a bounded heartbeat while the remote command runs so an idle SDK connection cannot hide a completed command.
+They retry once when the Vercel Sandbox SDK reports an exact early-stream or bridge-socket transport failure after remote execution started.
 All other command failures remain terminal, and the retry must still return the bounded sealed output handoff before any candidate patch is trusted.
 Delegated output is emitted as separately flushed, ordered 32 KiB records under one SHA-256 envelope so a larger patch never depends on one oversized provider-stream line.
 The receiver verifies record count, order, size, digest, lane, filenames, decoded size, and canonical encoding before restoring files; legacy one-line envelopes remain readable during migration.
@@ -152,6 +153,7 @@ That exact reply resumes zero-model triage automatically, is frozen as untrusted
 Bot replies, non-owner replies, stale comments, duplicate replies, and pull-request comments do not resume work.
 Implementation validates the patch, performs at most one focused unpublished repair when deterministic checks fail, creates `agent/issue-<number>-<slug>`, opens or updates a draft PR, starts exact-head CI, and starts review.
 Review can apply a safe patch, reruns exact-head CI and review until clean within the shared three-revision ledger, requests proof when needed, publishes `agent-review`, then starts no-mistakes.
+When a same-issue bot branch is safely replaced for a newly sealed intent, the publisher resets its shared repair ledger before dispatching review.
 After model review, a credential-free deterministic repair removes extra blank lines at EOF only when `git diff --check` identifies them in a safe, non-privileged text file.
 Malformed no-mistakes output retries once inside the same isolated run on the unchanged head.
 no-mistakes uses the full issue plus trusted triage as authoritative implementation intent, reviews the branch, and applies safe native fixes when possible.
