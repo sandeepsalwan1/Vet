@@ -39,6 +39,7 @@ Rules:
   Use stable accessible or `data-agent-proof` selectors, local routes, non-secret test values, and the fewest steps that exercise the real behavior.
   Set every browser task `session` explicitly.
   Use `demo-admin`, `demo-staff`, `demo-veterinarian`, or `demo-customer` only when the protected behavior needs that visible demo login; otherwise use `none`.
+  The proof runner performs that visible demo login before task actions; never repeat sign-in fill or submit actions in the proof plan.
   Use CSS selectors for `click` and `fill`.
   Use `clickText` with a CSS element selector plus visible text instead of Playwright-only selectors such as `:has-text(...)`.
   Before clicking a save or submit control, include the actual form-control change that enables the action.

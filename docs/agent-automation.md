@@ -261,6 +261,7 @@ The trusted behavior contract comes from the sealed issue and implementation add
 The browser driver receives only routes, actions, selectors, and assertions, not source code.
 Every browser task declares `session: none` or one bounded visible demo role.
 Protected staff interactions require a staff-capable demo session.
+The runner performs visible demo login setup before task actions and deterministically removes only its own exact sign-in hook actions from legacy or generated plans.
 Demo authentication must remain present after every planned navigation, with the account session, task-board session, and rendered authenticated surface agreeing on the role.
 A lost session fails before the next selector with the affected role and route in the diagnostic.
 `click` and `fill` use executable CSS selectors; `clickText` selects a CSS element type and visible text without Playwright-only selector syntax.

@@ -266,6 +266,19 @@ function proofTaskSession(task) {
   return task.session;
 }
 
+function runnerOwnedDemoSessionAction(action, session) {
+  if (!session || session === "none") return false;
+  const selector = String(action?.selector ?? "").replace(/\s+/g, "");
+  const match = selector.match(
+    /^\[data-agent-proof=(?:(['"])(signin-email|signin-passcode|signin-submit)\1|(signin-email|signin-passcode|signin-submit))\]$/
+  );
+  const hook = match?.[2] ?? match?.[3];
+  return (
+    (action.type === "fill" && ["signin-email", "signin-passcode"].includes(hook)) ||
+    (action.type === "click" && hook === "signin-submit")
+  );
+}
+
 function mutatesForm(action) {
   if (action.type === "fill") return true;
   if (!["click", "clickText"].includes(action.type)) return false;
@@ -391,10 +404,13 @@ export function validateProofPlan(plan) {
           throw new AgentError(`implementation proof task ${field} is invalid`, 1);
         }
       }
+      const actions = task.actions.map(validateProofAction);
       const normalized = {
         clauseIds: task.clauseIds,
         route: safeProofRoute(task.route),
-        actions: task.actions.map(validateProofAction),
+        actions: actions.filter(
+          (action) => !runnerOwnedDemoSessionAction(action, session)
+        ),
         intermediateAssertions: task.intermediateAssertions.map(validateProofAssertion),
         finalAssertions: task.finalAssertions.map(validateProofAssertion)
       };

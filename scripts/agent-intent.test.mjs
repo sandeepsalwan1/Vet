@@ -863,3 +863,30 @@ test("browser proof plans declare protected sessions and executable interactions
     /must be CSS/
   );
 });
+
+test("demo session plans omit only runner-owned visible sign-in actions", () => {
+  const plan = validateProofPlan({
+    version: 1,
+    tasks: [
+      {
+        clauseIds: ["AC1"],
+        route: "/staff",
+        session: "demo-staff",
+        actions: [
+          { type: "fill", selector: "[data-agent-proof='signin-email']", value: "staff@clinic.demo" },
+          { type: "fill", selector: "[data-agent-proof=signin-passcode]", value: "staff1234" },
+          { type: "click", selector: "[data-agent-proof=\"signin-submit\"]" },
+          { type: "fill", selector: "[data-agent-proof='task-board-search']", value: "Biscuit" }
+        ],
+        intermediateAssertions: [],
+        finalAssertions: [
+          { type: "visible", selector: "[data-agent-proof='task-board-search-summary']" }
+        ]
+      }
+    ]
+  });
+
+  assert.deepEqual(plan.tasks[0].actions, [
+    { type: "fill", selector: "[data-agent-proof='task-board-search']", value: "Biscuit" }
+  ]);
+});

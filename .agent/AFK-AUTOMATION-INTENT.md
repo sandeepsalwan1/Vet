@@ -860,6 +860,7 @@ Proof must demonstrate the user's requested behavior, not only that an artifact 
 Derive proof steps from the sealed intent before implementation.
 Every browser task must declare whether it uses no session or one bounded visible demo role.
 Protected staff interactions require a matching staff-capable demo session.
+The proof runner owns visible demo login setup before task actions, so model plans must not repeat sign-in fill or submit actions.
 Click and fill selectors must be executable CSS, while visible-text clicks use the explicit text-click action.
 A save or submit proof must change the relevant form control before invoking the action.
 An existing static route may be used by the proof plan without changing an unrelated page file merely to make the route appear affected.
