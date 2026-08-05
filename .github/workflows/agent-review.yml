@@ -100,7 +100,7 @@ jobs:
           fi
           printf 'base-sha=%s\n' "$base_sha" >> "$GITHUB_OUTPUT"
           printf 'head-sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: main
           persist-credentials: false
@@ -185,12 +185,12 @@ jobs:
       pull-requests: read
       issues: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.workflow_sha }}
           path: trusted
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare-review.outputs.reviewed-head-sha }}
           path: target
@@ -315,7 +315,7 @@ jobs:
     outputs:
       next-gate: ${{ steps.apply.outputs.next-gate }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
@@ -486,7 +486,7 @@ jobs:
       pull-requests: write
       statuses: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: main
           persist-credentials: false
