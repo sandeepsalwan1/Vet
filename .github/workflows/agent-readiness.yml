@@ -30,7 +30,7 @@ jobs:
     name: zero-model readiness
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.expected-head-sha || github.sha }}
           fetch-depth: 0
