@@ -50,6 +50,8 @@ Vet: one deployed Next.js app, Postgres-backed npm workspace.
 - Failure lesson: Vercel delegated output can report remote success then lose the final stream; retry once only for the exact SDK early-stream signature and still require the sealed handoff marker.
 - Failure lesson: repeated early-stream loss on larger agent output needs digest-bound bounded handoff records, not more paid retries; retain the legacy reader during migration.
 - Failure lesson: resealing an implemented issue can leave its bot branch divergent; replace only a bot-authored same-issue prior intent from the new validated base with an exact force-with-lease.
+- Failure lesson: a long Vercel command can finish before an idle SDK socket closes; emit a bounded heartbeat, retry the exact bridge socket signature once, and never classify it as a model failure.
+- Failure lesson: replacing a prior sealed intent must reset that pull request's shared repair ledger before review; old-intent evaluations are invalid for the new seal.
 - Full operation, recovery, and exact-head approval steps: `docs/agent-automation.md`.
 
 ## Architecture Rules

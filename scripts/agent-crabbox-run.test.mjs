@@ -17,6 +17,7 @@ import {
   emitImplementationOutput,
   gifArtifactArgs,
   gifEncoderBootstrapCommands,
+  isRetryableVercelStreamFailure,
   parseTimingReport,
   parseBrowserBehaviorObservation,
   parseBrowserCaptures,
@@ -445,6 +446,32 @@ process.stdout.write(JSON.stringify({
   );
 });
 
+test("Vercel bridge socket termination is retryable only for the exact transport signature", () => {
+  const bridgeFailure = {
+    status: 1,
+    stderr: `vercel-sandbox SDK bridge failed: exit status 1
+TypeError: terminated
+[cause]: SocketError: other side closed
+code: 'UND_ERR_SOCKET'`
+  };
+
+  assert.equal(
+    isRetryableVercelStreamFailure("vercel-sandbox", bridgeFailure),
+    true
+  );
+  assert.equal(
+    isRetryableVercelStreamFailure("vercel-sandbox", {
+      status: 1,
+      stderr: "TypeError: terminated"
+    }),
+    false
+  );
+  assert.equal(
+    isRetryableVercelStreamFailure("hetzner", bridgeFailure),
+    false
+  );
+});
+
 test("Crabbox child receives only selected provider auth and readiness", () => {
   const source = {
     PATH: "/usr/bin",
@@ -733,6 +760,8 @@ test("Vercel implementation uses a bounded stdout handoff instead of unsupported
   );
   assert.equal(vercelArgs.includes("--download"), false);
   assert.match(vercelArgs.at(-1), /AGENT_CRABBOX_REMOTE_COMMAND_STARTED_V1/);
+  assert.match(vercelArgs.at(-1), /AGENT_CRABBOX_REMOTE_HEARTBEAT_V1/);
+  assert.match(vercelArgs.at(-1), /setInterval/);
   assert.match(
     vercelArgs.at(-1),
     /--emit-output-lane implementRemote --output-workdir "\$agent_crabbox_root\/\."$/

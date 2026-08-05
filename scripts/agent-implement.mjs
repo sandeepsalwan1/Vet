@@ -48,6 +48,10 @@ import {
   validateIntentCapsule,
   validateProofPlan
 } from "./agent-intent.mjs";
+import {
+  emptyRepairLedger,
+  saveRepairLedger
+} from "./agent-repair-ledger.mjs";
 
 const IMPLEMENTATION_PROOF_PLAN_CHECK =
   "trusted implementation proof-plan validation";
@@ -1076,6 +1080,12 @@ function replacePriorIntentBranch(manifest, head, cwd) {
   return { action: "replaced-prior-intent", head };
 }
 
+export function replacementRepairLedger(branchAlignment, intentDigest) {
+  return branchAlignment?.action === "replaced-prior-intent"
+    ? emptyRepairLedger(intentDigest)
+    : null;
+}
+
 export function privilegedPatchPaths(paths) {
   return privilegedCandidatePaths(paths);
 }
@@ -1273,6 +1283,17 @@ export function applyPatchAndOpenPr(config, issueNumber, patchPath, codexOutputP
     { config, issue, branch, codexOutput, metadata, existingPull },
     { publisherEnvironment: () => publishEnv }
   );
+  const resetLedger = replacementRepairLedger(
+    branchAlignment,
+    capsule.intentDigest
+  );
+  if (resetLedger) {
+    saveRepairLedger({
+      config,
+      prNumber: pull.number,
+      ledger: resetLedger
+    });
+  }
   const prLabels = implementationPullLabels(config, sealedLabels);
   addLabels(config, pull.number, prLabels, false);
   removeLabels(

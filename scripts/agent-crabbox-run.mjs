@@ -41,6 +41,7 @@ import {
 const VISUAL_LANES = new Set(["visualProof", "gifProof"]);
 const FALLBACK_READINESS_LANE = "fallbackReadinessRemote";
 const REMOTE_COMMAND_STARTED_MARKER = "AGENT_CRABBOX_REMOTE_COMMAND_STARTED_V1";
+const REMOTE_HEARTBEAT_MARKER = "AGENT_CRABBOX_REMOTE_HEARTBEAT_V1";
 const LOCAL_CONTAINER_VISUAL_IMAGE =
   "node:22-bookworm@sha256:5647be709086c696ff32edaaf1c70cd26d1da6ab2b39c32f3c7b4c4a31957e37";
 const DELEGATED_OUTPUTS = new Map([
@@ -482,9 +483,19 @@ export function buildRunArgs({
       "1800"
     );
   }
+  const commandWithHeartbeat =
+    provider === "vercel-sandbox"
+      ? `( node -e 'setInterval(() => process.stdout.write("${REMOTE_HEARTBEAT_MARKER}\\\\n"), 15000)' & ` +
+        `agent_crabbox_heartbeat_pid=$!; ` +
+        `trap 'kill "$agent_crabbox_heartbeat_pid" 2>/dev/null || true' EXIT HUP INT TERM; ` +
+        `agent_crabbox_status=0; ( ${command} ) || agent_crabbox_status=$?; ` +
+        `kill "$agent_crabbox_heartbeat_pid" 2>/dev/null || true; ` +
+        `wait "$agent_crabbox_heartbeat_pid" 2>/dev/null || true; ` +
+        `trap - EXIT HUP INT TERM; exit "$agent_crabbox_status" )`
+      : `( ${command} )`;
   let remoteCommand =
     `agent_crabbox_root="$PWD"; printf '${REMOTE_COMMAND_STARTED_MARKER}\\n' && ` +
-    `( ${command} )`;
+    commandWithHeartbeat;
   if (provider === "local-container") args.push("--local-container-image", LOCAL_CONTAINER_VISUAL_IMAGE);
   if (noSync) args.push("--no-sync");
   const delegated = DELEGATED_OUTPUTS.get(lane);
@@ -2039,14 +2050,21 @@ function providerAttemptSummary(result) {
   };
 }
 
-function isRetryableVercelStreamFailure(provider, run) {
+export function isRetryableVercelStreamFailure(provider, run) {
   const stderr = String(run?.stderr ?? "");
+  const exactEarlyStreamFailure =
+    stderr.includes("@vercel/sandbox") &&
+    stderr.includes("StreamError: Stream ended before command finished") &&
+    stderr.includes("code: 'stream_ended_early'");
+  const exactBridgeSocketFailure =
+    /vercel-sandbox (?:SDK )?bridge(?: exec)? failed:/i.test(stderr) &&
+    stderr.includes("TypeError: terminated") &&
+    (stderr.includes("UND_ERR_SOCKET") ||
+      stderr.includes("SocketError: other side closed"));
   return (
     provider === "vercel-sandbox" &&
     run?.status !== 0 &&
-    stderr.includes("@vercel/sandbox") &&
-    stderr.includes("StreamError: Stream ended before command finished") &&
-    stderr.includes("code: 'stream_ended_early'")
+    (exactEarlyStreamFailure || exactBridgeSocketFailure)
   );
 }
 
