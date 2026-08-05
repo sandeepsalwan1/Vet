@@ -2,13 +2,16 @@ import { NextResponse } from "next/server";
 import { dbError, noStoreHeaders } from "../_apiResponse";
 import { resolveClinicFromRequest } from "../_shared";
 import { getClientJourneySettings } from "@central-vet/db";
+import { agentProofFixturesEnabled } from "../_agentProofFixtures";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
     const clinic = await resolveClinicFromRequest(request);
-    const journey = await getClientJourneySettings({ clinicId: clinic.clinicId });
+    const journey = agentProofFixturesEnabled(request)
+      ? { publicName: clinic.name }
+      : await getClientJourneySettings({ clinicId: clinic.clinicId });
     return NextResponse.json({
       clinic: {
         ...clinic,

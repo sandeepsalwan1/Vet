@@ -10,6 +10,10 @@ import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createStatusForActor, sourceForActor } from "../../lib/taskWorkflow";
+import {
+  agentProofCreateTask,
+  agentProofFixturesEnabled
+} from "../_agentProofFixtures";
 import { logInfo, logWarn } from "../_apiResponse";
 import {
   authenticateActor,
@@ -189,12 +193,15 @@ export async function taskCreateResponse(request: Request) {
     task: taskResult.data
   });
 
-  const guardError = await internalTaskCreateGuard({
-    clinicId: clinic.clinicId,
-    request,
-    actor,
-    task: taskResult.data
-  });
+  const fixtureMode = agentProofFixturesEnabled(request);
+  const guardError = fixtureMode
+    ? null
+    : await internalTaskCreateGuard({
+        clinicId: clinic.clinicId,
+        request,
+        actor,
+        task: taskResult.data
+      });
   if (guardError) {
     logWarn("task_create_rejected", {
       reason: "internal_guard",
@@ -203,7 +210,9 @@ export async function taskCreateResponse(request: Request) {
     return NextResponse.json({ error: guardError }, { status: 429 });
   }
 
-  const task = await createTask(input, actor);
+  const task = fixtureMode
+    ? agentProofCreateTask(clinic, input, actor)
+    : await createTask(input, actor);
   logInfo("task_created", {
     taskId: task.id,
     actorRole: actor.role,

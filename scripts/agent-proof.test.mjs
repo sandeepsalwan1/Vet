@@ -256,11 +256,11 @@ test("affected routes derive only from concrete changed Next.js pages", () => {
     { filename: "apps/internal/app/records/page.tsx", status: "removed" }
   ]);
 
-  assert.deepEqual(routes, ["/new", "/old", "/request", "/staff/tasks"]);
+  assert.deepEqual(routes, ["/new", "/old", "/request", "/staff"]);
 });
 
 test("explicit visual route is local, static, and normalized", () => {
-  assert.deepEqual(deriveAffectedRoutes([], "/staff/tasks/"), ["/staff/tasks"]);
+  assert.deepEqual(deriveAffectedRoutes([], "/staff/tasks/"), ["/staff"]);
   assert.throws(() => deriveAffectedRoutes([], "https://example.com"), /unsafe or non-UI/);
   assert.throws(() => deriveAffectedRoutes([], "/api/tasks"), /unsafe or non-UI/);
 });
@@ -357,14 +357,17 @@ test("visual behavior plan covers every sealed clause and GIF transition", () =>
     ]
   };
 
-  assert.equal(
+  assert.deepEqual(
     validateVisualBehaviorPlan({
       proofKind: "GIF",
       routes: ["/proof/loading"],
       behaviorContract,
       proofPlan
     }),
-    proofPlan
+    {
+      ...proofPlan,
+      tasks: [{ ...proofPlan.tasks[0], session: "none" }]
+    }
   );
   assert.throws(
     () =>
@@ -544,21 +547,24 @@ test("browser plans cover browser clauses while final proof combines determinist
       }
     ]
   };
-  assert.equal(
+  assert.deepEqual(
     validateVisualBehaviorPlan({
       proofKind: "UI",
-      routes: ["/staff/tasks"],
+      routes: ["/staff"],
       behaviorContract,
       proofPlan,
       evidenceLanes: ["deterministic", "browser"]
     }),
-    proofPlan
+    {
+      ...proofPlan,
+      tasks: [{ ...proofPlan.tasks[0], route: "/staff", session: "none" }]
+    }
   );
   assert.throws(
     () =>
       validateVisualBehaviorPlan({
         proofKind: "UI",
-        routes: ["/staff/tasks"],
+        routes: ["/staff"],
         behaviorContract,
         proofPlan: {
           ...proofPlan,
@@ -574,7 +580,7 @@ test("browser plans cover browser clauses while final proof combines determinist
     number: 12,
     requested: true,
     proofKind: "UI",
-    routes: ["/staff/tasks"],
+    routes: ["/staff"],
     sha: "a".repeat(40),
     checkoutRef: "a".repeat(40),
     intentDigest: "b".repeat(64),
@@ -999,19 +1005,76 @@ test("untrusted proof commands receive no GitHub, OpenAI, Crabbox, or provider c
 });
 
 test("visual server command requires a direct 2xx from every route before claiming readiness", () => {
+  const taskBoardPlan = {
+    version: 1,
+    tasks: [{
+      actions: [],
+      intermediateAssertions: [],
+      finalAssertions: [{
+        type: "visible",
+        selector: "[data-agent-proof='task-board-lanes']"
+      }]
+    }]
+  };
   const command = visualServerCommand(
     { commands: { install: "npm ci", build: "npm run build" } },
-    ["/request", "/staff/tasks"]
+    ["/request", "/staff"],
+    { proofPlan: taskBoardPlan }
   );
 
   assert.match(command, /http:\/\/127\.0\.0\.1:3000\/request/);
-  assert.match(command, /http:\/\/127\.0\.0\.1:3000\/staff\/tasks/);
+  assert.match(command, /http:\/\/127\.0\.0\.1:3000\/staff/);
   assert.match(command, /AGENT_PROOF_ROUTE_OK \/request/);
-  assert.match(command, /AGENT_PROOF_ROUTE_OK \/staff\/tasks/);
+  assert.match(command, /AGENT_PROOF_ROUTE_OK \/staff/);
+  assert.match(command, /AGENT_PROOF_FIXTURES=task-board/);
   assert.match(command, /%\{http_code\}/);
   assert.match(command, /2\?\?/);
   assert.equal(command.includes(" -L"), false);
   assert.equal(command.includes("then exit 0"), false);
+
+  const requestOnlyCommand = visualServerCommand(
+    { commands: { install: "npm ci", build: "npm run build" } },
+    ["/request"]
+  );
+  assert.equal(requestOnlyCommand.includes("AGENT_PROOF_FIXTURES"), false);
+
+  const staffSettingsCommand = visualServerCommand(
+    { commands: { install: "npm ci", build: "npm run build" } },
+    ["/staff"],
+    {
+      proofPlan: {
+        version: 1,
+        tasks: [{
+          actions: [{
+            type: "click",
+            selector: "[data-agent-proof='settings-open']"
+          }],
+          intermediateAssertions: [],
+          finalAssertions: [{ type: "visible", selector: "main" }]
+        }]
+      }
+    }
+  );
+  assert.equal(staffSettingsCommand.includes("AGENT_PROOF_FIXTURES"), false);
+
+  const unquotedTaskBoardCommand = visualServerCommand(
+    { commands: { install: "npm ci", build: "npm run build" } },
+    ["/staff"],
+    {
+      proofPlan: {
+        version: 1,
+        tasks: [{
+          actions: [],
+          intermediateAssertions: [],
+          finalAssertions: [{
+            type: "visible",
+            selector: "[data-agent-proof = 'task-board-lanes' ]"
+          }]
+        }]
+      }
+    }
+  );
+  assert.match(unquotedTaskBoardCommand, /AGENT_PROOF_FIXTURES=task-board/);
 });
 
 test("remote PR command fetches and verifies the exact prepared head inside Crabbox", () => {

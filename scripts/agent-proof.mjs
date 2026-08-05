@@ -50,6 +50,7 @@ import {
   intentCapsuleForManagedTriage,
   normalizeExplicitRoute,
   parseImplementationAddendum,
+  proofSelectorHooks,
   validateBrowserProofPlan,
   validateProofPlan
 } from "./agent-intent.mjs";
@@ -697,8 +698,19 @@ function shellQuote(value) {
 export function visualServerCommand(
   config,
   routes,
-  { includeDeterministic = false } = {}
+  { includeDeterministic = false, proofPlan = null } = {}
 ) {
+  const taskBoardFixtures = proofPlan?.tasks?.some((task) =>
+    [
+      ...task.actions,
+      ...task.intermediateAssertions,
+      ...task.finalAssertions
+    ].some((step) =>
+      proofSelectorHooks(step.selector).some(
+        (hook) => hook === "task-board" || hook.startsWith("task-board-")
+      )
+    )
+  );
   const probes = routes.flatMap((route) => {
     const url = `http://127.0.0.1:3000${route}`;
     return [
@@ -719,7 +731,7 @@ export function visualServerCommand(
     ...(includeDeterministic
       ? ["echo AGENT_PROOF_DETERMINISTIC_OK"]
       : []),
-    "(nohup npm --workspace @central-vet/internal run start -- --port 3000 --hostname 127.0.0.1 >/tmp/vet-agent-proof-next.log 2>&1 </dev/null &)",
+    `(nohup ${taskBoardFixtures ? "env AGENT_PROOF_FIXTURES=task-board " : ""}npm --workspace @central-vet/internal run start -- --port 3000 --hostname 127.0.0.1 >/tmp/vet-agent-proof-next.log 2>&1 </dev/null &)`,
     ...probes
   ].join("; ");
 }
@@ -1424,7 +1436,8 @@ async function executeRemoteMain(args, config) {
     const lane = request.proofKind === "GIF" ? "gifProof" : visual ? "visualProof" : "ciRemote";
     const proofCommand = visual
       ? visualServerCommand(config, request.routes, {
-          includeDeterministic: deterministic
+          includeDeterministic: deterministic,
+          proofPlan: request.proofPlan
         })
       : [config.commands.install, ...config.commands.proof].join(" && ");
     const command = exactRemoteProofCommand(config, request, proofCommand);

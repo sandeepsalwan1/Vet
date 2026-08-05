@@ -44,6 +44,7 @@ import {
 } from "./agent-intent.mjs";
 import {
   MAX_SEMANTIC_REVISIONS,
+  MAX_TOTAL_REVISIONS,
   loadRepairLedger,
   openRepairFindings,
   recordRepairEvaluation,
@@ -54,7 +55,7 @@ import {
 } from "./agent-repair-ledger.mjs";
 
 export const MAX_REVIEW_DIFF_BYTES = 50000;
-export const MAX_REVIEW_REPAIR_ATTEMPTS = MAX_SEMANTIC_REVISIONS;
+export const MAX_REVIEW_REPAIR_ATTEMPTS = MAX_TOTAL_REVISIONS;
 export const REVIEW_WORKFLOW_FAILURE_MARKER = "<!-- agent-review-workflow-failure:v1 -->";
 export const REVIEW_BLOCKER_OWNERSHIP_MARKER = "<!-- agent-review-blocker:v1";
 
@@ -1196,7 +1197,10 @@ function applyReview(
   let patchApplied = false;
   let patchRejectedByBudget = false;
 
-  if (hasPatch && repairLedger.revisionCount >= MAX_SEMANTIC_REVISIONS) {
+  const repairLimit = proofFindings.length
+    ? MAX_TOTAL_REVISIONS
+    : MAX_SEMANTIC_REVISIONS;
+  if (hasPatch && repairLedger.revisionCount >= repairLimit) {
     patchRejectedByBudget = true;
     review.bugsFound.push("The shared semantic repair budget is exhausted.");
     review.mergeRecommendation = "blocked";
@@ -1289,6 +1293,8 @@ function applyReview(
       fromHead: pull.head.sha,
       toHead: statusSha,
       findingDigest: evaluation.findingDigest,
+    }, {
+      allowProofRecovery: proofFindings.length > 0,
     }).ledger;
   }
   const cycle = reviewCycleDecision(review, {

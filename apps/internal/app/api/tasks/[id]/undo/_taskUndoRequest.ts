@@ -2,6 +2,10 @@ import { undoLastStatusChange } from "@central-vet/db";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { canManage } from "../../../../lib/taskWorkflow";
+import {
+  agentProofFixturesEnabled,
+  agentProofUndoLastStatusChange
+} from "../../../_agentProofFixtures";
 import { logInfo, logWarn } from "../../../_apiResponse";
 import {
   authenticateActor,
@@ -44,7 +48,9 @@ export async function taskUndoResponse(args: {
   }
 
   const actor = auth.actor;
-  const task = await undoLastStatusChange(args.id, actor, { clinicId: clinic.clinicId });
+  const task = agentProofFixturesEnabled(args.request)
+    ? agentProofUndoLastStatusChange(clinic, args.id, actor)
+    : await undoLastStatusChange(args.id, actor, { clinicId: clinic.clinicId });
   if (task) {
     logInfo("task_updated", {
       taskId: args.id,

@@ -2,6 +2,7 @@ import { listTaskEvents } from "@central-vet/db";
 import { NextResponse } from "next/server";
 import { canManage } from "../../lib/taskWorkflow";
 import { logWarn } from "../_apiResponse";
+import { agentProofFixturesEnabled } from "../_agentProofFixtures";
 import {
   authenticateActorFromQuery,
   resolveClinicFromRequest
@@ -21,6 +22,8 @@ export async function eventListPayload(request: Request) {
       response: NextResponse.json({ error: "Audit log requires VA, Veterinarian, or Admin." }, { status: 403 })
     };
   }
+
+  if (agentProofFixturesEnabled(request)) return { events: [] };
 
   return {
     events: await listTaskEvents(80, { clinicId: clinic.clinicId })
