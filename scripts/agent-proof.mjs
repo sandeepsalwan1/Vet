@@ -50,6 +50,7 @@ import {
   intentCapsuleForManagedTriage,
   normalizeExplicitRoute,
   parseImplementationAddendum,
+  proofSelectorHooks,
   validateBrowserProofPlan,
   validateProofPlan
 } from "./agent-intent.mjs";
@@ -705,8 +706,8 @@ export function visualServerCommand(
       ...task.intermediateAssertions,
       ...task.finalAssertions
     ].some((step) =>
-      /\[data-agent-proof\s*=\s*(?:["']task-board(?:-[^"']+)?["']|task-board(?:-[^\]\s]+)?)\]/.test(
-        step.selector ?? ""
+      proofSelectorHooks(step.selector).some(
+        (hook) => hook === "task-board" || hook.startsWith("task-board-")
       )
     )
   );

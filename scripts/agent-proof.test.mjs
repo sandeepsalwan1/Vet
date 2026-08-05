@@ -1068,7 +1068,7 @@ test("visual server command requires a direct 2xx from every route before claimi
           intermediateAssertions: [],
           finalAssertions: [{
             type: "visible",
-            selector: "[data-agent-proof=task-board-lanes]"
+            selector: "[data-agent-proof = 'task-board-lanes' ]"
           }]
         }]
       }

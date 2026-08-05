@@ -84,6 +84,28 @@ const LEGACY_PROOF_SELECTOR_ALIASES = new Map([
   [".boardGrid", "[data-agent-proof='task-board-lanes']"]
 ]);
 const PROOF_ROUTE_ALIASES = new Map([["/staff/tasks", "/staff"]]);
+const DATA_AGENT_PROOF_HOOK_PATTERN =
+  /\[data-agent-proof\s*=\s*(?:(["'])([^"']+)\1|([^\]\s"']+))\s*\]/g;
+
+function proofSelectorHookMatches(value) {
+  return [...String(value ?? "").matchAll(DATA_AGENT_PROOF_HOOK_PATTERN)].map(
+    (match) => ({ hook: match[2] ?? match[3], index: match.index, text: match[0] })
+  );
+}
+
+export function proofSelectorHooks(value) {
+  return proofSelectorHookMatches(value).map((match) => match.hook);
+}
+
+function exactProofSelectorHook(value) {
+  const selector = String(value ?? "").trim();
+  const matches = proofSelectorHookMatches(selector);
+  return matches.length === 1 &&
+    matches[0].index === 0 &&
+    matches[0].text.length === selector.length
+    ? matches[0].hook
+    : null;
+}
 
 function canonicalProofRoute(route) {
   return PROOF_ROUTE_ALIASES.get(route) ?? route;
@@ -323,11 +345,7 @@ function proofTaskSession(task) {
 
 function runnerOwnedDemoSessionAction(action, session) {
   if (!session || session === "none") return false;
-  const selector = String(action?.selector ?? "").replace(/\s+/g, "");
-  const match = selector.match(
-    /^\[data-agent-proof=(?:(['"])(signin-email|signin-passcode|signin-submit)\1|(signin-email|signin-passcode|signin-submit))\]$/
-  );
-  const hook = match?.[2] ?? match?.[3];
+  const hook = exactProofSelectorHook(action?.selector);
   return (
     (action.type === "fill" && ["signin-email", "signin-passcode"].includes(hook)) ||
     (action.type === "click" && hook === "signin-submit")
