@@ -78,6 +78,38 @@ const MAX_IMPLEMENTATION_ITEM_BYTES = 2_000;
 const MAX_PROOF_TASKS = 20;
 const MAX_PROOF_STEPS = 20;
 const MAX_PROOF_VALUE_BYTES = 1_000;
+const LEGACY_PROOF_SELECTOR_ALIASES = new Map([
+  [".miniConfetti", "[data-agent-proof='mini-confetti']"],
+  [".lane .taskStack", "[data-agent-proof='task-board-lanes']"],
+  [".boardGrid", "[data-agent-proof='task-board-lanes']"]
+]);
+const PROOF_ROUTE_ALIASES = new Map([["/staff/tasks", "/staff"]]);
+const DATA_AGENT_PROOF_HOOK_PATTERN =
+  /\[data-agent-proof\s*=\s*(?:(["'])([^"']+)\1|([^\]\s"']+))\s*\]/g;
+
+function proofSelectorHookMatches(value) {
+  return [...String(value ?? "").matchAll(DATA_AGENT_PROOF_HOOK_PATTERN)].map(
+    (match) => ({ hook: match[2] ?? match[3], index: match.index, text: match[0] })
+  );
+}
+
+export function proofSelectorHooks(value) {
+  return proofSelectorHookMatches(value).map((match) => match.hook);
+}
+
+function exactProofSelectorHook(value) {
+  const selector = String(value ?? "").trim();
+  const matches = proofSelectorHookMatches(selector);
+  return matches.length === 1 &&
+    matches[0].index === 0 &&
+    matches[0].text.length === selector.length
+    ? matches[0].hook
+    : null;
+}
+
+function canonicalProofRoute(route) {
+  return PROOF_ROUTE_ALIASES.get(route) ?? route;
+}
 
 function normalizedText(value) {
   return String(value ?? "").replace(/\r\n?/g, "\n").trim();
@@ -106,7 +138,8 @@ function safeProofRoute(value, label = "proof route") {
   ) {
     throw new AgentError(`${label} is invalid`, 1);
   }
-  return route.length > 1 ? route.replace(/\/+$/, "") : route;
+  const normalized = route.length > 1 ? route.replace(/\/+$/, "") : route;
+  return canonicalProofRoute(normalized);
 }
 
 export function normalizeExplicitRoute(route) {
@@ -120,7 +153,8 @@ export function normalizeExplicitRoute(route) {
   ) {
     throw new AgentError(`unsafe or non-UI proof route: ${value}`, 2);
   }
-  return value.length > 1 ? value.replace(/\/+$/, "") : value;
+  const normalized = value.length > 1 ? value.replace(/\/+$/, "") : value;
+  return canonicalProofRoute(normalized);
 }
 
 function routeForPageFile(path) {
@@ -155,7 +189,7 @@ export function deriveAffectedRoutes(files, explicitRoute = "") {
     for (const path of candidatePaths([file])) {
       if (!path) continue;
       const route = routeForPageFile(path);
-      if (route) routes.push(route);
+      if (route) routes.push(canonicalProofRoute(route));
       if (
         /^apps\/internal\/app\/(?:layout\.[jt]sx?|globals\.css)$/.test(path)
       ) {
@@ -192,8 +226,45 @@ function boundedProofValue(value, label, { allowEmpty = false } = {}) {
   return boundedText(value, MAX_PROOF_VALUE_BYTES, label);
 }
 
+function hasClassOrIdSelector(selector) {
+  let bracketDepth = 0;
+  let quote = "";
+  let escaped = false;
+  for (const character of selector) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = "";
+      continue;
+    }
+    if (character === "\"" || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+    if (character === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      continue;
+    }
+    if (bracketDepth === 0 && (character === "." || character === "#")) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function boundedProofSelector(value) {
-  const selector = boundedProofValue(value, "implementation proof selector");
+  const requested = boundedProofValue(value, "implementation proof selector");
+  const selector = LEGACY_PROOF_SELECTOR_ALIASES.get(requested) ?? requested;
   if (
     /:(?:has-text|text(?:-is|-matches)?|contains|visible|hidden)(?:\s*\(|\b)/i.test(
       selector
@@ -206,6 +277,12 @@ function boundedProofSelector(value) {
   ) {
     throw new AgentError(
       "implementation proof selector must be CSS; use clickText for visible text",
+      1
+    );
+  }
+  if (hasClassOrIdSelector(selector)) {
+    throw new AgentError(
+      "implementation proof selector must use a stable element, attribute, or data-agent-proof hook instead of a CSS class or id",
       1
     );
   }
@@ -264,6 +341,15 @@ function proofTaskSession(task) {
     throw new AgentError("implementation proof task session is invalid", 1);
   }
   return task.session;
+}
+
+function runnerOwnedDemoSessionAction(action, session) {
+  if (!session || session === "none") return false;
+  const hook = exactProofSelectorHook(action?.selector);
+  return (
+    (action.type === "fill" && ["signin-email", "signin-passcode"].includes(hook)) ||
+    (action.type === "click" && hook === "signin-submit")
+  );
 }
 
 function mutatesForm(action) {
@@ -391,10 +477,16 @@ export function validateProofPlan(plan) {
           throw new AgentError(`implementation proof task ${field} is invalid`, 1);
         }
       }
+      const actions = task.actions.map(validateProofAction);
+      const finalNavigation = actions.findLast(
+        (action) => action.type === "navigate"
+      );
       const normalized = {
         clauseIds: task.clauseIds,
-        route: safeProofRoute(task.route),
-        actions: task.actions.map(validateProofAction),
+        route: finalNavigation?.path ?? safeProofRoute(task.route),
+        actions: actions.filter(
+          (action) => !runnerOwnedDemoSessionAction(action, session)
+        ),
         intermediateAssertions: task.intermediateAssertions.map(validateProofAssertion),
         finalAssertions: task.finalAssertions.map(validateProofAssertion)
       };
@@ -419,7 +511,9 @@ function contractCheckEvidenceLanes(check, contract) {
 }
 
 function contractCheckRoutes(check, contract) {
-  const allowed = new Set(contract?.routes ?? []);
+  const allowed = new Set(
+    (contract?.routes ?? []).map((route) => safeProofRoute(route))
+  );
   const routes = [];
   const statement = normalizedText(check?.statement);
   const routePattern =
@@ -427,7 +521,8 @@ function contractCheckRoutes(check, contract) {
   for (const match of statement.matchAll(routePattern)) {
     const candidate =
       match[1].length > 1 ? match[1].replace(/\/+$/, "") : match[1];
-    if (allowed.has(candidate)) routes.push(candidate);
+    const canonical = canonicalProofRoute(candidate);
+    if (allowed.has(canonical)) routes.push(canonical);
   }
   if (
     allowed.has("/") &&
@@ -568,7 +663,7 @@ export function validateBrowserProofPlan({
       1
     );
   }
-  return proofPlan;
+  return validatedPlan;
 }
 
 function cleanSectionValue(value) {

@@ -860,6 +860,7 @@ Proof must demonstrate the user's requested behavior, not only that an artifact 
 Derive proof steps from the sealed intent before implementation.
 Every browser task must declare whether it uses no session or one bounded visible demo role.
 Protected staff interactions require a matching staff-capable demo session.
+The proof runner owns visible demo login setup before task actions, so model plans must not repeat sign-in fill or submit actions.
 Click and fill selectors must be executable CSS, while visible-text clicks use the explicit text-click action.
 A save or submit proof must change the relevant form control before invoking the action.
 An existing static route may be used by the proof plan without changing an unrelated page file merely to make the route appear affected.
@@ -917,6 +918,12 @@ The repaired candidate still passes the same fail-closed protected-path validati
 Issue 94 then exercised a separate source-blind GIF path and exposed browser-runner defects before the product interaction ran.
 Navigation assertions could race a replaced execution context, textarea filling used an input-only value setter, and initial navigation could satisfy an intermediate assertion before the user trigger.
 The browser runner now waits for navigation to settle, focuses and fills each selected form control through its native setter and value, and observes intermediate state only after form-input, click, or key-press triggers.
+
+Recorded correction on 2026-08-05:
+Issue 103 reached the real authenticated task board after duplicate sign-in actions were normalized, but its generated plan ended on a different route, used mutable CSS classes, and assumed task records that the clean proof environment did not contain.
+Trusted plan normalization now binds the task to its final navigation, maps only exact historical selectors to stable proof hooks, and rejects new class or ID selectors before publication.
+The proof server enables deterministic non-secret task fixtures only under the exact task-board scope, a loopback-bound process, approved task-board referrers, and fixture-backed API methods, so the real task-board component can demonstrate filtering and restoration without production data or a proof-only route.
+The shared repair ledger also reserves one additional semantic revision exclusively for an exact-head proof failure, preventing earlier clean-review refinements from consuming the only repair opportunity informed by source-blind behavior.
 Triggerless GIF plans are rejected before publication, and the runner cannot omit an unobserved requested intermediate from its result.
 
 ## Baseline Health And Workflow Approval

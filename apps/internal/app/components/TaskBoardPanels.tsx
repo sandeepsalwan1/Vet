@@ -55,7 +55,7 @@ export function TaskLaneGrid({
   onUndo
 }: TaskLaneGridProps) {
   return (
-    <section className="boardGrid">
+    <section className="boardGrid" data-agent-proof="task-board-lanes">
       {visibleTaskLanes(role).map((lane) => {
         const Icon = laneIcons[lane.key];
         const items = taskLaneItems(tasks, lane.key, role);

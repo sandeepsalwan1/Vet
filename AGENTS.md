@@ -52,6 +52,8 @@ Vet: one deployed Next.js app, Postgres-backed npm workspace.
 - Failure lesson: resealing an implemented issue can leave its bot branch divergent; replace only a bot-authored same-issue prior intent from the new validated base with an exact force-with-lease.
 - Failure lesson: a long Vercel command can finish before an idle SDK socket closes; emit a bounded heartbeat, retry the exact bridge socket signature once, and never classify it as a model failure.
 - Failure lesson: replacing a prior sealed intent must reset that pull request's shared repair ledger before review; old-intent evaluations are invalid for the new seal.
+- Failure lesson: demo-session proof already performs visible login; repeating exact sign-in hook actions after setup fails on the authenticated page, so normalize only those runner-owned actions away.
+- Failure lesson: browser proof needs canonical routes, intent-scoped loopback fixtures with production visibility, stable hooks, no class/id selectors, and one reserved proof repair.
 - Full operation, recovery, and exact-head approval steps: `docs/agent-automation.md`.
 
 ## Architecture Rules

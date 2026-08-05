@@ -12,6 +12,13 @@ import { sendEscalationAlert } from "@central-vet/notifications";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { persistedStatusForRequest, validateTaskAction } from "../../../lib/taskWorkflow";
+import {
+  agentProofEditTask,
+  agentProofEscalateTask,
+  agentProofFixturesEnabled,
+  agentProofGetTask,
+  agentProofTransitionTask
+} from "../../_agentProofFixtures";
 import { logError, logInfo, logWarn } from "../../_apiResponse";
 import {
   authenticateActor,
@@ -67,13 +74,16 @@ async function applyTaskUpdateAction(args: {
   clinicId: string;
   actor: Actor;
   body: TaskUpdateBody;
+  fixtureClinic?: Awaited<ReturnType<typeof resolveClinicFromRequest>>;
   onEscalationAlertError?: (error: unknown, taskId: string) => void;
 }): Promise<TaskUpdateError | TaskUpdateSuccess> {
   if (args.body.action === "status" && !args.body.nextStatus) {
     return { error: "Missing next status.", status: 400 };
   }
 
-  const currentTask = await getTask(args.id, { clinicId: args.clinicId });
+  const currentTask = args.fixtureClinic
+    ? agentProofGetTask(args.fixtureClinic, args.id)
+    : await getTask(args.id, { clinicId: args.clinicId });
   if (!currentTask) {
     return { error: "Task not found.", status: 404 };
   }
@@ -87,38 +97,61 @@ async function applyTaskUpdateAction(args: {
   if (workflowError) return workflowError;
 
   if (args.body.action === "edit") {
-    const task = await editTask(
-      args.id,
-      (args.body.task ?? {}) as UpdateTaskInput,
-      args.actor,
-      { clinicId: args.clinicId }
-    );
+    const task = args.fixtureClinic
+      ? agentProofEditTask(
+          args.fixtureClinic,
+          args.id,
+          (args.body.task ?? {}) as UpdateTaskInput,
+          args.actor
+        )
+      : await editTask(
+          args.id,
+          (args.body.task ?? {}) as UpdateTaskInput,
+          args.actor,
+          { clinicId: args.clinicId }
+        );
     return { task, action: "edit" };
   }
 
   if (args.body.action === "archive") {
-    const task = await transitionTask({
-      id: args.id,
-      nextStatus: "archived",
-      actor: args.actor,
-      clinicId: args.clinicId
-    });
+    const task = args.fixtureClinic
+      ? agentProofTransitionTask({
+          clinic: args.fixtureClinic,
+          id: args.id,
+          nextStatus: "archived",
+          actor: args.actor
+        })
+      : await transitionTask({
+          id: args.id,
+          nextStatus: "archived",
+          actor: args.actor,
+          clinicId: args.clinicId
+        });
     return { task, action: "archive" };
   }
 
   if (args.body.action === "restore") {
-    const task = await transitionTask({
-      id: args.id,
-      nextStatus: "due",
-      actor: args.actor,
-      clinicId: args.clinicId
-    });
+    const task = args.fixtureClinic
+      ? agentProofTransitionTask({
+          clinic: args.fixtureClinic,
+          id: args.id,
+          nextStatus: "due",
+          actor: args.actor
+        })
+      : await transitionTask({
+          id: args.id,
+          nextStatus: "due",
+          actor: args.actor,
+          clinicId: args.clinicId
+        });
     return { task, action: "restore" };
   }
 
   if (args.body.action === "escalate") {
-    const task = await escalateTask(args.id, args.actor, { clinicId: args.clinicId });
-    if (task) {
+    const task = args.fixtureClinic
+      ? agentProofEscalateTask(args.fixtureClinic, args.id, args.actor)
+      : await escalateTask(args.id, args.actor, { clinicId: args.clinicId });
+    if (task && !args.fixtureClinic) {
       await sendEscalationAlert(task).catch((error) => {
         args.onEscalationAlertError?.(error, task.id);
       });
@@ -130,13 +163,21 @@ async function applyTaskUpdateAction(args: {
   if (!nextStatus) {
     return { error: "Missing next status.", status: 400 };
   }
-  const task = await transitionTask({
-    id: args.id,
-    nextStatus: persistedStatusForRequest(nextStatus),
-    actor: args.actor,
-    invalidReason: args.body.invalidReason,
-    clinicId: args.clinicId
-  });
+  const task = args.fixtureClinic
+    ? agentProofTransitionTask({
+        clinic: args.fixtureClinic,
+        id: args.id,
+        nextStatus: persistedStatusForRequest(nextStatus),
+        actor: args.actor,
+        invalidReason: args.body.invalidReason
+      })
+    : await transitionTask({
+        id: args.id,
+        nextStatus: persistedStatusForRequest(nextStatus),
+        actor: args.actor,
+        invalidReason: args.body.invalidReason,
+        clinicId: args.clinicId
+      });
   return { task, action: "status", nextStatus };
 }
 
@@ -169,6 +210,7 @@ export async function taskUpdateResponse(args: {
     clinicId: clinic.clinicId,
     actor,
     body: bodyResult.data,
+    fixtureClinic: agentProofFixturesEnabled(args.request) ? clinic : undefined,
     onEscalationAlertError: (error, taskId) => {
       logError("escalation_notification_failed", error, { taskId });
     }

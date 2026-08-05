@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   MAX_SEMANTIC_REVISIONS,
+  MAX_TOTAL_REVISIONS,
   emptyRepairLedger,
   findingDigest,
   hasRepairEvaluation,
@@ -161,6 +162,31 @@ test("shared revision limit rejects a fourth material head", () => {
       fromHead: "4".repeat(40),
       toHead: "5".repeat(40),
       findingDigest: findingDigest(["one more"]),
+    }),
+    /shared semantic repair limit exhausted/,
+  );
+
+  ledger = recordRepairRevision(ledger, {
+    lane: "review",
+    fromHead: "4".repeat(40),
+    toHead: "5".repeat(40),
+    findingDigest: findingDigest(["exact-head browser proof failed"]),
+  }, {
+    allowProofRecovery: true,
+  }).ledger;
+  assert.equal(ledger.revisionCount, MAX_TOTAL_REVISIONS);
+  assert.match(
+    repairLedgerBody(ledger),
+    /Semantic revisions: 4\/4 \(3 standard \+ 1 proof recovery\)/,
+  );
+  assert.throws(
+    () => recordRepairRevision(ledger, {
+      lane: "review",
+      fromHead: "5".repeat(40),
+      toHead: "6".repeat(40),
+      findingDigest: findingDigest(["one more proof repair"]),
+    }, {
+      allowProofRecovery: true,
     }),
     /shared semantic repair limit exhausted/,
   );

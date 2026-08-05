@@ -112,7 +112,7 @@ test("intent capsule binds issue, requirements, clarifications, transcript, and 
   assert.equal(capsule.transcriptContext.sourceDigest, "a".repeat(64));
   assert.equal(capsule.ownerClarifications[0].commentId, 55);
   assert.equal(capsule.version, INTENT_CAPSULE_VERSION);
-  assert.deepEqual(capsule.behaviorContract.routes, ["/staff/tasks"]);
+  assert.deepEqual(capsule.behaviorContract.routes, ["/staff"]);
   assert.deepEqual(
     capsule.behaviorContract.checks.map((check) => check.id),
     ["AC1", "AC2"]
@@ -633,7 +633,7 @@ test("proof plan rejects unsafe routes and unbounded waits", () => {
 
   assert.deepEqual(validateProofPlan(base), {
     ...base,
-    tasks: [{ ...base.tasks[0], session: "none" }]
+    tasks: [{ ...base.tasks[0], route: "/staff", session: "none" }]
   });
   assert.deepEqual(
     validateProofPlan({
@@ -652,7 +652,7 @@ test("proof plan rejects unsafe routes and unbounded waits", () => {
         }
       ]
     }).tasks[0].actions,
-    [{ type: "navigate", path: "/staff/tasks" }]
+    [{ type: "navigate", path: "/staff" }]
   );
   assert.throws(
     () =>
@@ -732,7 +732,7 @@ test("browser proof plans declare protected sessions and executable interactions
       { type: "clickText", selector: "button", value: "Save changes" }
     ],
     intermediateAssertions: [
-      { type: "visible", selector: ".miniConfetti" }
+      { type: "visible", selector: "[data-agent-proof='mini-confetti']" }
     ],
     finalAssertions: [
       { type: "text", selector: "[aria-live='polite']", value: "All changes saved." }
@@ -862,4 +862,89 @@ test("browser proof plans declare protected sessions and executable interactions
       }),
     /must be CSS/
   );
+  assert.throws(
+    () =>
+      validateProofPlan({
+        version: 1,
+        tasks: [{
+          ...task,
+          finalAssertions: [{ type: "visible", selector: ".generated-class" }]
+        }]
+      }),
+    /stable element, attribute, or data-agent-proof hook/
+  );
+  for (const selector of [
+    "button.generated-class",
+    "section#generated-id",
+    "section:not(.generated-class)"
+  ]) {
+    assert.throws(
+      () =>
+        validateProofPlan({
+          version: 1,
+          tasks: [{
+            ...task,
+            finalAssertions: [{ type: "visible", selector }]
+          }]
+        }),
+      /stable element, attribute, or data-agent-proof hook/
+    );
+  }
+  assert.doesNotThrow(() =>
+    validateProofPlan({
+      version: 1,
+      tasks: [{
+        ...task,
+        finalAssertions: [{ type: "visible", selector: "a[href='#details']" }]
+      }]
+    })
+  );
+});
+
+test("demo session plans omit only runner-owned visible sign-in actions", () => {
+  const plan = validateProofPlan({
+    version: 1,
+    tasks: [
+      {
+        clauseIds: ["AC1"],
+        route: "/staff",
+        session: "demo-staff",
+        actions: [
+          { type: "navigate", path: "/staff" },
+          { type: "fill", selector: "[data-agent-proof='signin-email']", value: "staff@clinic.demo" },
+          { type: "fill", selector: "[data-agent-proof=signin-passcode]", value: "staff1234" },
+          { type: "click", selector: "[data-agent-proof=\"signin-submit\"]" },
+          { type: "navigate", path: "/staff/tasks" },
+          { type: "fill", selector: "[data-agent-proof='task-board-search']", value: "Biscuit" }
+        ],
+        intermediateAssertions: [
+          { type: "text", selector: ".lane .taskStack", value: "Biscuit" }
+        ],
+        finalAssertions: [
+          { type: "text", selector: ".boardGrid", value: "Biscuit" }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(plan.tasks[0].route, "/staff");
+  assert.deepEqual(plan.tasks[0].actions, [
+    { type: "navigate", path: "/staff" },
+    { type: "navigate", path: "/staff" },
+    { type: "fill", selector: "[data-agent-proof='task-board-search']", value: "Biscuit" }
+  ]);
+  assert.deepEqual(plan.tasks[0].intermediateAssertions, [
+    {
+      type: "text",
+      selector: "[data-agent-proof='task-board-lanes']",
+      value: "Biscuit"
+    }
+  ]);
+  assert.deepEqual(plan.tasks[0].finalAssertions, [
+    {
+      type: "text",
+      selector: "[data-agent-proof='task-board-lanes']",
+      value: "Biscuit"
+    }
+  ]);
 });

@@ -10,6 +10,9 @@ import {
 export const REPAIR_LEDGER_VERSION = 1;
 export const REPAIR_LEDGER_MARKER = "<!-- agent-repair-ledger:v1 -->";
 export const MAX_SEMANTIC_REVISIONS = 3;
+export const MAX_PROOF_RECOVERY_REVISIONS = 1;
+export const MAX_TOTAL_REVISIONS =
+  MAX_SEMANTIC_REVISIONS + MAX_PROOF_RECOVERY_REVISIONS;
 
 const HEAD_PATTERN = /^[0-9a-f]{40}$/;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -114,7 +117,7 @@ export function validateRepairLedger(value, expectedIntentDigest = "") {
     (expectedIntentDigest && value.intentDigest !== expectedIntentDigest) ||
     !Number.isInteger(value.revisionCount) ||
     value.revisionCount < 0 ||
-    value.revisionCount > MAX_SEMANTIC_REVISIONS ||
+    value.revisionCount > MAX_TOTAL_REVISIONS ||
     !Array.isArray(value.revisions) ||
     value.revisions.length !== value.revisionCount ||
     !Array.isArray(value.evaluations) ||
@@ -289,6 +292,7 @@ export function recordRepairEvaluation(
 export function recordRepairRevision(
   ledgerValue,
   { lane, fromHead, toHead, findingDigest: sourceFindingDigest },
+  { allowProofRecovery = false } = {},
 ) {
   const ledger = structuredClone(validateRepairLedger(ledgerValue));
   if (
@@ -307,7 +311,10 @@ export function recordRepairRevision(
       revision.toHead === toHead,
   );
   if (replayed) return { ledger, replayed: true };
-  if (ledger.revisionCount >= MAX_SEMANTIC_REVISIONS) {
+  const limit = allowProofRecovery
+    ? MAX_TOTAL_REVISIONS
+    : MAX_SEMANTIC_REVISIONS;
+  if (ledger.revisionCount >= limit) {
     throw new AgentError("shared semantic repair limit exhausted", 1);
   }
   ledger.revisionCount += 1;
@@ -355,7 +362,7 @@ export function repairLedgerBody(ledgerValue) {
   const openCount = ledger.findings.filter((finding) => finding.status === "open").length;
   return `## Shared Repair Ledger
 
-Semantic revisions: ${ledger.revisionCount}/${MAX_SEMANTIC_REVISIONS}
+Semantic revisions: ${ledger.revisionCount}/${MAX_TOTAL_REVISIONS} (${MAX_SEMANTIC_REVISIONS} standard + ${MAX_PROOF_RECOVERY_REVISIONS} proof recovery)
 Open finding fingerprints: ${openCount}
 
 Infrastructure retries, polling, and unchanged-head reconciliation do not consume this budget.

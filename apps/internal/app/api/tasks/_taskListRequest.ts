@@ -2,10 +2,15 @@ import {
   archiveCompletedTasksBefore,
   listTasks,
   type Actor,
-  type ClinicContext
+  type ClinicContext,
+  type Task
 } from "@central-vet/db";
 import { NextResponse } from "next/server";
 import { logWarn, noStoreHeaders } from "../_apiResponse";
+import {
+  agentProofFixturesEnabled,
+  agentProofTasks
+} from "../_agentProofFixtures";
 import {
   authenticateActorFromQuery,
   resolveClinicFromRequest
@@ -31,18 +36,21 @@ async function taskListPayload(args: {
   actor: Actor;
   clinic: ClinicContext;
   includeArchived: boolean;
+  fixtureTasks?: Task[];
 }) {
-  await archiveCompletedTasksBefore(
-    localDateString(),
-    systemActor,
-    args.clinic.timeZone || process.env.APP_TIME_ZONE || process.env.TZ || "America/Los_Angeles",
-    { clinicId: args.clinic.clinicId }
-  );
-  const tasks = await listTasks({
+  if (!args.fixtureTasks) {
+    await archiveCompletedTasksBefore(
+      localDateString(),
+      systemActor,
+      args.clinic.timeZone || process.env.APP_TIME_ZONE || process.env.TZ || "America/Los_Angeles",
+      { clinicId: args.clinic.clinicId }
+    );
+  }
+  const tasks = args.fixtureTasks ?? (await listTasks({
     clinicId: args.clinic.clinicId,
     role: args.actor.role,
     includeArchived: args.includeArchived
-  });
+  }));
   return {
     tasks: tasks.map((task) => sanitizeTaskForActor(task, args.actor.role))
   };
@@ -59,7 +67,17 @@ export async function taskListResponse(request: Request) {
 
   const includeArchived = url.searchParams.get("includeArchived") === "true";
   return NextResponse.json(
-    await taskListPayload({ actor: auth.actor, clinic, includeArchived }),
+    await taskListPayload({
+      actor: auth.actor,
+      clinic,
+      includeArchived,
+      fixtureTasks: agentProofFixturesEnabled(request)
+        ? agentProofTasks(clinic, {
+            includeArchived,
+            role: auth.actor.role
+          })
+        : undefined
+    }),
     { headers: noStoreHeaders }
   );
 }

@@ -119,6 +119,7 @@ jobs:
       - run: npm run lint:dead
       - run: npm run lint:duplicates
       - run: node --test scripts/agent-*.test.mjs
+      - run: npm run test:agent-proof-fixtures
       - name: actionlint
         uses: raven-actions/actionlint@v2
         with:

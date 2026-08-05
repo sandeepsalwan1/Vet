@@ -55,6 +55,7 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
    Before artifact upload, the gate rejects binary changes and any exact credential value inherited by the gate process.
    A separate trusted job verifies the patch digest, paths, tree, original PR head, and explicit force-with-lease before publishing it.
    Published fixes restart exact-head CI, independent review, and no-mistakes.
+   Manual local no-mistakes validation must run from a non-default feature branch containing the exact committed candidate tree.
    Unchanged exact-head evaluations are reused and do not spend a revision.
    Remaining `auto-fix` findings may return to the independent reviewer within the shared three-revision budget, while `ask-user` findings and exhausted repair budgets block.
 8. Proof validates the sealed behavior contract.
@@ -261,7 +262,12 @@ The trusted behavior contract comes from the sealed issue and implementation add
 The browser driver receives only routes, actions, selectors, and assertions, not source code.
 Every browser task declares `session: none` or one bounded visible demo role.
 Protected staff interactions require a staff-capable demo session.
+The runner performs visible demo login setup before task actions and deterministically removes only its own exact sign-in hook actions from legacy or generated plans.
 Demo authentication must remain present after every planned navigation, with the account session, task-board session, and rendered authenticated surface agreeing on the role.
+The final planned navigation owns the route binding, so a recording cannot pass against one declared route after ending on another.
+Generated plans must use stable semantic selectors or `data-agent-proof` hooks; bounded exact legacy aliases migrate previously sealed selectors without reopening arbitrary CSS classes or IDs.
+The trusted localhost server enables deterministic non-secret task-board fixtures only under the exact `AGENT_PROOF_FIXTURES=task-board` scope, a loopback-bound process, approved task-board referrers, and fixture-backed API methods.
+Other proof routes and deployed hosts continue through normal tenant and database resolution.
 A lost session fails before the next selector with the affected role and route in the diagnostic.
 `click` and `fill` use executable CSS selectors; `clickText` selects a CSS element type and visible text without Playwright-only selector syntax.
 A task that clicks save or submit must first exercise the form-control change that enables the action.
@@ -296,6 +302,7 @@ Failed media links are labeled as diagnostics and explicitly state that the capt
 Visual proof fails closed when the proof plan is incomplete, behavior assertions fail, a clause is missing, or no reviewable artifact URL is published.
 Browser action and assertion exceptions are recorded as structured exact-head failures, so the bounded repair loop receives the actual failed step instead of a missing-report error.
 An actionable exact-head behavior failure automatically returns its failed clauses to the shared bounded reviewer repair loop.
+One additional semantic revision is reserved exclusively for an exact-head proof failure after the normal three-revision review and no-mistakes budget is spent.
 The failed proof remains merge-blocking, and unchanged or unsafe findings stop instead of looping.
 Published-media verification runs only after the structured browser result passes, so artifact publication errors cannot hide the original behavior failure.
 The verifier explicitly installs `ffprobe` when the runner image does not provide it, then confirms the command before downloading and opening the media.
