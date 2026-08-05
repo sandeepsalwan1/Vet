@@ -5,6 +5,9 @@ read_when:
   - Preparing or verifying a Datahub sandbox or production rollout
 ---
 
+> **DO NOT DELETE:** This is the canonical Datahub and PIMS integration runbook for Vet.
+> Keep it current when the receiver, Datahub configuration, credentials process, payload contract, or rollout state changes.
+
 # Datahub PIMS Integration
 
 Captured and verified against the live Datahub documentation and GraphQL schemas on 2026-08-04.
@@ -32,12 +35,51 @@ Vet now has a local implementation of that receiver:
 - Database migration: `db/migrations/030_datahub_pims_ingestion.sql`
 - Focused tests: `apps/internal/app/api/integrations/datahub/_datahubWebhook.test.ts`
 
-Current proof level: source, focused tests, and an isolated local HTTP runtime backed by ephemeral PostgreSQL.
-The database migration has not been applied to a live database.
-The endpoint has not been deployed.
-No Datahub webhook has been registered.
-No initial sync has been triggered.
-No factual rollout email has been sent.
+Current proof level: merged, deployed, authenticated, sandbox-mapped, and exercised with live Datahub webhook traffic.
+Production clinic onboarding and production PIMS traffic remain intentionally incomplete because they require a clinic invitation, approval, PIMS-provider confirmation, and pricing agreement.
+
+## Live sandbox rollout on 2026-08-04
+
+Completed actions:
+
+- Merged PR `#106` after the no-mistakes gate, repository CI, CodeQL, dependency review, and external AI review passed.
+- Deployed the merged receiver and migration to the approved Render service.
+- Stored the dedicated webhook secret in the Mac Keychain under service `vet-datahub-webhook` and configured `DATAHUB_WEBHOOK_SECRET` on Render.
+- Proved the public receiver returns `401` without authentication and `400` for an authenticated malformed JSON payload.
+- Created an isolated hidden clinic tenant named `datahub-sandbox` with no public hostname.
+- Mapped the Datahub sandbox practice only to that tenant.
+- Registered `Vet sandbox ingestion` as an active Datahub sandbox webhook.
+- Configured `X-Datahub-Webhook-Secret` as a custom header without exposing its value.
+- Enabled every data category offered by the Datahub webhook form.
+- Generated all fake-data categories offered by the Getting Started workflow.
+- Triggered `triggerInitialSync` through the API GraphQL endpoint and received `Success`.
+- Stored the replacement partner key in the Mac Keychain under service `datahubvet-partner-api`.
+- Stored the sandbox practice identifier in the Mac Keychain under service `datahubvet-sandbox-practice`.
+
+Live data proof after fake data and initial sync:
+
+- Webhook deliveries: `3`.
+- Received entity receipts: `513`.
+- Successful entity receipts: `511`.
+- Failed entity receipts: `2`.
+- Unique tenant-scoped records stored: `491`.
+- Initial sync added one new practice-authorization record and no new failures.
+- Connection status: `active`.
+- Initial-sync timestamp: recorded.
+- Last-webhook timestamp: recorded.
+
+The two failures came from the fake generator's `patientReminders` category.
+Every other selected fake-data category stored successfully.
+The two reminder objects did not provide a stable `integrationId` or `id`, so Vet correctly returned failure receipts instead of inventing an unsafe identity.
+No Datahub retry arrived during the observation window.
+
+Security result:
+
+- The screenshots exposed the previous partner key.
+- The Registry API `partnerRekey` mutation returned a replacement key, and the replacement was verified against `partnerPractices`.
+- Datahub continued accepting the previous key immediately after rekey, and the dashboard continued displaying its cached value.
+- Do not treat the previous key as revoked until Datahub confirms its invalidation behavior or grace period.
+- The inbound webhook does not use the partner key, so partner-key rotation does not interrupt webhook delivery.
 
 ## What to do, in order
 
@@ -45,8 +87,9 @@ No factual rollout email has been sent.
 
 The supplied screenshots visibly contained the full partner API key.
 Treat that key as compromised.
-Rotate it in Datahub before using production data.
-Rotation is intentionally not performed from this repository because it can invalidate unknown external users of the existing key.
+The Registry API `partnerRekey` mutation was executed on 2026-08-04.
+The replacement works and is stored in the approved Keychain location.
+The previous key remained accepted immediately afterward, so vendor confirmation is still required before production.
 
 After rotation:
 
@@ -976,6 +1019,10 @@ Questions for Datahub support before production:
 8. What data retention, deletion, and replay controls exist?
 9. How are multi-site records assigned when shared client and patient data has no site ID?
 10. Which GraphQL write operations are supported by each PIMS adapter?
+11. Why did generated `patientReminders` omit both `integrationId` and `id`, and what receipt ID should consumers return for those objects?
+12. Does `partnerRekey` revoke the previous key immediately, use a grace period, or create an additional concurrently valid key?
+13. When should the dashboard display the replacement key after `partnerRekey`?
+14. What sandbox, onboarding, per-practice, per-site, per-PIMS, webhook-volume, and writeback pricing applies?
 
 ## Acceptance checklist
 
@@ -1009,17 +1056,19 @@ Local proof:
 - [x] Screenshot OCR finds no credential-length token, UUID, or personal account name.
 
 The complete repository migration chain was not proven in bare Homebrew PostgreSQL because existing migration `024` requires the `vector` extension.
-No live database was used.
+The local proof stage did not use a live database.
+The later external rollout applied the migration and verified receipt/storage counts against the intended live database.
 
 External proof:
 
-- [ ] Exposed Datahub partner key rotated.
-- [ ] Migration applied to the intended database.
-- [ ] Sandbox practice mapped to one Vet clinic.
-- [ ] Receiver deployed with approved secrets.
-- [ ] Sandbox hook registered.
-- [ ] Fake webhook produces durable records and correct receipts.
-- [ ] Initial sync completes.
+- [x] Registry `partnerRekey` executed and replacement key verified.
+- [ ] Datahub confirms the previous exposed key is revoked or documents its grace period.
+- [x] Migration applied to the intended database.
+- [x] Sandbox practice mapped to one isolated Vet clinic tenant.
+- [x] Receiver deployed with approved secrets.
+- [x] Sandbox hook registered and active.
+- [x] Fake webhook produced durable tenant-scoped records and per-entity receipts.
+- [x] Initial sync mutation returned success and produced a clean follow-up delivery.
 - [ ] Incremental 15-second updates arrive.
 - [ ] Retry behavior proven.
 - [ ] Production practice approves and completes PIMS onboarding.
