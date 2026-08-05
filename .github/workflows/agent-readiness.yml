@@ -137,7 +137,7 @@ jobs:
           --publish --json
       - name: Upload redacted readiness evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-readiness-${{ inputs.expected-head-sha || github.sha }}
           path: |

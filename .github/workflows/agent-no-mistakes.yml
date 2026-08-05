@@ -161,7 +161,7 @@ jobs:
           --approval-state "${{ inputs.approval }}"
           --prepare
           --json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: steps.prepare.outputs.skip_model != 'true'
         with:
           name: no-mistakes-context-${{ inputs.pr-number }}
@@ -375,7 +375,7 @@ jobs:
           esac
       - name: Upload sanitized gate result and native fix
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: no-mistakes-result-${{ inputs.pr-number }}
           path: |
@@ -390,7 +390,7 @@ jobs:
           always() &&
           (steps.gate.outcome != 'success' ||
           steps.classify-setup.outcome != 'success')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: no-mistakes-remote-diagnostics-${{ inputs.pr-number }}
           path: |

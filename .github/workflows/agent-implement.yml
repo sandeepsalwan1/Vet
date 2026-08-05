@@ -96,7 +96,7 @@ jobs:
           --issue-number "${{ inputs.issue-number }}"
           --write-prompt .agent-output/implement-prompt.md
           --json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agent-implementation-context-${{ inputs.issue-number }}
           path: |
@@ -181,7 +181,7 @@ jobs:
           --record-file .agent-output/implementation-remote.json
           --json
       - id: implementation-artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: steps.generate.outcome == 'success'
         with:
           name: agent-implementation-${{ inputs.issue-number }}
@@ -190,7 +190,7 @@ jobs:
           if-no-files-found: error
       - name: Upload redacted remote diagnostics
         if: always() && (steps.generate.outcome != 'success' || steps.implementation-artifact.outcome != 'success')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-implementation-remote-diagnostics-${{ inputs.issue-number }}
           path: |
@@ -317,7 +317,7 @@ jobs:
           --record-file .agent-output/implementation-remote.json
           --json
       - id: repair-artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: steps.generate.outcome == 'success'
         with:
           name: agent-implementation-repaired-${{ inputs.issue-number }}
@@ -326,7 +326,7 @@ jobs:
           if-no-files-found: error
       - name: Upload redacted repair diagnostics
         if: always() && (steps.generate.outcome != 'success' || steps.repair-artifact.outcome != 'success')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-implementation-repair-remote-diagnostics-${{ inputs.issue-number }}
           path: |
