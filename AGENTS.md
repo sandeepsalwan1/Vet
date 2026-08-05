@@ -44,8 +44,10 @@ Vet: one deployed Next.js app, Postgres-backed npm workspace.
 - No manual branch or push is required.
 - Intentional manual bypass: a repository-owner direct push is outside the AFK loop; `[skip ci]` also skips push-triggered Actions.
 - Return only when `agent:blocked` requests a decision, or `agent:proof-failed` remains after automatic recovery stops.
-- Failure lesson: missing exact-main checks plus stale readiness need one deduplicated exact-head recovery before model spend; explicit no-media wording stays proofless unless positive visual proof overrides it.
+- Failure lesson: missing exact-main checks plus stale readiness need one deduplicated exact-head recovery before model spend; explicit proofless or CI-only wording defeats keyword-only media or service escalation unless positive evidence overrides it.
 - Failure lesson: do not run `typecheck` and `build` concurrently in one checkout; both touch `.next/types` and can create transient route-validator failures.
+- Failure lesson: if no-mistakes self-update returns HTTP 403, use an authenticated checksum-verified release download, then require doctor and AXI success after daemon restart.
+- Failure lesson: Vercel delegated output can report remote success then lose the final stream; retry once only for the exact SDK early-stream signature and still require the sealed handoff marker.
 - Full operation, recovery, and exact-head approval steps: `docs/agent-automation.md`.
 
 ## Architecture Rules

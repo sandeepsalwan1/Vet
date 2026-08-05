@@ -354,6 +354,97 @@ process.stdout.write(JSON.stringify({
   );
 });
 
+test("delegated Vercel output retries once after an exact early-stream failure", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "vet-agent-stream-retry-"));
+  const bin = join(dir, "bin");
+  const workdir = join(dir, "work");
+  const remote = join(dir, "remote");
+  const calls = join(dir, "calls");
+  mkdirSync(bin);
+  mkdirSync(workdir);
+  mkdirSync(join(remote, ".agent-output"), { recursive: true });
+  writeFileSync(join(remote, ".agent-output/review.json"), "{}\n");
+  writeFileSync(join(remote, ".agent-output/review.patch"), "");
+  writeFileSync(
+    join(remote, ".agent-output/model-usage.json"),
+    '{"complete":true}\n'
+  );
+  const handoff = emitDelegatedOutput("reviewRemote", remote);
+  writeFileSync(
+    join(bin, "crabbox"),
+    `#!/usr/bin/env node
+import { appendFileSync, existsSync } from "node:fs";
+const prior = existsSync(${JSON.stringify(calls)});
+appendFileSync(${JSON.stringify(calls)}, "called\\n");
+process.stdout.write("AGENT_CRABBOX_REMOTE_COMMAND_STARTED_V1\\n");
+if (!prior) {
+  process.stdout.write(JSON.stringify({
+    provider: "vercel-sandbox",
+    leaseId: "vsbx_stream_lost",
+    totalMs: 12,
+    exitCode: 0
+  }) + "\\n");
+  process.stderr.write("@vercel/sandbox\\nStreamError: Stream ended before command finished\\ncode: 'stream_ended_early'\\n");
+  process.exit(1);
+}
+process.stdout.write(${JSON.stringify(`${handoff}\n`)});
+process.stdout.write(JSON.stringify({
+  provider: "vercel-sandbox",
+  leaseId: "vsbx_stream_retry",
+  totalMs: 14,
+  exitCode: 0
+}) + "\\n");
+`
+  );
+  chmodSync(join(bin, "crabbox"), 0o755);
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${bin}:${originalPath}`;
+  t.after(() => {
+    process.env.PATH = originalPath;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const result = runCrabboxLane({
+    config,
+    lane: "reviewRemote",
+    command: "run reviewer",
+    env: {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      VERCEL_TOKEN: "vercel",
+      CRABBOX_VERCEL_READY: "true",
+      CODEX_API_KEY: "agent"
+    },
+    workdir
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(readFileSync(calls, "utf8"), "called\ncalled\n");
+  assert.deepEqual(
+    result.providerAttempts.map((attempt) => ({
+      ok: attempt.ok,
+      remoteCommandStarted: attempt.remoteCommandStarted,
+      retryableTransportFailure: attempt.retryableTransportFailure
+    })),
+    [
+      {
+        ok: false,
+        remoteCommandStarted: true,
+        retryableTransportFailure: true
+      },
+      {
+        ok: true,
+        remoteCommandStarted: true,
+        retryableTransportFailure: false
+      }
+    ]
+  );
+  assert.equal(
+    readFileSync(join(workdir, ".agent-output/review.json"), "utf8"),
+    "{}\n"
+  );
+});
+
 test("Crabbox child receives only selected provider auth and readiness", () => {
   const source = {
     PATH: "/usr/bin",

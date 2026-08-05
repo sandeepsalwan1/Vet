@@ -1605,6 +1605,7 @@ function runCrabboxAttempt({
   let leaseId = "";
   let run = null;
   let cleanup = null;
+  let retryableTransportFailure = false;
   const artifacts = [];
   const artifactBindings = [];
   const behaviorObservations = [];
@@ -1618,6 +1619,10 @@ function runCrabboxAttempt({
       cwd: workdir,
       maxBuffer: 8 * 1024 * 1024
     });
+    retryableTransportFailure = isRetryableVercelStreamFailure(
+      selection.provider,
+      run
+    );
     remoteCommandStarted = `${run.stdout}\n${run.stderr}`.includes(
       REMOTE_COMMAND_STARTED_MARKER
     );
@@ -1909,6 +1914,7 @@ function runCrabboxAttempt({
     artifactBindings,
     behaviorObservations,
     remoteCommandStarted,
+    retryableTransportFailure,
     logPath,
     cleanupStatus: cleanup?.status ?? null,
     reason: failure
@@ -1924,9 +1930,21 @@ function providerAttemptSummary(result) {
     attempted: result.attempted,
     ok: result.ok,
     remoteCommandStarted: result.remoteCommandStarted ?? false,
+    retryableTransportFailure: result.retryableTransportFailure ?? false,
     cleanupStatus: result.cleanupStatus ?? null,
     reason: result.reason
   };
+}
+
+function isRetryableVercelStreamFailure(provider, run) {
+  const stderr = String(run?.stderr ?? "");
+  return (
+    provider === "vercel-sandbox" &&
+    run?.status !== 0 &&
+    stderr.includes("@vercel/sandbox") &&
+    stderr.includes("StreamError: Stream ended before command finished") &&
+    stderr.includes("code: 'stream_ended_early'")
+  );
 }
 
 export function resolveCrabboxWorkdir(value = repoRoot()) {
@@ -1974,6 +1992,7 @@ export function runCrabboxLane(options) {
   }
 
   const attempts = [];
+  let delegatedTransportRetriesRemaining = 1;
   for (const [index, selection] of candidates.entries()) {
     const retries = index === candidates.length - 1 ? 1 : 0;
     for (let retry = 0; retry <= retries; retry += 1) {
@@ -1987,6 +2006,18 @@ export function runCrabboxLane(options) {
       attempts.push(providerAttemptSummary(result));
       const final = { ...result, providerAttempts: attempts };
       if (result.ok) return final;
+
+      const retryableDelegatedTransportFailure =
+        DELEGATED_OUTPUTS.has(lane) &&
+        result.remoteCommandStarted === true &&
+        result.retryableTransportFailure === true &&
+        delegatedTransportRetriesRemaining > 0;
+      if (retryableDelegatedTransportFailure) {
+        delegatedTransportRetriesRemaining -= 1;
+        if (retry < retries) continue;
+        if (index < candidates.length - 1) break;
+        return final;
+      }
 
       const acquisitionFailedBeforeRemoteExecution =
         result.attempted === true &&

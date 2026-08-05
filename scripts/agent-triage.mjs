@@ -294,6 +294,57 @@ function requestedProofLines(value) {
     .join("\n");
 }
 
+function positiveEvidenceLines(value) {
+  return String(value ?? "")
+    .split("\n")
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^[-*]\s+(?:\[[ xX]\]\s*)?/, "")
+        .replace(/^\d+[.)]\s+/, "")
+        .trim()
+    )
+    .filter(Boolean)
+    .filter(
+      (line) =>
+        !/^(?:do not|don't|must not|should not|may not|cannot|can't|never|no\b|remove|disable|hide|rename|document)\b/i.test(
+          line
+        ) &&
+        !/\b(?:is|are|was|were)\s+not\s+(?:needed|required|requested)\b/i.test(
+          line
+        )
+    )
+    .join("\n");
+}
+
+function requestsDeterministicProofOnly(value) {
+  const deterministicProofPattern =
+    /\bproofless\b|\bci(?:[- ]only| and exact diff only)\b/i;
+  return String(value ?? "")
+    .split("\n")
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^[-*]\s+(?:\[[ xX]\]\s*)?/, "")
+        .replace(/^\d+[.)]\s+/, "")
+        .trim()
+    )
+    .filter(Boolean)
+    .some(
+      (line) =>
+        deterministicProofPattern.test(line) &&
+        !/^(?:do not|don't|must not|should not|may not|cannot|can't|never|no\b)\b/i.test(
+          line
+        ) &&
+        !/\b(?:not|never|without)\b[\s\S]{0,40}\b(?:proofless|ci(?:[- ]only| and exact diff only))\b/i.test(
+          line
+        ) &&
+        !/\b(?:proofless|ci(?:[- ]only| and exact diff only))\b[\s\S]{0,40}\b(?:not|never)\b/i.test(
+          line
+        )
+    );
+}
+
 function hasDocumentationOnlyScope(sections) {
   return [
     sections["plan or context"],
@@ -373,6 +424,14 @@ export function lightweightTriageDecision(config, issue) {
         ]
           .filter(Boolean)
           .join("\n");
+  const proofControlText = [
+    sections["plan or context"],
+    requestedProofLines(sections.proof),
+    requestedProofLines(sections["proof route"]),
+    requestedProofLines(sections["proof interaction"])
+  ]
+    .filter(Boolean)
+    .join("\n");
   const compactRequest = `${outcome}\n${acceptance}`
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
@@ -411,18 +470,40 @@ export function lightweightTriageDecision(config, issue) {
     /\b(?:render\s+(?:api|blueprint|deploy(?:ment)?|environment|health|logs?|service)|(?:blueprint|deploy(?:ment)?|health|logs?|service)\s+(?:on\s+)?render)\b/i.test(
       classificationProofText
     );
-  const classifiedProof = /\b(?:gif|video|screen recording)\b/i.test(
+  const deterministicProofOnly = requestsDeterministicProofOnly(
+    proofControlText
+  );
+  const positiveProofEvidenceText = [outcome, acceptance, proofControlText]
+    .map(positiveEvidenceLines)
+    .filter(Boolean)
+    .join("\n");
+  const visualEvidenceRequested =
+    /\b(?:(?:gif|video|screen recording|screenshot|browser|visual|ui) proof|(?:capture|record|provide|attach|include|show|demonstrate|verify|validate)\b[\s\S]{0,80}\b(?:gif|video|screen recording|screenshot|browser proof|visual proof|ui proof)|(?:gif|video|screen recording|screenshot)\b[\s\S]{0,40}\b(?:required|requested|attached|included))\b/i.test(
+      positiveProofEvidenceText
+    );
+  const serviceEvidenceRequested =
+    /\b(?:service proof|deployment proof|deploy(?:s|ed|ing)?\b[\s\S]{0,60}\b(?:staging|production|render|(?:disposable|live|real) service)|render (?:health|logs?|deploy(?:ment)?)|(?:live|staging|disposable|real) (?:database|postgres|supabase)|(?:apply|run) (?:the )?migrations?|(?:verify|validate|exercise|inspect|record)\b[\s\S]{0,80}\b(?:live|staging|production|deployment|render|service health|production logs)|webhook delivery|integration smoke)\b/i.test(
+      positiveProofEvidenceText
+    );
+  const serviceWork =
+    renderService ||
+    /\b(?:deploy(?:ment)?|migration|database|postgres|supabase|webhook|integration|service health|production logs)\b/i.test(
+      classificationProofText
+    );
+  const mediaWork = /\b(?:gif|video|screen recording)\b/i.test(
     classificationProofText
-  )
+  );
+  const visualWork =
+    /\b(?:ui|visual|screenshot|browser|page|route|screen|layout|loading state|animation)\b/i.test(
+      classificationProofText
+    );
+  const classifiedProof =
+    mediaWork && (!deterministicProofOnly || visualEvidenceRequested)
     ? "GIF"
-    : renderService ||
-        /\b(?:deploy(?:ment)?|migration|database|postgres|supabase|webhook|integration|service health|production logs)\b/i.test(
-          classificationProofText
-        )
+    : serviceWork && (!deterministicProofOnly || serviceEvidenceRequested)
       ? "service"
-      : /\b(?:ui|visual|screenshot|browser|page|route|screen|layout|loading state|animation)\b/i.test(
-            classificationProofText
-          ) || labels.includes(config.labels.proof)
+      : (visualWork && (!deterministicProofOnly || visualEvidenceRequested)) ||
+          labels.includes(config.labels.proof)
         ? "UI"
         : "CI";
   const proofNeeded =

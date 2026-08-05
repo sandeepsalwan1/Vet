@@ -119,7 +119,12 @@ https://github.com/sandeepsalwan1/Vet/issues/new?template=afk-implementation.yml
 
 The AFK form requires an outcome, acceptance criteria, proof level, and optional stable proof route or interaction.
 An unambiguous `No ... proof` line excludes the named media or service lanes, while positive requirements elsewhere in the issue still take precedence.
+Explicit proofless or CI-only wording also prevents database, migration, deployment, or integration keywords alone from selecting service proof.
+Positive live, disposable-service, migration, deployment, or integration evidence still selects the service lane.
 Submission automatically adds `agent:implement`.
+
+Delegated Codex lanes retry once when the Vercel Sandbox SDK reports its exact early-stream transport failure after remote execution started.
+All other command failures remain terminal, and the retry must still return the bounded sealed output handoff before any candidate patch is trusted.
 
 CLI path:
 

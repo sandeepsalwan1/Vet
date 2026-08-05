@@ -594,11 +594,16 @@ test("an explicit no-media proof interaction stays proofless", () => {
     title: "Harden task date projection across timezones",
     body: `### Outcome
 
-Task dates project consistently across supported timezones.
+Database task projections format due dates deterministically across supported Postgres driver values.
+
+### Plan or context
+
+Keep this a proofless, behavior-preserving canary.
 
 ### Acceptance criteria
 
 - [ ] Date projection has deterministic timezone coverage.
+- [ ] Date and Postgres timestamp inputs produce the documented UTC date.
 - [ ] Automated checks pass.
 
 ### Proof
@@ -608,6 +613,221 @@ Automated tests and checks
 ### Proof interaction
 
 No browser proof, screenshots, GIF, or video are required.`,
+    labels: [{ name: config.labels.priorityLow }]
+  });
+
+  assert.equal(result.proofNeeded, "CI");
+});
+
+test("explicit deterministic proof cannot suppress requested service evidence", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 106,
+    title: "Validate a tenant-safe migration",
+    body: `### Outcome
+
+The migration preserves tenant isolation.
+
+### Plan or context
+
+Use deterministic checks.
+
+### Acceptance criteria
+
+- [ ] Migration tests pass.
+- [ ] Apply the migration to a disposable Postgres database.
+
+### Proof
+
+CI-only.`,
+    labels: [{ name: config.labels.priorityLow }]
+  });
+
+  assert.equal(result.proofNeeded, "service");
+});
+
+test("explicit deterministic proof cannot suppress plural migration evidence", () => {
+  for (const acceptance of [
+    "Run migrations in staging.",
+    "Apply migrations to a disposable Postgres database."
+  ]) {
+    const result = lightweightTriageDecision(config, {
+      number: 114,
+      title: "Validate tenant-safe migrations",
+      body: `### Outcome
+
+Tenant-safe migration behavior is validated.
+
+### Acceptance criteria
+
+- [ ] ${acceptance}
+
+### Proof
+
+CI-only.`,
+      labels: [{ name: config.labels.priorityLow }]
+    });
+
+    assert.equal(result.proofNeeded, "service", acceptance);
+  }
+});
+
+test("hyphenated CI-only wording suppresses keyword-only service escalation", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 109,
+    title: "Harden database projection parsing",
+    body: `### Outcome
+
+Postgres driver values project deterministically.
+
+### Acceptance criteria
+
+- [ ] Database projection tests pass.
+
+### Proof
+
+CI-only.`,
+    labels: [{ name: config.labels.priorityLow }]
+  });
+
+  assert.equal(result.proofNeeded, "CI");
+});
+
+test("CI-only wording suppresses keyword-only media escalation", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 110,
+    title: "Harden video upload metadata parsing",
+    body: `### Outcome
+
+Video metadata inputs parse deterministically.
+
+### Acceptance criteria
+
+- [ ] Video upload metadata parser tests pass.
+
+### Proof
+
+CI-only.`,
+    labels: [{ name: config.labels.priorityLow }]
+  });
+
+  assert.equal(result.proofNeeded, "CI");
+});
+
+test("CI-only wording cannot suppress explicitly requested GIF evidence", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 111,
+    title: "Improve the task transition",
+    body: `### Outcome
+
+Task transitions remain smooth.
+
+### Acceptance criteria
+
+- [ ] Capture a GIF showing the complete transition.
+
+### Proof
+
+CI-only.`,
+    labels: [{ name: config.labels.priorityLow }]
+  });
+
+  assert.equal(result.proofNeeded, "GIF");
+});
+
+test("negated proofless wording cannot suppress service proof", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 112,
+    title: "Validate database migration behavior",
+    body: `### Outcome
+
+Database migration behavior is validated.
+
+### Plan or context
+
+This is not proofless.
+Do not keep this proofless.
+
+### Acceptance criteria
+
+- [ ] Migration checks pass.
+
+### Proof
+
+Automated checks.`,
+    labels: [{ name: config.labels.priorityLow }]
+  });
+
+  assert.equal(result.proofNeeded, "service");
+});
+
+test("CI-only wording cannot suppress an explicit deployment acceptance clause", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 107,
+    title: "Prepare the release deployment",
+    body: `### Outcome
+
+The release is ready.
+
+### Acceptance criteria
+
+- [ ] Deploy to staging.
+- [ ] Verify the production deployment succeeds.
+
+### Proof
+
+CI only.`,
+    labels: [{ name: config.labels.priorityLow }]
+  });
+
+  assert.equal(result.proofNeeded, "service");
+});
+
+test("CI-only wording cannot suppress explicit Render or disposable service deployment", () => {
+  for (const acceptance of ["Deploy to Render.", "Deploy to a disposable service."]) {
+    const result = lightweightTriageDecision(config, {
+      number: 113,
+      title: "Validate deployment",
+      body: `### Outcome
+
+The deployment is ready.
+
+### Acceptance criteria
+
+- [ ] ${acceptance}
+
+### Proof
+
+CI only.`,
+      labels: [{ name: config.labels.priorityLow }]
+    });
+
+    assert.equal(result.proofNeeded, "service", acceptance);
+  }
+});
+
+test("negated deployment wording cannot override explicit proofless scope", () => {
+  const result = lightweightTriageDecision(config, {
+    number: 108,
+    title: "Document deployment exclusions",
+    body: `### Outcome
+
+The deployment exclusions are documented.
+
+### Plan or context
+
+This is a proofless documentation change.
+
+### Acceptance criteria
+
+- [ ] Do not deploy to staging.
+- [ ] Remove the deploy button wording.
+- [ ] Production deployment is not required.
+1. Do not deploy to staging.
+2) Must not deploy to production.
+
+### Proof
+
+CI only.`,
     labels: [{ name: config.labels.priorityLow }]
   });
 
