@@ -84,7 +84,8 @@ Codex authentication defaults to `auto`: prefer `CODEX_ACCESS_TOKEN`, otherwise 
 Only the selected credential reaches the Codex child process or delegated Crabbox lane.
 
 Each model invocation produces a bounded per-call usage record with input, cached input, output, and reasoning-output counts when available.
-`agent-cost` prices the immutable usage record against the versioned model snapshot, adds actual Crabbox provider timing, records GitHub Actions minutes when available, and separates marginal issue cost from fixed service plans.
+`agent-cost` prices metered API usage against the versioned model snapshot and records subscription-backed usage as plan-included incremental model cost instead of fake API spend.
+It adds actual Crabbox provider timing, records GitHub Actions minutes when available, and separates marginal issue cost from fixed service plans.
 Vercel Sandbox cost is an explicit upper-bound estimate.
 Hetzner cost uses a versioned conservative ceiling for the pinned `beast` class, hourly billing increments, and primary IPv4.
 Unpriced provider usage stays incomplete instead of inventing a number.
@@ -436,7 +437,7 @@ This is the duplicate-model boundary for interruption recovery.
 - Render and production database credentials remain in trusted operations and deployed services, not the implementation lease.
 - Trusted post-merge Render evidence stores only exact commit, deployment state, bounded log counts, and configured public health results.
   It never stores the Render service ID or raw logs.
-- Codex Action author gates allow the repository owner and `github-actions[bot]`; cross-repository PR review is rejected before Codex runs.
+- Trusted agent PR author gates allow the repository owner and `github-actions[bot]`; cross-repository PR review is rejected before Codex runs.
 - High-risk or high-priority work requires human review.
 - A missing provider, artifact, or lease blocks required visual proof; it does not fake success.
 - Credentialed Crabbox providers require readiness proof; built-in `local-container` receives no provider credentials and passes a scheduled lifecycle smoke plus the same route, lease, desktop, media, and behavior checks when used for proof.

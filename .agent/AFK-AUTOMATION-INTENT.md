@@ -455,7 +455,7 @@ Verified bootstrap on 2026-07-24:
 
 Reverify all bootstrap claims before a production rollout because credentials, provider readiness, and account state drift.
 The current checkout contains the Crabbox-only model lanes, selected skill bundle, scoped auth bootstrap, semantic behavior proof, shared repair ledger, cost accounting, trusted post-merge verification, and scheduled readiness.
-Subscription-token migration and fresh end-to-end issue canaries remain acceptance work.
+Subscription-token configuration, its redacted production canary, and fresh end-to-end issue canaries remain acceptance work.
 
 ## Intent Contract
 
