@@ -122,7 +122,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           READINESS_EXPECTED_HEAD: ${{ inputs.expected-head-sha || github.sha }}
-          AGENT_AUTH_PRESENT: ${{ secrets.CODEX_ACCESS_TOKEN != '' || secrets.OPENAI_API_KEY != '' }}
+          CODEX_ACCESS_TOKEN_PRESENT: ${{ secrets.CODEX_ACCESS_TOKEN != '' }}
+          CODEX_API_KEY_PRESENT: ${{ secrets.OPENAI_API_KEY != '' }}
           PUBLISHER_AUTH_PRESENT: ${{ secrets.AGENT_GITHUB_TOKEN != '' }}
           PRIMARY_PROVIDER_AUTH_PRESENT: ${{ (vars.CRABBOX_VERCEL_READY == 'true' && (secrets.VERCEL_TOKEN != '' || secrets.VERCEL_OIDC_TOKEN != '')) || (vars.CRABBOX_HETZNER_READY == 'true' && (secrets.HCLOUD_TOKEN != '' || secrets.HETZNER_TOKEN != '' || secrets.HETZNER_API_TOKEN != '')) }}
           RENDER_AUTH_PRESENT: ${{ secrets.RENDER_API_KEY != '' && secrets.RENDER_WORKSPACE_ID != '' }}

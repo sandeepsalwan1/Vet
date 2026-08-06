@@ -16,6 +16,7 @@ import {
   repoSlug,
   withTempJson
 } from "./agent-lib.mjs";
+import { resolveCodexAuthentication } from "./agent-worker.mjs";
 
 export const READINESS_MARKER = "<!-- agent-readiness:v1 -->";
 
@@ -276,8 +277,20 @@ function api(config, path, options = {}) {
   return ghApiJson(`repos/${config.repo.owner}/${config.repo.name}/${path}`, options);
 }
 
-function booleanEnvironment(name) {
-  return String(process.env[name] ?? "").toLowerCase() === "true";
+function booleanEnvironment(name, env = process.env) {
+  return String(env[name] ?? "").toLowerCase() === "true";
+}
+
+export function modelAuthenticationPresent(config, env = process.env) {
+  const authentication = resolveCodexAuthentication(config, {
+    CODEX_ACCESS_TOKEN: booleanEnvironment("CODEX_ACCESS_TOKEN_PRESENT", env)
+      ? "present"
+      : "",
+    CODEX_API_KEY: booleanEnvironment("CODEX_API_KEY_PRESENT", env)
+      ? "present"
+      : ""
+  });
+  return authentication.authenticationMode !== "missing";
 }
 
 export function verifyPublisherAccess(config, dependencies = {}) {
@@ -320,6 +333,7 @@ function readJsonIfPresent(path, fallback) {
 }
 
 export function collectReadinessSnapshot(config, options = {}) {
+  const env = options.env ?? process.env;
   const readApi =
     options.api ??
     ((path, apiOptions = {}) => api(config, path, apiOptions));
@@ -366,10 +380,10 @@ export function collectReadinessSnapshot(config, options = {}) {
     branch: readApi(`branches/${config.repo.defaultBranch}`),
     readinessRuns,
     credentials: {
-      agentAuth: booleanEnvironment("AGENT_AUTH_PRESENT"),
-      publisher: booleanEnvironment("PUBLISHER_AUTH_PRESENT"),
-      primaryProvider: booleanEnvironment("PRIMARY_PROVIDER_AUTH_PRESENT"),
-      render: booleanEnvironment("RENDER_AUTH_PRESENT")
+      agentAuth: modelAuthenticationPresent(config, env),
+      publisher: booleanEnvironment("PUBLISHER_AUTH_PRESENT", env),
+      primaryProvider: booleanEnvironment("PRIMARY_PROVIDER_AUTH_PRESENT", env),
+      render: booleanEnvironment("RENDER_AUTH_PRESENT", env)
     },
     publisherRecord: readJsonIfPresent(options.publisherRecord, null),
     providerRecord: readJsonIfPresent(options.providerRecord, null),
@@ -378,7 +392,7 @@ export function collectReadinessSnapshot(config, options = {}) {
       null
     ),
     renderRecord: readJsonIfPresent(options.renderRecord, null),
-    staticAgentTests: booleanEnvironment("STATIC_AGENT_TESTS_PASSED"),
+    staticAgentTests: booleanEnvironment("STATIC_AGENT_TESTS_PASSED", env),
     audit: readJsonIfPresent(options.auditRecord, { ok: false })
   };
 }
