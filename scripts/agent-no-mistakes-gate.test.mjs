@@ -104,7 +104,12 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
   const gate = readFileSync(new URL("./agent-no-mistakes-gate.mjs", import.meta.url), "utf8");
   const review = readFileSync(new URL("./agent-review.mjs", import.meta.url), "utf8");
 
+  assert.match(workflow, /CODEX_ACCESS_TOKEN:[\s\S]*?required: false[\s\S]*?OPENAI_API_KEY:[\s\S]*?required: false/);
   assert.match(workflow, /--validate-backend --lane no-mistakes --json/);
+  assert.match(
+    workflow,
+    /backend_authentication_mode: \$\{\{ steps\.backend\.outputs\.authentication_mode \}\}/,
+  );
   assert.match(workflow, /--lane noMistakesRemote/);
   assert.match(
     workflow,
@@ -206,7 +211,16 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
     workflow,
     /if \[ "\$\{\{ inputs\.approval \}\}" = "true" \]; then approval_flag="--user-approved"; fi/,
   );
-  assert.match(workflow, /export CODEX_API_KEY="\$agent_key";/);
+  assert.match(
+    workflow,
+    /if \[ "\$authentication_mode" = "chatgpt-access-token" \]; then[\s\S]*?export CODEX_ACCESS_TOKEN="\$agent_access_token";[\s\S]*?unset CODEX_API_KEY;[\s\S]*?else[\s\S]*?export CODEX_API_KEY="\$agent_api_key";[\s\S]*?unset CODEX_ACCESS_TOKEN;/,
+  );
+  assert.match(
+    workflow,
+    /case "\$\{\{ needs\.prepare\.outputs\.backend_authentication_mode \}\}" in[\s\S]*?auto\)[\s\S]*?access-token\)[\s\S]*?api-key\)/,
+  );
+  assert.match(workflow, /trap preserve_setup_failure EXIT;\n\s+if \[ "\$missing_auth" -ne 0 \]; then exit 1; fi;/);
+  assert.match(workflow, /--authentication-mode "\$authentication_mode"/);
   assert.match(workflow, /export NM_HOME=\/tmp\/no-mistakes-home;/);
   assert.match(
     workflow,
@@ -218,7 +232,7 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
   assert.match(workflow, /npm run typecheck &&\n\s+npm run build &&\n\s+npm run test:scenarios/);
   assert.ok(
     workflow.indexOf("npm run test:scenarios") <
-      workflow.indexOf('CODEX_API_KEY="$agent_key"'),
+      workflow.indexOf('CODEX_ACCESS_TOKEN="$agent_access_token"'),
   );
   assert.match(
     workflow,
@@ -439,7 +453,9 @@ test("early no-mistakes setup failures produce terminal sanitized artifacts", (t
   });
   assert.deepEqual(written.artifact, setupFailureArtifact(HEAD));
   assert.equal(JSON.parse(readFileSync(resultFile)).outcome, "setup-failed");
-  assert.deepEqual(JSON.parse(readFileSync(usageFile)).calls, []);
+  const usage = JSON.parse(readFileSync(usageFile));
+  assert.equal(usage.authenticationMode, "metered-api");
+  assert.deepEqual(usage.calls, []);
 });
 
 test("interrupted started model is terminal and usage-incomplete", (t) => {
@@ -522,6 +538,7 @@ review  1  review  cold  1200  80  900  1200  80  900  0  300  20
   });
 
   assert.equal(usage.complete, true);
+  assert.equal(usage.authenticationMode, "metered-api");
   assert.equal(usage.calls.length, 1);
   assert.deepEqual(usage.calls[0], {
     id: usage.calls[0].id,
@@ -1016,6 +1033,7 @@ test("no-mistakes uses its own composite managed-comment marker", () => {
 
 test("authenticated gate child receives no GitHub or Actions credentials", () => {
   const env = gateEnvironment({
+    CODEX_ACCESS_TOKEN: "subscription-token",
     CODEX_API_KEY: "model-key",
     AGENT_GITHUB_TOKEN: "publisher-key",
     GH_TOKEN: "github-key",
@@ -1028,7 +1046,8 @@ test("authenticated gate child receives no GitHub or Actions credentials", () =>
     NM_TEST_START_DAEMON: "1",
   });
 
-  assert.equal(env.CODEX_API_KEY, "model-key");
+  assert.equal(env.CODEX_ACCESS_TOKEN, "subscription-token");
+  assert.equal(Object.hasOwn(env, "CODEX_API_KEY"), false);
   assert.equal(env.NM_TEST_START_DAEMON, "1");
   for (const name of [
     "AGENT_GITHUB_TOKEN",
@@ -1042,6 +1061,16 @@ test("authenticated gate child receives no GitHub or Actions credentials", () =>
   ]) {
     assert.equal(Object.hasOwn(env, name), false, name);
   }
+});
+
+test("authenticated gate child uses the API fallback only without a subscription token", () => {
+  const env = gateEnvironment({
+    CODEX_ACCESS_TOKEN: "",
+    CODEX_API_KEY: "model-key",
+  });
+
+  assert.equal(Object.hasOwn(env, "CODEX_ACCESS_TOKEN"), false);
+  assert.equal(env.CODEX_API_KEY, "model-key");
 });
 
 test("nonzero AXI exit produces a finalizable sanitized failure", () => {

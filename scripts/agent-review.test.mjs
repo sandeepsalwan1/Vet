@@ -939,6 +939,7 @@ test("review schema and unresolved questions fail closed", () => {
 
 test("review fixes stay credential-free and bound to the prepared head", () => {
   const workflow = readFileSync(new URL("../.github/workflows/agent-review.yml", import.meta.url), "utf8");
+  assert.match(workflow, /CODEX_ACCESS_TOKEN:[\s\S]*?required: false[\s\S]*?OPENAI_API_KEY:[\s\S]*?required: false/);
   const reviewScript = readFileSync(new URL("./agent-review.mjs", import.meta.url), "utf8");
   const ciWorkflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   const codeqlWorkflow = readFileSync(new URL("../.github/workflows/codeql.yml", import.meta.url), "utf8");

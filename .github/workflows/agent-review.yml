@@ -18,9 +18,12 @@ on:
       AGENT_GITHUB_TOKEN:
         description: Repository-scoped owner credential for reviewed repair publication
         required: true
+      CODEX_ACCESS_TOKEN:
+        description: Optional ChatGPT workspace token for the isolated review lane
+        required: false
       OPENAI_API_KEY:
-        description: Model credential for the isolated review lane
-        required: true
+        description: Optional API fallback for the isolated review lane
+        required: false
       VERCEL_TOKEN:
         description: Optional Vercel credential for review leases
         required: false
@@ -229,6 +232,7 @@ jobs:
           vercel-ready: ${{ vars.CRABBOX_VERCEL_READY }}
       - name: Review exact head in Crabbox
         env:
+          CODEX_ACCESS_TOKEN: ${{ secrets.CODEX_ACCESS_TOKEN }}
           CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_OIDC_TOKEN: ${{ secrets.VERCEL_OIDC_TOKEN }}
@@ -244,7 +248,9 @@ jobs:
             --input-workdir candidate --json &&
             cd candidate &&
             export AGENT_TARGET_ROOT="$PWD";
-            agent_key="$CODEX_API_KEY"; unset CODEX_API_KEY OPENAI_API_KEY;
+            agent_access_token="${CODEX_ACCESS_TOKEN:-}";
+            agent_api_key="${CODEX_API_KEY:-}";
+            unset CODEX_ACCESS_TOKEN CODEX_API_KEY OPENAI_API_KEY;
             node ../trusted/scripts/agent-crabbox-run.mjs
             --seed-exact-repository
             --input-workdir "$PWD"
@@ -255,7 +261,8 @@ jobs:
             > /tmp/vet-review-prompt-input.json &&
             node ../trusted/scripts/agent-skill-discovery.mjs
             --input /tmp/vet-review-prompt-input.json --json &&
-            CODEX_API_KEY="$agent_key" node ../trusted/scripts/agent-worker.mjs
+            CODEX_ACCESS_TOKEN="$agent_access_token"
+            CODEX_API_KEY="$agent_api_key" node ../trusted/scripts/agent-worker.mjs
             --lane review
             --model "${{ needs.prepare-review.outputs.backend-model }}"
             --effort "${{ needs.prepare-review.outputs.backend-effort }}"
@@ -264,7 +271,7 @@ jobs:
             --schema .agent-output/review.schema.json
             --usage-file .agent-output/model-usage.json
             --output-file .agent-output/review.json &&
-            unset agent_key && node ../trusted/scripts/agent-review.mjs
+            unset agent_access_token agent_api_key && node ../trusted/scripts/agent-review.mjs
             --pr-number "${{ inputs.pr-number }}"
             --create-patch .agent-output/review.patch --json
         run: >-

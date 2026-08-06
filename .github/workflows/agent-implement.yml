@@ -9,8 +9,10 @@ on:
     secrets:
       AGENT_GITHUB_TOKEN:
         required: true
+      CODEX_ACCESS_TOKEN:
+        required: false
       OPENAI_API_KEY:
-        required: true
+        required: false
       VERCEL_TOKEN:
         required: false
       VERCEL_OIDC_TOKEN:
@@ -75,7 +77,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
-          AGENT_AUTH_PRESENT: ${{ secrets.OPENAI_API_KEY != '' }}
+          AGENT_AUTH_PRESENT: ${{ secrets.CODEX_ACCESS_TOKEN != '' || secrets.OPENAI_API_KEY != '' }}
           PUBLISHER_AUTH_PRESENT: ${{ secrets.AGENT_GITHUB_TOKEN != '' }}
           PRIMARY_PROVIDER_AUTH_PRESENT: ${{ (vars.CRABBOX_VERCEL_READY == 'true' && (secrets.VERCEL_TOKEN != '' || secrets.VERCEL_OIDC_TOKEN != '')) || (vars.CRABBOX_HETZNER_READY == 'true' && (secrets.HCLOUD_TOKEN != '' || secrets.HETZNER_TOKEN != '' || secrets.HETZNER_API_TOKEN != '')) }}
           RENDER_AUTH_PRESENT: ${{ secrets.RENDER_API_KEY != '' && secrets.RENDER_WORKSPACE_ID != '' }}
@@ -143,6 +145,7 @@ jobs:
       - name: Generate patch in Crabbox
         id: generate
         env:
+          CODEX_ACCESS_TOKEN: ${{ secrets.CODEX_ACCESS_TOKEN }}
           CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_OIDC_TOKEN: ${{ secrets.VERCEL_OIDC_TOKEN }}
@@ -155,7 +158,9 @@ jobs:
             set -e;
             node scripts/agent-crabbox-run.mjs
             --restore-input-lane implementRemote --json &&
-            agent_key="$CODEX_API_KEY"; unset CODEX_API_KEY OPENAI_API_KEY;
+            agent_access_token="${CODEX_ACCESS_TOKEN:-}";
+            agent_api_key="${CODEX_API_KEY:-}";
+            unset CODEX_ACCESS_TOKEN CODEX_API_KEY OPENAI_API_KEY;
             node scripts/agent-crabbox-run.mjs
             --seed-exact-repository
             --expected-tree "${{ steps.source-tree.outputs.tree }}" --json &&
@@ -165,13 +170,14 @@ jobs:
             > /tmp/vet-worker-prompt-input.json &&
             node scripts/agent-skill-discovery.mjs
             --input /tmp/vet-worker-prompt-input.json --json &&
-            CODEX_API_KEY="$agent_key" node scripts/agent-worker.mjs
+            CODEX_ACCESS_TOKEN="$agent_access_token"
+            CODEX_API_KEY="$agent_api_key" node scripts/agent-worker.mjs
             --sandbox danger-full-access
             --prompt-file .agent-output/implement-prompt.md
             --schema .agent/schemas/implementation.schema.json
             --usage-file .agent-output/model-usage.json
             --output-file .agent-output/implementation.md &&
-            unset agent_key && node scripts/agent-implement.mjs
+            unset agent_access_token agent_api_key && node scripts/agent-implement.mjs
             --issue-number "${{ inputs.issue-number }}"
             --create-patch .agent-output/codex.patch --json
         run: >-
@@ -275,6 +281,7 @@ jobs:
       - name: Repair patch in Crabbox
         id: generate
         env:
+          CODEX_ACCESS_TOKEN: ${{ secrets.CODEX_ACCESS_TOKEN }}
           CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_OIDC_TOKEN: ${{ secrets.VERCEL_OIDC_TOKEN }}
@@ -287,7 +294,9 @@ jobs:
             set -e;
             node scripts/agent-crabbox-run.mjs
             --restore-input-lane implementRepairRemote --json &&
-            agent_key="$CODEX_API_KEY"; unset CODEX_API_KEY OPENAI_API_KEY;
+            agent_access_token="${CODEX_ACCESS_TOKEN:-}";
+            agent_api_key="${CODEX_API_KEY:-}";
+            unset CODEX_ACCESS_TOKEN CODEX_API_KEY OPENAI_API_KEY;
             node scripts/agent-crabbox-run.mjs
             --seed-exact-repository
             --expected-tree "${{ steps.source-tree.outputs.tree }}" --json &&
@@ -298,7 +307,8 @@ jobs:
             > /tmp/vet-worker-repair-prompt-input.json &&
             node scripts/agent-skill-discovery.mjs
             --input /tmp/vet-worker-repair-prompt-input.json --json &&
-            CODEX_API_KEY="$agent_key" node scripts/agent-worker.mjs
+            CODEX_ACCESS_TOKEN="$agent_access_token"
+            CODEX_API_KEY="$agent_api_key" node scripts/agent-worker.mjs
             --lane implement
             --model "${{ needs.prepare-prompt.outputs.backend-model }}"
             --effort "${{ needs.prepare-prompt.outputs.backend-effort }}"
@@ -307,7 +317,7 @@ jobs:
             --schema .agent/schemas/implementation.schema.json
             --usage-file .agent-output/model-usage.json
             --output-file .agent-output/implementation.md &&
-            unset agent_key && node scripts/agent-implement.mjs
+            unset agent_access_token agent_api_key && node scripts/agent-implement.mjs
             --issue-number "${{ inputs.issue-number }}"
             --create-patch .agent-output/codex.patch --json
         run: >-

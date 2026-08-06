@@ -20,6 +20,7 @@ import {
 
 const CODEX_SANDBOXES = new Set(["read-only", "workspace-write", "danger-full-access"]);
 const CODEX_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);
+const CODEX_AUTH_MODES = new Set(["auto", "access-token", "api-key"]);
 const CODEX_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const CODEX_PREFLIGHT_RETRY_DELAYS_MS = Object.freeze([1000, 2000, 4000, 8000, 16000]);
 const CODEX_PREFLIGHT_RETRY_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
@@ -86,6 +87,7 @@ function codexArgs(args, config) {
     `shell_environment_policy.exclude=${JSON.stringify([
       ...new Set([
         config.secrets?.agentAuth,
+        "CODEX_ACCESS_TOKEN",
         "CODEX_API_KEY",
         "CODEX_HOME",
         "OPENAI_API_KEY",
@@ -155,6 +157,7 @@ export function parseCodexUsage(output, settings) {
     lane: settings.lane,
     model: settings.model,
     effort: settings.effort,
+    authenticationMode: settings.authenticationMode ?? "metered-api",
     complete: calls.length > 0,
     calls
   };
@@ -166,18 +169,45 @@ function writeUsage(path, usage) {
   writeFileSync(target, `${JSON.stringify(usage, null, 2)}\n`, { mode: 0o600 });
 }
 
-function codexAuthNames(config) {
+export function codexAuthNames(config) {
   const configured = nonemptyString(config.secrets?.agentAuth, "agent auth secret name");
-  return [...new Set([configured, "CODEX_API_KEY"])];
+  return [...new Set([configured, "CODEX_ACCESS_TOKEN", "CODEX_API_KEY"])];
+}
+
+export function resolveCodexAuthentication(config, source = process.env) {
+  const configured = nonemptyString(config.secrets?.agentAuth, "agent auth secret name");
+  const requestedMode = config.backend?.authenticationMode ?? "auto";
+  if (!CODEX_AUTH_MODES.has(requestedMode)) {
+    throw new AgentError(`unsupported Codex authentication mode: ${requestedMode}`, 2);
+  }
+  const env = { ...source };
+  const accessToken = env.CODEX_ACCESS_TOKEN;
+  const apiKey = env.CODEX_API_KEY || (configured === "CODEX_ACCESS_TOKEN" ? "" : env[configured]);
+  const useAccessToken =
+    requestedMode !== "api-key" && typeof accessToken === "string" && accessToken.length > 0;
+  const useApiKey =
+    !useAccessToken &&
+    requestedMode !== "access-token" &&
+    typeof apiKey === "string" &&
+    apiKey.length > 0;
+  for (const name of codexAuthNames(config)) delete env[name];
+  delete env.OPENAI_API_KEY;
+  if (useAccessToken) env.CODEX_ACCESS_TOKEN = accessToken;
+  if (useApiKey) env.CODEX_API_KEY = apiKey;
+  return {
+    requestedMode,
+    authenticationMode: useAccessToken
+      ? "chatgpt-access-token"
+      : useApiKey
+        ? "metered-api"
+        : "missing",
+    name: useAccessToken ? "CODEX_ACCESS_TOKEN" : useApiKey ? "CODEX_API_KEY" : "",
+    env
+  };
 }
 
 function codexEnvironment(config, source) {
-  const configured = nonemptyString(config.secrets?.agentAuth, "agent auth secret name");
-  const env = { ...source };
-  const key = env.CODEX_API_KEY || env[configured];
-  if (configured !== "CODEX_API_KEY") delete env[configured];
-  if (key) env.CODEX_API_KEY = key;
-  return env;
+  return resolveCodexAuthentication(config, source).env;
 }
 
 export async function preflightCodexModel({
@@ -355,11 +385,14 @@ export function resolveWorkerBackend(config, requestedBackend) {
 export function createWorkerInvocation(args, config, source = process.env) {
   const backend = resolveWorkerBackend(config, args.backend);
   const authNames = backend.adapter.authNames(config);
+  const authentication = resolveCodexAuthentication(config, source);
   return {
     backend: backend.name,
     executable: backend.adapter.executable,
     args: backend.adapter.args(args, config),
     auth: secretState(authNames, source),
+    requestedAuthenticationMode: authentication.requestedMode,
+    authenticationMode: authentication.authenticationMode,
     env: backend.adapter.environment(config, source)
   };
 }
@@ -371,12 +404,13 @@ export async function main(argv = process.argv.slice(2)) {
   const backend = resolveWorkerBackend(config, args.backend);
   if (args["validate-backend"]) {
     const settings = resolveCodexSettings(config, args.lane);
-    createWorkerInvocation(
+    const invocation = createWorkerInvocation(
       { ...args, "prompt-file": ".agent/prompts/implement.md" },
       config,
       {}
     );
     setGitHubOutput({
+      authentication_mode: invocation.requestedAuthenticationMode,
       backend: backend.name,
       effort: settings.effort,
       lane: settings.lane,
@@ -388,6 +422,7 @@ export async function main(argv = process.argv.slice(2)) {
         ok: true,
         message: `configured ${settings.lane} worker backend: ${backend.name}`,
         backend: backend.name,
+        authenticationMode: invocation.requestedAuthenticationMode,
         ...settings
       },
       Boolean(args.json)
@@ -396,7 +431,7 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   const invocation = createWorkerInvocation(args, config);
-  const hasAuth = invocation.auth.some((item) => item.present);
+  const hasAuth = invocation.authenticationMode !== "missing";
   if (!hasAuth && !dryRun) throw new AgentError("missing agent auth secret", 2, invocation.auth);
   if (!commandExists(invocation.executable) && !dryRun) {
     throw new AgentError(`${invocation.backend} worker CLI not found: ${invocation.executable}`, 2);
@@ -409,6 +444,7 @@ export async function main(argv = process.argv.slice(2)) {
         message: `would run ${invocation.backend} worker`,
         backend: invocation.backend,
         command: [invocation.executable, ...invocation.args],
+        authenticationMode: invocation.authenticationMode,
         auth: invocation.auth
       },
       Boolean(args.json)
@@ -425,18 +461,24 @@ export async function main(argv = process.argv.slice(2)) {
     validateCodexOutputSchema(schema);
   }
   const settings = resolveCodexRunSettings(config, args);
-  await preflightCodexModel({
-    key: invocation.env.CODEX_API_KEY,
-    model: settings.model,
-    onRetry: ({ attempt, delayMs, failure, maxAttempts }) => {
-      process.stderr.write(
-        `Codex model preflight unavailable: ${failure}; retry ${attempt}/${maxAttempts - 1} in ${delayMs}ms\n`
-      );
-    }
-  });
-  process.stderr.write(
-    `Codex model preflight passed: lane=${settings.lane} model=${settings.model}\n`
-  );
+  if (invocation.authenticationMode === "metered-api") {
+    await preflightCodexModel({
+      key: invocation.env.CODEX_API_KEY,
+      model: settings.model,
+      onRetry: ({ attempt, delayMs, failure, maxAttempts }) => {
+        process.stderr.write(
+          `Codex model preflight unavailable: ${failure}; retry ${attempt}/${maxAttempts - 1} in ${delayMs}ms\n`
+        );
+      }
+    });
+    process.stderr.write(
+      `Codex model preflight passed: lane=${settings.lane} model=${settings.model} auth=metered-api\n`
+    );
+  } else {
+    process.stderr.write(
+      `Codex access-token authentication selected: lane=${settings.lane} model=${settings.model}\n`
+    );
+  }
   const workerStateDir = mkdtempSync(join(tmpdir(), "vet-codex-home-"));
   invocation.env.CODEX_HOME = workerStateDir;
   const result = runCommand(invocation.executable, invocation.args, {
@@ -448,7 +490,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (args["usage-file"]) {
     const usage = parseCodexUsage(
       result.stdout,
-      settings
+      { ...settings, authenticationMode: invocation.authenticationMode }
     );
     writeUsage(args["usage-file"], usage);
     if (result.status === 0 && !usage.complete) {

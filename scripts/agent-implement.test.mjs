@@ -953,6 +953,8 @@ test("repair prompt binds sealed intent and treats feedback as bounded data", (t
 
 test("implementation workflow isolates candidate checks from credentials, artifacts, and command channels", () => {
   const workflow = readFileSync(join(process.cwd(), ".github/workflows/agent-implement.yml"), "utf8");
+  assert.match(workflow, /CODEX_ACCESS_TOKEN:\n\s+required: false/);
+  assert.match(workflow, /OPENAI_API_KEY:\n\s+required: false/);
   const validationAction = readFileSync(
     join(process.cwd(), ".github/actions/validate-agent-implementation/action.yml"),
     "utf8"

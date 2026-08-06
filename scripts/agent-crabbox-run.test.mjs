@@ -43,6 +43,7 @@ import {
 
 const config = {
   secrets: {
+    agentAuth: "OPENAI_API_KEY",
     crabboxCoordinator: "CRABBOX_COORDINATOR_TOKEN",
     crabboxProviders: ["HCLOUD_TOKEN", "HETZNER_TOKEN", "HETZNER_API_TOKEN"],
     vercel: ["VERCEL_TOKEN", "VERCEL_OIDC_TOKEN"]
@@ -484,6 +485,7 @@ test("Crabbox child receives only selected provider auth and readiness", () => {
     VERCEL_OIDC_TOKEN: "vercel-oidc",
     CRABBOX_VERCEL_READY: "true",
     CRABBOX_HETZNER_READY: "true",
+    CODEX_ACCESS_TOKEN: "subscription",
     CODEX_API_KEY: "agent",
     GH_TOKEN: "github"
   };
@@ -521,20 +523,24 @@ test("Crabbox child receives only selected provider auth and readiness", () => {
     "coordinator"
   );
   assert.equal(
-    providerChildEnvironment(config, { provider: "vercel-sandbox", lane: "implementRemote" }, source).CODEX_API_KEY,
-    "agent"
+    providerChildEnvironment(config, { provider: "vercel-sandbox", lane: "implementRemote" }, source).CODEX_ACCESS_TOKEN,
+    "subscription"
   );
   assert.equal(
-    providerChildEnvironment(config, { provider: "vercel-sandbox", lane: "implementRepairRemote" }, source).CODEX_API_KEY,
-    "agent"
+    providerChildEnvironment(config, { provider: "vercel-sandbox", lane: "implementRepairRemote" }, source).CODEX_ACCESS_TOKEN,
+    "subscription"
+  );
+  assert.equal(
+    providerChildEnvironment(config, { provider: "vercel-sandbox", lane: "reviewRemote" }, source).CODEX_ACCESS_TOKEN,
+    "subscription"
+  );
+  assert.equal(
+    providerChildEnvironment(config, { provider: "vercel-sandbox", lane: "noMistakesRemote" }, source).CODEX_ACCESS_TOKEN,
+    "subscription"
   );
   assert.equal(
     providerChildEnvironment(config, { provider: "vercel-sandbox", lane: "reviewRemote" }, source).CODEX_API_KEY,
-    "agent"
-  );
-  assert.equal(
-    providerChildEnvironment(config, { provider: "vercel-sandbox", lane: "noMistakesRemote" }, source).CODEX_API_KEY,
-    "agent"
+    undefined
   );
 });
 
@@ -756,7 +762,7 @@ test("Vercel implementation uses a bounded stdout handoff instead of unsupported
 
   assert.deepEqual(
     vercelArgs.filter((value, index) => vercelArgs[index - 1] === "--allow-env"),
-    ["CODEX_API_KEY"]
+    ["CODEX_ACCESS_TOKEN", "CODEX_API_KEY"]
   );
   assert.equal(vercelArgs.includes("--download"), false);
   assert.match(vercelArgs.at(-1), /AGENT_CRABBOX_REMOTE_COMMAND_STARTED_V1/);
@@ -816,7 +822,7 @@ test("remote review uses the same bounded credential-free Crabbox handoff", (t) 
   });
   assert.deepEqual(
     args.filter((value, index) => args[index - 1] === "--allow-env"),
-    ["CODEX_API_KEY"],
+    ["CODEX_ACCESS_TOKEN", "CODEX_API_KEY"],
   );
   assert.match(
     args.at(-1),

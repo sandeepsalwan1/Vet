@@ -48,6 +48,8 @@ export function validateModelUsage(value, expectedLane) {
     !value.model ||
     typeof value.effort !== "string" ||
     !value.effort ||
+    (value.authenticationMode !== undefined &&
+      !["metered-api", "chatgpt-access-token"].includes(value.authenticationMode)) ||
     typeof value.complete !== "boolean" ||
     !Array.isArray(value.calls) ||
     value.calls.length > 20
@@ -95,14 +97,18 @@ export function validateModelUsage(value, expectedLane) {
 export function priceModelUsage(config, usage) {
   const price = config.cost.modelPricing.models[usage.model];
   if (!price) throw new AgentError(`no price snapshot for model ${usage.model}`, 1);
+  const authenticationMode = usage.authenticationMode ?? config.cost.authenticationMode;
+  const subscriptionBacked = authenticationMode === "chatgpt-access-token";
   const calls = usage.calls.map((call) => {
     const uncachedInputTokens = call.inputTokens - call.cachedInputTokens;
-    const estimatedUsd = roundUsd(
-      (uncachedInputTokens * price.inputPerMillionUsd +
-        call.cachedInputTokens * price.cachedInputPerMillionUsd +
-        call.outputTokens * price.outputPerMillionUsd) /
-        1_000_000
-    );
+    const estimatedUsd = subscriptionBacked
+      ? 0
+      : roundUsd(
+          (uncachedInputTokens * price.inputPerMillionUsd +
+            call.cachedInputTokens * price.cachedInputPerMillionUsd +
+            call.outputTokens * price.outputPerMillionUsd) /
+            1_000_000
+        );
     return { ...call, uncachedInputTokens, estimatedUsd };
   });
   return {
@@ -111,9 +117,13 @@ export function priceModelUsage(config, usage) {
     backend: usage.backend,
     model: usage.model,
     effort: usage.effort,
-    authenticationMode: config.cost.authenticationMode,
-    pricingVersion: config.cost.modelPricing.version,
-    pricingSource: config.cost.modelPricing.source,
+    authenticationMode,
+    pricingVersion: subscriptionBacked
+      ? "chatgpt-workspace-plan"
+      : config.cost.modelPricing.version,
+    pricingSource: subscriptionBacked
+      ? "https://learn.chatgpt.com/docs/auth"
+      : config.cost.modelPricing.source,
     calls,
     totals: {
       inputTokens: calls.reduce((sum, call) => sum + call.inputTokens, 0),
