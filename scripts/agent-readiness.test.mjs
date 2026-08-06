@@ -6,6 +6,7 @@ import {
   collectReadinessSnapshot,
   evaluateReadiness,
   exactHeadCheckState,
+  modelAuthenticationPresent,
   publishReadiness,
   recoverPreflightReadiness,
   readinessSummary,
@@ -18,6 +19,8 @@ const headSha = "a".repeat(40);
 const details = "https://github.com/owner/repo/actions/runs/12/job/34";
 const config = {
   repo: { owner: "owner", name: "repo", defaultBranch: "main" },
+  backend: { authenticationMode: "auto" },
+  secrets: { agentAuth: "OPENAI_API_KEY" },
   automerge: { requiredChecks: ["quality", "build", "scenarios", "audit", "dependency-review"] },
   crabbox: { nonVisualProviders: ["vercel-sandbox", "hetzner"] },
   readiness: {
@@ -31,6 +34,34 @@ const config = {
     alertTitle: "AFK automation readiness drift"
   }
 };
+
+test("readiness honors configured Codex authentication mode", () => {
+  const configured = (authenticationMode) => ({
+    ...config,
+    backend: { authenticationMode },
+    secrets: { agentAuth: "OPENAI_API_KEY" }
+  });
+
+  assert.equal(
+    modelAuthenticationPresent(configured("access-token"), {
+      CODEX_API_KEY_PRESENT: "true"
+    }),
+    false
+  );
+  assert.equal(
+    modelAuthenticationPresent(configured("api-key"), {
+      CODEX_ACCESS_TOKEN_PRESENT: "true"
+    }),
+    false
+  );
+  assert.equal(
+    modelAuthenticationPresent(configured("auto"), {
+      CODEX_ACCESS_TOKEN_PRESENT: "true",
+      CODEX_API_KEY_PRESENT: "true"
+    }),
+    true
+  );
+});
 
 function check(name, conclusion = "success", overrides = {}) {
   return {
@@ -574,7 +605,9 @@ test("readiness workflow is scheduled, zero-model, pinned, and publishes even af
   assert.match(renderAction, /cli_2\.22\.0_linux_amd64\.zip/);
   assert.match(workflow, /--publish --json/);
   assert.match(workflow, /if: always\(\)/);
-  assert.doesNotMatch(workflow, /CODEX_API_KEY|OPENAI_API_KEY:\s*\$\{\{\s*secrets/);
+  assert.match(workflow, /CODEX_ACCESS_TOKEN_PRESENT: \$\{\{ secrets\.CODEX_ACCESS_TOKEN != '' \}\}/);
+  assert.match(workflow, /CODEX_API_KEY_PRESENT: \$\{\{ secrets\.OPENAI_API_KEY != '' \}\}/);
+  assert.doesNotMatch(workflow, /AGENT_AUTH_PRESENT|OPENAI_API_KEY:\s*\$\{\{\s*secrets/);
   assert.doesNotMatch(workflow, /openai\/codex-action|agent-worker/);
 });
 
@@ -585,8 +618,10 @@ test("implementation preflight blocks before any model-authenticated job", () =>
   assert.match(prepare, /--verify-publisher \\\n\s+--json/);
   assert.match(prepare, /--preflight \\\n\s+--recover \\\n\s+--wait-seconds 900 \\\n\s+--json/);
   assert.match(prepare, /AGENT_GITHUB_TOKEN: \$\{\{ secrets\.AGENT_GITHUB_TOKEN \}\}/);
+  assert.match(prepare, /CODEX_ACCESS_TOKEN_PRESENT: \$\{\{ secrets\.CODEX_ACCESS_TOKEN != '' \}\}/);
+  assert.match(prepare, /CODEX_API_KEY_PRESENT: \$\{\{ secrets\.OPENAI_API_KEY != '' \}\}/);
   assert.match(prepare, /checks: read/);
   assert.match(prepare, /group: agent-implement-readiness/);
   assert.match(prepare, /actions: write/);
-  assert.doesNotMatch(prepare, /CODEX_API_KEY|openai\/codex-action/);
+  assert.doesNotMatch(prepare, /AGENT_AUTH_PRESENT|CODEX_API_KEY:\s*\$\{\{|openai\/codex-action/);
 });

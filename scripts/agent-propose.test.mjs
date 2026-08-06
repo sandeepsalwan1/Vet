@@ -62,8 +62,9 @@ test("proposal generation has no issue-write authority and uses pinned Codex", (
   const generate = workflow.split("\n  apply:\n", 1)[0];
 
   assert.doesNotMatch(generate, /issues:\s*write/);
-  assert.match(generate, /openai\/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56/);
-  assert.match(generate, /codex-version: "0\.144\.1"/);
+  assert.doesNotMatch(generate, /openai\/codex-action/);
+  assert.match(generate, /@openai\/codex@0\.144\.1/);
+  assert.match(generate, /node scripts\/agent-worker\.mjs/);
 });
 
 test("proposer captures bounded health before model auth and pins that main head", () => {
@@ -75,15 +76,19 @@ test("proposer captures bounded health before model auth and pins that main head
   assert.match(prepare, /GH_TOKEN: \$\{\{ github\.token \}\}/);
   assert.match(prepare, /--validate-backend --lane proposer --json/);
   assert.match(prepare, /agent-proposer-context\.mjs/);
-  assert.doesNotMatch(prepare, /OPENAI_API_KEY|CODEX_API_KEY|openai\/codex-action/);
+  assert.doesNotMatch(prepare, /OPENAI_API_KEY|CODEX_ACCESS_TOKEN|CODEX_API_KEY|openai\/codex-action/);
   assert.match(generate, /ref: \$\{\{ needs\.allocate-concurrency\.outputs\.head-sha \}\}/);
   assert.match(generate, /name: agent-proposer-context/);
   assert.match(generate, /ACTIONS_RUNTIME_TOKEN: ""/);
   assert.match(generate, /GH_TOKEN: ""/);
   assert.match(generate, /GITHUB_TOKEN: ""/);
-  assert.match(generate, /openai-api-key: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
-  assert.match(generate, /model: \$\{\{ needs\.allocate-concurrency\.outputs\.backend-model \}\}/);
-  assert.match(generate, /effort: \$\{\{ needs\.allocate-concurrency\.outputs\.backend-effort \}\}/);
+  assert.match(generate, /CODEX_ACCESS_TOKEN: \$\{\{ secrets\.CODEX_ACCESS_TOKEN \}\}/);
+  assert.match(generate, /CODEX_API_KEY: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
+  assert.match(generate, /--model "\$\{\{ needs\.allocate-concurrency\.outputs\.backend-model \}\}"/);
+  assert.match(generate, /--effort "\$\{\{ needs\.allocate-concurrency\.outputs\.backend-effort \}\}"/);
+  assert.match(generate, /--schema \.agent\/schemas\/proposals\.schema\.json/);
+  assert.match(generate, /--usage-file \.agent-output\/proposer-usage\.json/);
+  assert.match(generate, /--output-file \.agent-output\/proposals\.json/);
 });
 
 test("proposer prompt treats bounded health context as untrusted data", () => {

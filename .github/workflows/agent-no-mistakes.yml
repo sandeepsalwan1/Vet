@@ -29,9 +29,12 @@ on:
       AGENT_GITHUB_TOKEN:
         description: Repository-scoped owner credential for sealed fix publication
         required: true
+      CODEX_ACCESS_TOKEN:
+        description: Optional ChatGPT workspace token for the isolated no-mistakes lane
+        required: false
       OPENAI_API_KEY:
-        description: Model credential for the isolated no-mistakes lane
-        required: true
+        description: Optional API fallback for the isolated no-mistakes lane
+        required: false
       VERCEL_TOKEN:
         description: Optional Vercel credential for no-mistakes leases
         required: false
@@ -97,6 +100,7 @@ jobs:
       default_tree: ${{ steps.prepare.outputs.default_tree }}
       merge_base_sha: ${{ steps.prepare.outputs.merge_base_sha }}
       merge_base_tree: ${{ steps.prepare.outputs.merge_base_tree }}
+      backend_authentication_mode: ${{ steps.backend.outputs.authentication_mode }}
       backend_effort: ${{ steps.backend.outputs.effort }}
       backend_model: ${{ steps.backend.outputs.model }}
       concurrency_group: ${{ steps.concurrency.outputs.group }}
@@ -250,6 +254,7 @@ jobs:
         id: gate
         continue-on-error: true
         env:
+          CODEX_ACCESS_TOKEN: ${{ secrets.CODEX_ACCESS_TOKEN }}
           CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_OIDC_TOKEN: ${{ secrets.VERCEL_OIDC_TOKEN }}
@@ -265,7 +270,30 @@ jobs:
             --input-workdir candidate --json;
             cd candidate;
             export AGENT_TARGET_ROOT="$PWD";
-            agent_key="$CODEX_API_KEY"; unset CODEX_API_KEY OPENAI_API_KEY;
+            agent_access_token="${CODEX_ACCESS_TOKEN:-}";
+            agent_api_key="${CODEX_API_KEY:-}";
+            missing_auth=0;
+            case "${{ needs.prepare.outputs.backend_authentication_mode }}" in
+              auto)
+                if [ -n "$agent_access_token" ]; then
+                  authentication_mode=chatgpt-access-token;
+                elif [ -n "$agent_api_key" ]; then
+                  authentication_mode=metered-api;
+                else
+                  authentication_mode=metered-api;
+                  missing_auth=1;
+                fi;;
+              access-token)
+                authentication_mode=chatgpt-access-token;
+                if [ -z "$agent_access_token" ]; then missing_auth=1; fi;;
+              api-key)
+                authentication_mode=metered-api;
+                if [ -z "$agent_api_key" ]; then missing_auth=1; fi;;
+              *)
+                authentication_mode=metered-api;
+                missing_auth=1;;
+            esac;
+            unset CODEX_ACCESS_TOKEN CODEX_API_KEY OPENAI_API_KEY;
             external_head="${{ needs.prepare.outputs.head_sha }}";
             expected_parent_tree="${{ needs.prepare.outputs.merge_base_tree }}";
             expected_default_tree="${{ needs.prepare.outputs.default_tree }}";
@@ -282,8 +310,8 @@ jobs:
               if [ "$exit_code" -ne 0 ] ||
                 [ ! -s "$result_file" ] ||
                 [ ! -s .agent-output/model-usage.json ]; then
-                unset agent_key CODEX_API_KEY OPENAI_API_KEY;
-                if node ../trusted/scripts/agent-no-mistakes-gate.mjs --write-setup-failure --expected-head "$external_head" --result-file "$result_file" --usage-file .agent-output/model-usage.json --model-started-file "$model_started_file" --model "${{ needs.prepare.outputs.backend_model }}" --effort "${{ needs.prepare.outputs.backend_effort }}" --json >/dev/null 2>&1 &&
+                unset agent_access_token agent_api_key CODEX_ACCESS_TOKEN CODEX_API_KEY OPENAI_API_KEY;
+                if node ../trusted/scripts/agent-no-mistakes-gate.mjs --write-setup-failure --expected-head "$external_head" --result-file "$result_file" --usage-file .agent-output/model-usage.json --model-started-file "$model_started_file" --model "${{ needs.prepare.outputs.backend_model }}" --effort "${{ needs.prepare.outputs.backend_effort }}" --authentication-mode "$authentication_mode" --json >/dev/null 2>&1 &&
                   node ../trusted/scripts/agent-crabbox-run.mjs --emit-output-lane noMistakesRemote; then
                   exit 0;
                 fi;
@@ -292,6 +320,7 @@ jobs:
               exit "$exit_code";
             };
             trap preserve_setup_failure EXIT;
+            if [ "$missing_auth" -ne 0 ]; then exit 1; fi;
             node ../trusted/scripts/agent-crabbox-run.mjs
             --seed-exact-repository
             --input-workdir "$PWD"
@@ -329,7 +358,13 @@ jobs:
             approval_flag="";
             if [ "${{ inputs.approval }}" = "true" ]; then approval_flag="--user-approved"; fi;
             gate_status=0;
-            export CODEX_API_KEY="$agent_key";
+            if [ "$authentication_mode" = "chatgpt-access-token" ]; then
+              export CODEX_ACCESS_TOKEN="$agent_access_token";
+              unset CODEX_API_KEY;
+            else
+              export CODEX_API_KEY="$agent_api_key";
+              unset CODEX_ACCESS_TOKEN;
+            fi;
             export NM_HOME=/tmp/no-mistakes-home;
             export VET_GATE_DEPS="$PWD";
             export NO_MISTAKES_TELEMETRY=0;
@@ -344,7 +379,7 @@ jobs:
             --result-file .agent-output/result.json
             --repo-dir "$PWD"
             $approval_flag --json || gate_status=$?;
-            unset agent_key CODEX_API_KEY;
+            unset agent_access_token agent_api_key CODEX_ACCESS_TOKEN CODEX_API_KEY;
             test -s .agent-output/result.json &&
             case "$gate_status" in 0|1) ;; *) exit "$gate_status" ;; esac &&
             node ../trusted/scripts/agent-no-mistakes-gate.mjs
@@ -352,6 +387,7 @@ jobs:
             --output-file .agent-output/model-usage.json
             --model "${{ needs.prepare.outputs.backend_model }}"
             --effort "${{ needs.prepare.outputs.backend_effort }}"
+            --authentication-mode "$authentication_mode"
             --repo-dir "$PWD" --json
         run: >-
           node trusted/scripts/agent-crabbox-run.mjs

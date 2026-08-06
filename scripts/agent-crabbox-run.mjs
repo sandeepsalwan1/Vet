@@ -31,6 +31,7 @@ import {
   runCommand,
   secretState
 } from "./agent-lib.mjs";
+import { resolveCodexAuthentication } from "./agent-worker.mjs";
 import {
   BROWSER_BEHAVIOR_MARKER,
   BROWSER_CAPTURE_MARKER,
@@ -110,6 +111,7 @@ function redactSecrets(text, config, env = process.env) {
   );
   const names = [
     config.secrets.agentAuth,
+    "CODEX_ACCESS_TOKEN",
     "CODEX_API_KEY",
     config.secrets.crabboxCoordinator,
     ...config.secrets.crabboxProviders,
@@ -267,7 +269,10 @@ export function providerChildEnvironment(config, { provider, lane }, source = pr
     copyEnvironmentNames(child, source, [config.secrets?.crabboxCoordinator]);
   }
   if (DELEGATED_OUTPUTS.has(lane)) {
-    copyEnvironmentNames(child, source, ["CODEX_API_KEY"]);
+    const authentication = resolveCodexAuthentication(config, source);
+    if (authentication.name) {
+      copyEnvironmentNames(child, authentication.env, [authentication.name]);
+    }
   }
   return child;
 }
@@ -502,7 +507,7 @@ export function buildRunArgs({
   if (delegated) {
     const harness = remoteRelativePath(remoteHarnessPath, "remote harness path");
     const output = remoteRelativePath(remoteOutputPath, "remote output path", true);
-    args.push("--allow-env", "CODEX_API_KEY");
+    args.push("--allow-env", "CODEX_ACCESS_TOKEN", "--allow-env", "CODEX_API_KEY");
     remoteCommand =
       `${remoteCommand} && AGENT_TARGET_ROOT="$agent_crabbox_root/${output}" ` +
       `node "$agent_crabbox_root/${harness}" --emit-output-lane ${lane} ` +

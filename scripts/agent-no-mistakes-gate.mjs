@@ -262,7 +262,10 @@ function optionalCount(value) {
   return Number.isSafeInteger(number) && number >= 0 ? number : undefined;
 }
 
-export function parseNoMistakesUsageStats(output, { runId, model, effort }) {
+export function parseNoMistakesUsageStats(
+  output,
+  { runId, model, effort, authenticationMode = "metered-api" },
+) {
   const lines = String(output ?? "").split(/\r?\n/);
   const header = lines.findIndex(
     (line) =>
@@ -277,6 +280,7 @@ export function parseNoMistakesUsageStats(output, { runId, model, effort }) {
       lane: "no-mistakes",
       model,
       effort,
+      authenticationMode,
       complete: false,
       calls: [],
     };
@@ -343,13 +347,21 @@ export function parseNoMistakesUsageStats(output, { runId, model, effort }) {
     lane: "no-mistakes",
     model,
     effort,
+    authenticationMode,
     complete: calls.length > 0,
     calls,
   };
 }
 
 export function exportNoMistakesUsage(
-  { resultFile, outputFile, model, effort, repoDir },
+  {
+    resultFile,
+    outputFile,
+    model,
+    effort,
+    authenticationMode = "metered-api",
+    repoDir,
+  },
   dependencies = {},
 ) {
   const artifact = JSON.parse(readFileSync(resolve(resultFile), "utf8"));
@@ -361,6 +373,7 @@ export function exportNoMistakesUsage(
       lane: "no-mistakes",
       model,
       effort,
+      authenticationMode,
       complete: artifact?.outcome === "setup-failed",
       calls: [],
     };
@@ -377,6 +390,7 @@ export function exportNoMistakesUsage(
     runId,
     model,
     effort,
+    authenticationMode,
   });
   writePrivateFile(outputFile, `${JSON.stringify(usage, null, 2)}\n`);
   return usage;
@@ -1453,6 +1467,11 @@ function recordTerminal({
 
 export function gateEnvironment(source = process.env) {
   const env = { ...source };
+  if (typeof env.CODEX_ACCESS_TOKEN === "string" && env.CODEX_ACCESS_TOKEN.length > 0) {
+    delete env.CODEX_API_KEY;
+  } else {
+    delete env.CODEX_ACCESS_TOKEN;
+  }
   for (const name of [
     "AGENT_GITHUB_TOKEN",
     "AGENT_PAT",
@@ -1691,6 +1710,7 @@ export function writeSetupFailureResult({
   usageFile = "",
   model = "",
   effort = "",
+  authenticationMode = "metered-api",
   modelStarted = false,
 }) {
   if (!resultFile) {
@@ -1713,6 +1733,7 @@ export function writeSetupFailureResult({
         lane: "no-mistakes",
         model,
         effort,
+        authenticationMode,
         complete: !modelStarted,
         calls: [],
       }, null, 2)}\n`,
@@ -1734,6 +1755,7 @@ async function main() {
       usageFile: args["usage-file"],
       model: args.model,
       effort: args.effort,
+      authenticationMode: args["authentication-mode"] ?? "metered-api",
       modelStarted:
         Boolean(args["model-started-file"]) &&
         existsSync(resolve(String(args["model-started-file"]))),
@@ -1785,6 +1807,7 @@ async function main() {
       outputFile: args["output-file"],
       model: args.model,
       effort: args.effort,
+      authenticationMode: args["authentication-mode"] ?? "metered-api",
       repoDir: args["repo-dir"],
     });
     finish(

@@ -56,7 +56,7 @@ This snapshot was refreshed on 2026-08-05 and must be reverified where state can
 - Main merge readiness run 30198871160 passed again after pull request 81 merged.
 - The scoped GitHub owner credential is present and proved approval-free branch publication, stale-base updates, exact-head workflow dispatch, merge, branch deletion, and issue closure without exposing its value.
 - The full local closeout passed: 384 deterministic agent tests, typecheck, lint, dead-code, duplicate-code, scenarios, build, production dependency audit, documentation inventory, and diff validation.
-- Subscription-token migration remains a deferred cost optimization.
+- Subscription-token selection is implemented, with a scoped API fallback until a supported token is configured and canaried.
 
 Reverify provider, credential, repository-policy, dependency, and deployment claims when they can drift.
 
@@ -205,7 +205,7 @@ Line breaks and obvious speech-to-text paragraph boundaries are the only materia
 - Full authentication means each trusted lane has the scoped access needed for its responsibility.
   Generated implementation code must never receive all credentials.
 - ChatGPT subscription-backed Codex auth remains preferred when a supported automation token is available.
-  Its setup is deferred and must not block proving the current API-backed pipeline.
+  Authentication mode `auto` must select that token first and retain the scoped API fallback when it is absent.
 - Keep the current model path token-efficient without materially reducing quality.
   Production-quality code, tests, review, and proof remain mandatory.
 
@@ -426,15 +426,14 @@ Do not copy personal `~/.codex/auth.json` into GitHub Actions or a Crabbox lease
 For Plus or Pro accounts without `CODEX_ACCESS_TOKEN`, the current safe unattended Vercel path must retain a scoped API key or move model execution to a private trusted runner.
 Authentication mode must remain a configuration choice so adding a supported subscription token does not rewrite orchestration.
 
-`CODEX_ACCESS_TOKEN` setup is deferred by explicit user choice.
-Do not pause the core automation work or ask for this token now.
-Return to it only after the API-backed production path passes the required canaries, or earlier if the current model credential becomes the sole blocker.
-At that time:
+`CODEX_ACCESS_TOKEN` selection is implemented, but no live token is currently available.
+The API fallback must remain until the supported subscription mode passes a redacted production canary.
+When an eligible token becomes available:
 
 1. Recheck current official Codex documentation and workspace eligibility.
 2. Create a scoped automation token through the supported ChatGPT workspace flow.
 3. Store it in the user secret store and GitHub repository secret without displaying or logging its value.
-4. Add token authentication as a configuration-selected mode while retaining the proven API fallback.
+4. Confirm `auto` selects the token and does not forward the API key.
 5. Run a redacted Crabbox implementation canary through the subscription-backed mode.
 6. Remove the API fallback only after the subscription mode proves equivalent reliability and the user approves removal.
 
@@ -456,7 +455,7 @@ Verified bootstrap on 2026-07-24:
 
 Reverify all bootstrap claims before a production rollout because credentials, provider readiness, and account state drift.
 The current checkout contains the Crabbox-only model lanes, selected skill bundle, scoped auth bootstrap, semantic behavior proof, shared repair ledger, cost accounting, trusted post-merge verification, and scheduled readiness.
-Subscription-token migration and fresh end-to-end issue canaries remain acceptance work.
+Subscription-token configuration, its redacted production canary, and fresh end-to-end issue canaries remain acceptance work.
 
 ## Intent Contract
 
@@ -1105,7 +1104,7 @@ Use this order unless evidence shows a safer dependency order.
 16. Add scheduled zero-model readiness monitoring and actionable drift reporting.
 17. Complete representative repository, UI, data, deployment, and policy capability tests.
 18. Complete all local, provider, production-path, recovery, and concurrency acceptance tests.
-19. Return to subscription-backed `CODEX_ACCESS_TOKEN` as a cost optimization after reliability is proven.
+19. Configure and canary subscription-backed `CODEX_ACCESS_TOKEN` when an eligible workspace token exists.
 
 ## Repository Pointers
 

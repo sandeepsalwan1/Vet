@@ -108,6 +108,7 @@
     "allowed": [
       "codex"
     ],
+    "authenticationMode": "auto",
     "codexAction": "openai/codex-action@v1",
     "model": "gpt-5.4-mini",
     "effort": "low",

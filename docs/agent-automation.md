@@ -42,8 +42,10 @@ GitHub Issues and labels are the control plane. GitHub Actions owns events, perm
    Trusted branch pushes and pull request mutations use only the repository-scoped `AGENT_GITHUB_TOKEN`; routine statuses, comments, and workflow dispatch keep the built-in workflow token.
    The implementation preflight verifies the publisher token's owner identity, intended repository access, and reported push authorization before inference.
    GitHub does not provide a personal-token self-inspection API for every fine-grained permission, so fresh acceptance also requires a real approval-free create and update canary.
-   Before inference, every model lane verifies the configured model through a zero-model metadata request and retries transient network, rate-limit, and service failures with bounded backoff.
+   API-key model lanes verify the configured model through a zero-model metadata request and retry transient network, rate-limit, and service failures with bounded backoff.
+   Subscription-token lanes skip that API-only metadata request and rely on Codex authentication.
    These preflight retries cannot duplicate model work or consume a semantic revision because Codex has not started.
+   Metadata success does not prove paid inference capacity, so a zero-credit inference failure must become an actionable provider-health blocker before another paid dispatch.
 6. The current installed worker adapter is Codex; unsupported or unimplemented backend selections fail before model execution.
 7. Review repeats the credential-free read/patch separation, applies safe fixes to the agent branch, waits for exact-head CI, and shares one three-revision semantic repair ledger with no-mistakes.
    Review and no-mistakes seal tracked trusted-main and exact-candidate trees plus the bounded lane input into one temporary git workspace before Crabbox sync, preserving tracked files that local ignore rules hide while keeping their output handoff candidate-scoped.
@@ -74,13 +76,16 @@ Trusted recovery dispatches main-defined workflows with an expected head SHA, an
 Cost-sensitive routing lives in `.agent/config.json`.
 An issue carrying `priority:trivial` when implementation starts records that choice before the model runs, seals it in immutable PR commit ancestry, and skips only the paid no-mistakes model gate.
 The trivial lane still requires trusted triage, exact-head CI, independent agent review, proof when requested, and automerge policy.
-All model lanes use GPT-5.4 mini because GPT-5.4 nano does not support the Codex action's required tool transport.
+All model lanes use GPT-5.4 mini because GPT-5.4 nano does not support the required Codex tool transport.
 Triage uses no model.
 Implementation, first-pass review, and proposal use low reasoning; no-mistakes and bounded reviewer repair use medium reasoning after measured low-effort acceptance and structured-output failures.
 Increase a lane's model or reasoning only after measured contract failures.
+Codex authentication defaults to `auto`: prefer `CODEX_ACCESS_TOKEN`, otherwise use the scoped `OPENAI_API_KEY` fallback.
+Only the selected credential reaches the Codex child process or delegated Crabbox lane.
 
 Each model invocation produces a bounded per-call usage record with input, cached input, output, and reasoning-output counts when available.
-`agent-cost` prices the immutable usage record against the versioned model snapshot, adds actual Crabbox provider timing, records GitHub Actions minutes when available, and separates marginal issue cost from fixed service plans.
+`agent-cost` prices metered API usage against the versioned model snapshot and records subscription-backed usage as plan-included incremental model cost instead of fake API spend.
+It adds actual Crabbox provider timing, records GitHub Actions minutes when available, and separates marginal issue cost from fixed service plans.
 Vercel Sandbox cost is an explicit upper-bound estimate.
 Hetzner cost uses a versioned conservative ceiling for the pinned `beast` class, hourly billing increments, and primary IPv4.
 Unpriced provider usage stays incomplete instead of inventing a number.
@@ -105,7 +110,7 @@ Confirm the required label set and secret names without printing a secret value.
 
 ```bash
 node scripts/agent-labels.mjs --dry-run --json
-gh secret list --repo "$REPO" | awk '$1 == "AGENT_GITHUB_TOKEN" || $1 == "OPENAI_API_KEY" || $1 == "RENDER_API_KEY" || $1 == "RENDER_WORKSPACE_ID" || $1 == "VERCEL_TOKEN" { print $1 }'
+gh secret list --repo "$REPO" | awk '$1 == "AGENT_GITHUB_TOKEN" || $1 == "CODEX_ACCESS_TOKEN" || $1 == "OPENAI_API_KEY" || $1 == "RENDER_API_KEY" || $1 == "RENDER_WORKSPACE_ID" || $1 == "VERCEL_TOKEN" { print $1 }'
 ```
 
 Run `node scripts/agent-labels.mjs --json` only when the label dry-run reports drift.
@@ -423,7 +428,8 @@ This is the duplicate-model boundary for interruption recovery.
 
 - Keep baseline CI separate from agent workflows.
 - Prefer a scoped `CODEX_ACCESS_TOKEN` for ChatGPT-managed automation when the account supports it.
-- Until one exists, pass the OpenAI API fallback only to the isolated Crabbox worker or trusted review invocation, never as job-level environment.
+- Authentication mode `auto` selects `CODEX_ACCESS_TOKEN` first and uses the OpenAI API fallback only when the subscription token is absent.
+- Pass only the selected credential to the isolated Crabbox worker or trusted review invocation, never as job-level environment.
 - Never copy personal Codex `auth.json` into Actions or Crabbox.
 - Keep GitHub write tokens out of Codex jobs; validation commands run with GitHub token variables removed.
 - Remote Codex uses full filesystem access only inside its ephemeral Crabbox lease because Vercel Sandbox cannot run Codex's nested Bubblewrap sandbox.
@@ -431,7 +437,7 @@ This is the duplicate-model boundary for interruption recovery.
 - Render and production database credentials remain in trusted operations and deployed services, not the implementation lease.
 - Trusted post-merge Render evidence stores only exact commit, deployment state, bounded log counts, and configured public health results.
   It never stores the Render service ID or raw logs.
-- Codex Action author gates allow the repository owner and `github-actions[bot]`; cross-repository PR review is rejected before Codex runs.
+- Trusted agent PR author gates allow the repository owner and `github-actions[bot]`; cross-repository PR review is rejected before Codex runs.
 - High-risk or high-priority work requires human review.
 - A missing provider, artifact, or lease blocks required visual proof; it does not fake success.
 - Credentialed Crabbox providers require readiness proof; built-in `local-container` receives no provider credentials and passes a scheduled lifecycle smoke plus the same route, lease, desktop, media, and behavior checks when used for proof.

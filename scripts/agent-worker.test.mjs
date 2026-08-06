@@ -10,6 +10,7 @@ import {
   createWorkerInvocation,
   parseCodexUsage,
   preflightCodexModel,
+  resolveCodexAuthentication,
   resolveCodexRunSettings,
   resolveCodexSettings,
   resolveWorkerBackend,
@@ -145,7 +146,7 @@ test("Codex adapter applies config defaults and scopes its auth name", () => {
     "--config",
     'model_reasoning_effort="medium"',
     "--config",
-    'shell_environment_policy.exclude=["OPENAI_API_KEY","CODEX_API_KEY","CODEX_HOME","GITHUB_TOKEN","GH_TOKEN","AGENT_GITHUB_TOKEN","AGENT_PAT","CRABBOX_COORDINATOR_TOKEN"]',
+    'shell_environment_policy.exclude=["OPENAI_API_KEY","CODEX_ACCESS_TOKEN","CODEX_API_KEY","CODEX_HOME","GITHUB_TOKEN","GH_TOKEN","AGENT_GITHUB_TOKEN","AGENT_PAT","CRABBOX_COORDINATOR_TOKEN"]',
     "--output-schema",
     "schema.json",
     "--output-last-message",
@@ -154,12 +155,57 @@ test("Codex adapter applies config defaults and scopes its auth name", () => {
   ]);
   assert.deepEqual(invocation.auth, [
     { name: "OPENAI_API_KEY", present: true },
+    { name: "CODEX_ACCESS_TOKEN", present: false },
     { name: "CODEX_API_KEY", present: false }
   ]);
+  assert.equal(invocation.requestedAuthenticationMode, "auto");
+  assert.equal(invocation.authenticationMode, "metered-api");
   assert.equal(invocation.env.CODEX_API_KEY, "secret");
   assert.equal(invocation.env.OPENAI_API_KEY, undefined);
   assert.equal(invocation.env.UNRELATED, "kept");
   assert.deepEqual(source, { OPENAI_API_KEY: "secret", UNRELATED: "kept" });
+});
+
+test("Codex authentication prefers a scoped ChatGPT access token without forwarding API fallback", () => {
+  const source = {
+    CODEX_ACCESS_TOKEN: "subscription",
+    CODEX_API_KEY: "metered",
+    OPENAI_API_KEY: "configured",
+    UNRELATED: "kept"
+  };
+  const authentication = resolveCodexAuthentication(config(), source);
+  const invocation = createWorkerInvocation(
+    { "prompt-file": "prompt.md" },
+    config(),
+    source
+  );
+
+  assert.equal(authentication.authenticationMode, "chatgpt-access-token");
+  assert.equal(authentication.name, "CODEX_ACCESS_TOKEN");
+  assert.equal(authentication.env.CODEX_ACCESS_TOKEN, "subscription");
+  assert.equal(authentication.env.CODEX_API_KEY, undefined);
+  assert.equal(authentication.env.OPENAI_API_KEY, undefined);
+  assert.equal(authentication.env.UNRELATED, "kept");
+  assert.equal(invocation.authenticationMode, "chatgpt-access-token");
+});
+
+test("Codex authentication modes fail closed instead of silently changing credential type", () => {
+  assert.equal(
+    resolveCodexAuthentication(config({ authenticationMode: "access-token" }), {
+      CODEX_API_KEY: "metered"
+    }).authenticationMode,
+    "missing"
+  );
+  assert.equal(
+    resolveCodexAuthentication(config({ authenticationMode: "api-key" }), {
+      CODEX_ACCESS_TOKEN: "subscription"
+    }).authenticationMode,
+    "missing"
+  );
+  assert.throws(
+    () => resolveCodexAuthentication(config({ authenticationMode: "unknown" }), {}),
+    /unsupported Codex authentication mode/
+  );
 });
 
 test("Codex usage parser records exact per-turn tokens without thread identifiers", () => {
@@ -176,10 +222,16 @@ test("Codex usage parser records exact per-turn tokens without thread identifier
         }
       })
     ].join("\n"),
-    { lane: "implement", model: "gpt-test", effort: "low" }
+    {
+      lane: "implement",
+      model: "gpt-test",
+      effort: "low",
+      authenticationMode: "chatgpt-access-token"
+    }
   );
 
   assert.equal(usage.complete, true);
+  assert.equal(usage.authenticationMode, "chatgpt-access-token");
   assert.equal(usage.calls.length, 1);
   assert.match(usage.calls[0].id, /^[a-f0-9]{64}$/);
   assert.doesNotMatch(JSON.stringify(usage), /private-thread-id/);
@@ -247,6 +299,26 @@ test("worker dry-run reports auth presence without exposing its value", () => {
 
   assert.doesNotMatch(output, /must-not-appear/);
   assert.equal(JSON.parse(output).backend, "codex");
+});
+
+test("backend validation emits the configured authentication contract", () => {
+  const output = execFileSync(
+    process.execPath,
+    [
+      fileURLToPath(new URL("./agent-worker.mjs", import.meta.url)),
+      "--validate-backend",
+      "--lane",
+      "no-mistakes",
+      "--json",
+    ],
+    {
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      encoding: "utf8",
+      env: { PATH: process.env.PATH },
+    },
+  );
+
+  assert.equal(JSON.parse(output).authenticationMode, "auto");
 });
 
 test("Codex preflight verifies model metadata without making an inference request", async () => {

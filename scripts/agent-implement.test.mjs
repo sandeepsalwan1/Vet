@@ -953,6 +953,8 @@ test("repair prompt binds sealed intent and treats feedback as bounded data", (t
 
 test("implementation workflow isolates candidate checks from credentials, artifacts, and command channels", () => {
   const workflow = readFileSync(join(process.cwd(), ".github/workflows/agent-implement.yml"), "utf8");
+  assert.match(workflow, /CODEX_ACCESS_TOKEN:\n\s+required: false/);
+  assert.match(workflow, /OPENAI_API_KEY:\n\s+required: false/);
   const validationAction = readFileSync(
     join(process.cwd(), ".github/actions/validate-agent-implementation/action.yml"),
     "utf8"
@@ -984,6 +986,9 @@ test("implementation workflow isolates candidate checks from credentials, artifa
   assert.match(prepare, /concurrency-group: \$\{\{ steps\.concurrency\.outputs\.group \}\}/);
   assert.match(prepare, /agent-concurrency-slot\.mjs --lane implement --key "\$CONCURRENCY_KEY" --json/);
   assert.match(prepare, /id: backend\n\s+run: node scripts\/agent-worker\.mjs --validate-backend --lane implement --json/);
+  assert.match(prepare, /CODEX_ACCESS_TOKEN_PRESENT: \$\{\{ secrets\.CODEX_ACCESS_TOKEN != '' \}\}/);
+  assert.match(prepare, /CODEX_API_KEY_PRESENT: \$\{\{ secrets\.OPENAI_API_KEY != '' \}\}/);
+  assert.doesNotMatch(prepare, /AGENT_AUTH_PRESENT/);
   assert.match(remote, /concurrency:\n      group: \$\{\{ needs\.prepare-prompt\.outputs\.concurrency-group \}\}/);
   assert.match(remote, /cancel-in-progress: false/);
   assert.match(remote, /queue: max/);

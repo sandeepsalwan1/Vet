@@ -128,6 +128,36 @@ test("model pricing separates uncached, cached, and output tokens", () => {
   assert.equal(priced.totals.estimatedUsd, 0.000795);
 });
 
+test("subscription-backed Codex usage records plan-included incremental model cost", () => {
+  const usage = validateModelUsage(
+    {
+      version: 1,
+      backend: "codex",
+      lane: "review",
+      model: "gpt-5.4-mini",
+      effort: "low",
+      authenticationMode: "chatgpt-access-token",
+      complete: true,
+      calls: [
+        {
+          id: "f".repeat(64),
+          inputTokens: 1000,
+          cachedInputTokens: 500,
+          outputTokens: 100,
+          reasoningOutputTokens: 25
+        }
+      ]
+    },
+    "review"
+  );
+  const priced = priceModelUsage(config, usage);
+
+  assert.equal(priced.authenticationMode, "chatgpt-access-token");
+  assert.equal(priced.pricingVersion, "chatgpt-workspace-plan");
+  assert.equal(priced.calls[0].estimatedUsd, 0);
+  assert.equal(priced.totals.estimatedUsd, 0);
+});
+
 test("Vercel estimate records a conservative upper bound and explicit network exclusion", () => {
   const priced = priceProviderUsage(config, remote());
 
