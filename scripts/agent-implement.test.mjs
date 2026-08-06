@@ -986,6 +986,9 @@ test("implementation workflow isolates candidate checks from credentials, artifa
   assert.match(prepare, /concurrency-group: \$\{\{ steps\.concurrency\.outputs\.group \}\}/);
   assert.match(prepare, /agent-concurrency-slot\.mjs --lane implement --key "\$CONCURRENCY_KEY" --json/);
   assert.match(prepare, /id: backend\n\s+run: node scripts\/agent-worker\.mjs --validate-backend --lane implement --json/);
+  assert.match(prepare, /CODEX_ACCESS_TOKEN_PRESENT: \$\{\{ secrets\.CODEX_ACCESS_TOKEN != '' \}\}/);
+  assert.match(prepare, /CODEX_API_KEY_PRESENT: \$\{\{ secrets\.OPENAI_API_KEY != '' \}\}/);
+  assert.doesNotMatch(prepare, /AGENT_AUTH_PRESENT/);
   assert.match(remote, /concurrency:\n      group: \$\{\{ needs\.prepare-prompt\.outputs\.concurrency-group \}\}/);
   assert.match(remote, /cancel-in-progress: false/);
   assert.match(remote, /queue: max/);

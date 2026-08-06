@@ -618,8 +618,10 @@ test("implementation preflight blocks before any model-authenticated job", () =>
   assert.match(prepare, /--verify-publisher \\\n\s+--json/);
   assert.match(prepare, /--preflight \\\n\s+--recover \\\n\s+--wait-seconds 900 \\\n\s+--json/);
   assert.match(prepare, /AGENT_GITHUB_TOKEN: \$\{\{ secrets\.AGENT_GITHUB_TOKEN \}\}/);
+  assert.match(prepare, /CODEX_ACCESS_TOKEN_PRESENT: \$\{\{ secrets\.CODEX_ACCESS_TOKEN != '' \}\}/);
+  assert.match(prepare, /CODEX_API_KEY_PRESENT: \$\{\{ secrets\.OPENAI_API_KEY != '' \}\}/);
   assert.match(prepare, /checks: read/);
   assert.match(prepare, /group: agent-implement-readiness/);
   assert.match(prepare, /actions: write/);
-  assert.doesNotMatch(prepare, /CODEX_API_KEY|openai\/codex-action/);
+  assert.doesNotMatch(prepare, /AGENT_AUTH_PRESENT|CODEX_API_KEY:\s*\$\{\{|openai\/codex-action/);
 });
