@@ -308,7 +308,7 @@ export function visualRoutes(details, explicitRoute = "") {
           ...(proofContract(details)?.routes ?? [])
         ];
   }
-  return [...new Set(routes)].sort();
+  return [...new Set(routes.map((route) => normalizeExplicitRoute(route)))].sort();
 }
 
 export function validateVisualBehaviorPlan({

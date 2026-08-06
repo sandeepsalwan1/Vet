@@ -10,7 +10,7 @@ import {
   issueSnapshotSha256
 } from "./agent-lib.mjs";
 
-export const INTENT_CAPSULE_VERSION = 6;
+export const INTENT_CAPSULE_VERSION = 7;
 export const IMPLEMENTATION_RESULT_VERSION = 1;
 export const IMPLEMENTATION_ADDENDUM_MARKER =
   "<!-- agent-intent-addendum:v1 -->";
@@ -50,6 +50,7 @@ const STABLE_INTENT_LABEL_VERSION = 3;
 const EVIDENCE_LANE_CONTRACT_VERSION = 4;
 const REFINED_EVIDENCE_LANE_CONTRACT_VERSION = 5;
 const PROOF_RESULT_TRANSIENT_LABEL_VERSION = 6;
+const CANONICAL_PROOF_ROUTE_VERSION = 7;
 export const BASE_TRIAGE_FIELDS = Object.freeze([
   "value",
   "priority",
@@ -127,7 +128,11 @@ function sha256(value) {
   return createHash("sha256").update(String(value), "utf8").digest("hex");
 }
 
-function safeProofRoute(value, label = "proof route") {
+function safeProofRoute(
+  value,
+  label = "proof route",
+  { canonicalize = true } = {}
+) {
   const route = normalizedText(value);
   if (
     !route ||
@@ -139,7 +144,7 @@ function safeProofRoute(value, label = "proof route") {
     throw new AgentError(`${label} is invalid`, 1);
   }
   const normalized = route.length > 1 ? route.replace(/\/+$/, "") : route;
-  return canonicalProofRoute(normalized);
+  return canonicalize ? canonicalProofRoute(normalized) : normalized;
 }
 
 export function normalizeExplicitRoute(route) {
@@ -821,10 +826,15 @@ function legacyIntentIssues(issue, decision) {
     .map((labels) => ({ ...issue, labels }));
 }
 
-function proofRoutes(sections) {
+function proofRoutes(sections, { canonicalize = true } = {}) {
   const value = cleanSectionValue(sections["proof route"]);
   if (!value) return [];
-  return [...new Set(value.split(/\s+/).filter(Boolean).map((route) => safeProofRoute(route)))].sort();
+  return [...new Set(
+    value
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((route) => safeProofRoute(route, "proof route", { canonicalize }))
+  )].sort();
 }
 
 export function clauseEvidenceLanes(
@@ -879,7 +889,8 @@ function behaviorContract({
   explicitExclusions,
   sections,
   proofKind,
-  version
+  version,
+  canonicalizeProofRoutes
 }) {
   const userTasks = requirementLines(sections["proof interaction"]);
   const contractVersion =
@@ -900,7 +911,9 @@ function behaviorContract({
             : "repository",
       proofKind
     },
-    routes: proofRoutes(sections),
+    routes: proofRoutes(sections, {
+      canonicalize: canonicalizeProofRoutes
+    }),
     userTasks,
     checks: acceptanceCriteria.map((statement, index) => ({
       id: `AC${index + 1}`,
@@ -956,7 +969,12 @@ function behaviorContract({
   };
 }
 
-function validateBehaviorContract(contract, acceptanceCriteria, proofKind) {
+function validateBehaviorContract(
+  contract,
+  acceptanceCriteria,
+  proofKind,
+  capsuleVersion
+) {
   const legacyKeys = [
     "antiCheatProbes",
     "captureBeforeAction",
@@ -1016,7 +1034,13 @@ function validateBehaviorContract(contract, acceptanceCriteria, proofKind) {
     throw new AgentError("behavior contract is invalid", 1);
   }
   for (const route of contract.routes) {
-    if (safeProofRoute(route) !== route) throw new AgentError("behavior contract route is invalid", 1);
+    if (
+      safeProofRoute(route, "proof route", {
+        canonicalize: capsuleVersion >= CANONICAL_PROOF_ROUTE_VERSION
+      }) !== route
+    ) {
+      throw new AgentError("behavior contract route is invalid", 1);
+    }
   }
   return contract;
 }
@@ -1025,7 +1049,10 @@ export function createIntentCapsuleVersion({
   issue,
   decision,
   ownerClarifications = [],
-  version = INTENT_CAPSULE_VERSION
+  version = INTENT_CAPSULE_VERSION,
+  canonicalizeProofRoutes =
+    version >= CANONICAL_PROOF_ROUTE_VERSION ||
+    version === PROOF_RESULT_TRANSIENT_LABEL_VERSION
 }) {
   const issueNumber = Number(issue?.number);
   const title = boundedText(issue?.title, 512, "issue title");
@@ -1066,7 +1093,8 @@ export function createIntentCapsuleVersion({
       explicitExclusions,
       sections,
       proofKind: decision.proofNeeded,
-      version
+      version,
+      canonicalizeProofRoutes
     });
   }
   return {
@@ -1111,6 +1139,7 @@ export function validateIntentCapsule(capsule) {
       STABLE_INTENT_LABEL_VERSION,
       EVIDENCE_LANE_CONTRACT_VERSION,
       REFINED_EVIDENCE_LANE_CONTRACT_VERSION,
+      PROOF_RESULT_TRANSIENT_LABEL_VERSION,
       INTENT_CAPSULE_VERSION
     ].includes(capsule.version) ||
     !Number.isSafeInteger(capsule.sourceIssue) ||
@@ -1141,7 +1170,8 @@ export function validateIntentCapsule(capsule) {
     validateBehaviorContract(
       capsule.behaviorContract,
       capsule.acceptanceCriteria,
-      capsule.decision.proofNeeded
+      capsule.decision.proofNeeded,
+      capsule.version
     );
   }
   return capsule;
@@ -1360,20 +1390,27 @@ export function intentCapsuleForManagedTriage({
   }
   for (const legacyIssue of legacyIntentIssues(issue, decision)) {
     for (const version of [
+      PROOF_RESULT_TRANSIENT_LABEL_VERSION,
       REFINED_EVIDENCE_LANE_CONTRACT_VERSION,
       EVIDENCE_LANE_CONTRACT_VERSION,
       STABLE_INTENT_LABEL_VERSION,
       BEHAVIOR_CONTRACT_VERSION,
       1
     ]) {
-      const legacyCapsule = createIntentCapsuleVersion({
-        issue: legacyIssue,
-        decision,
-        ownerClarifications,
-        version
-      });
-      if (legacyCapsule.intentDigest === decision.intentDigest) {
-        return { decision, capsule: legacyCapsule };
+      const canonicalModes = version === PROOF_RESULT_TRANSIENT_LABEL_VERSION
+        ? [true, false]
+        : [false];
+      for (const canonicalizeProofRoutes of canonicalModes) {
+        const legacyCapsule = createIntentCapsuleVersion({
+          issue: legacyIssue,
+          decision,
+          ownerClarifications,
+          version,
+          canonicalizeProofRoutes
+        });
+        if (legacyCapsule.intentDigest === decision.intentDigest) {
+          return { decision, capsule: legacyCapsule };
+        }
       }
     }
   }
