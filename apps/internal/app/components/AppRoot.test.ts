@@ -30,5 +30,5 @@ test("proof loading still reaches the welcome back auth state", () => {
   assert.match(staffAuthSource, /data-agent-proof="signin-email"/);
   assert.match(staffAuthSource, /dataAgentProof="signin-passcode"/);
   assert.match(staffAuthSource, /data-agent-proof="signin-submit"/);
-  assert.match(staffTasksPageSource, /return <AppRoot audience="staff" \/>/);
+  assert.match(staffTasksPageSource, /redirect\("\/staff"\)/);
 });

@@ -1,5 +1,5 @@
-import { AppRoot } from "../../components/AppRoot";
+import { redirect } from "next/navigation";
 
 export default function StaffTasksPage() {
-  return <AppRoot audience="staff" />;
+  redirect("/staff");
 }
