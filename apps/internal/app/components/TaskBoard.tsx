@@ -29,6 +29,7 @@ import { useTaskBoardForm } from "./useTaskBoardForm";
 import { useTaskBoardProfileName } from "./useTaskBoardProfileName";
 import { useTaskBoardSettings } from "./useTaskBoardSettings";
 import { useTaskBoardTaskActions } from "./useTaskBoardTaskActions";
+import { filterTaskBoardTasks } from "./taskBoardDisplay";
 
 export function TaskBoard() {
   const clinic = useClinicBrand();
@@ -57,6 +58,7 @@ export function TaskBoard() {
   const [invalidTask, setInvalidTask] = useState<Task | null>(null);
   const [invalidReason, setInvalidReason] = useState("");
   const [confetti, setConfetti] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const {
     settingsOpen,
@@ -158,6 +160,10 @@ export function TaskBoard() {
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
     [tasks]
   );
+  const activeTasks = useMemo(() => tasks.filter((task) => task.status !== "archived"), [tasks]);
+  const visibleTasks = useMemo(() => filterTaskBoardTasks(activeTasks, searchQuery), [activeTasks, searchQuery]);
+  const normalizedSearchQuery = searchQuery.trim();
+  const hasSearchResults = normalizedSearchQuery.length > 0;
 
   if (!booted) {
     return <BootScreen />;
@@ -223,6 +229,40 @@ export function TaskBoard() {
         ) : null}
       </section>
 
+      <section className="taskSearchBar" aria-label="Task board search">
+        <label className="taskSearchField" htmlFor="task-board-search">
+          <span>Search tasks</span>
+          <input
+            id="task-board-search"
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && searchQuery) {
+                event.preventDefault();
+                setSearchQuery("");
+              }
+            }}
+            placeholder="Search task text, pet, or client"
+            aria-describedby="task-board-search-summary"
+            data-agent-proof="task-board-search"
+          />
+        </label>
+        <div
+          className="taskSearchSummary"
+          id="task-board-search-summary"
+          data-agent-proof="task-board-search-summary"
+        >
+          {hasSearchResults ? (
+            <p>
+              Showing {visibleTasks.length} of {activeTasks.length} tasks for &quot;{normalizedSearchQuery}&quot;
+            </p>
+          ) : (
+            <p>Showing all {activeTasks.length} tasks</p>
+          )}
+        </div>
+      </section>
+
       {error ? <div className="alertLine">{error}</div> : null}
 
       <ArrivalDeskPanel
@@ -240,7 +280,7 @@ export function TaskBoard() {
       ) : null}
 
       <TaskLaneGrid
-        tasks={tasks}
+        tasks={visibleTasks}
         role={session.role}
         loading={loading}
         hasLoaded={hasLoaded}

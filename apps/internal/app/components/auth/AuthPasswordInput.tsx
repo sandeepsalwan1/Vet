@@ -8,13 +8,15 @@ export function AuthPasswordInput({
   onChange,
   placeholder,
   name,
-  autoComplete
+  autoComplete,
+  dataAgentProof
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   name?: string;
   autoComplete?: string;
+  dataAgentProof?: string;
 }) {
   const [show, setShow] = useState(false);
   return (
@@ -26,6 +28,7 @@ export function AuthPasswordInput({
         placeholder={placeholder ?? "Password"}
         name={name}
         autoComplete={autoComplete ?? (name === "new-password" ? "new-password" : "current-password")}
+        data-agent-proof={dataAgentProof}
       />
       <button
         type="button"

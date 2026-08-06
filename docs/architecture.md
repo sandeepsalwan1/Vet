@@ -60,7 +60,7 @@ Their domains, branding, settings, and data must never fall back to one another.
 5. A negative visit response creates a private service-recovery task and suppresses the next-day pet check. A positive response schedules that pet check.
 6. Customers see chat first and only current, actionable journey state. Pickup, discharge, and feedback controls stay hidden until their workflow state is due.
 7. A records request creates a front-desk task. Authorization, recipient, and scope are confirmed by staff outside the customer portal.
-8. Admin owns journey automation controls. Staff uses the task board for front-desk and cashier work; veterinarians use clinical task views.
+8. Admin owns journey automation controls. Staff uses the task board for front-desk and cashier work; veterinarians use clinical task views. Task-board search filters active tasks by task wording, request type, pet, client, or Clarity ID without changing task data.
 9. Room and check-in controls open from a compact task-board dialog, refresh automatically, and show pressure only at two-thirds occupancy or higher.
 10. Admin can edit future confirmation, reminder, feedback, pet-check, call-queue, and quiet-hour timing.
 11. Saved tenant settings do not enable transport. `NOTIFICATION_MODE` remains the deployment-level delivery gate.
