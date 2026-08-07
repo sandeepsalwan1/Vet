@@ -39,18 +39,18 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@next/env": "^16.0.0",
+    "@next/env": "^16.3.0",
     "brace-expansion": "file:vendor/brace-expansion-compat",
-    "e2b": "^2.27.0",
+    "e2b": "^2.38.0",
     "postgres": "^3.4.7"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",
-    "eslint-config-next": "^16.0.0",
+    "eslint-config-next": "^16.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "jscpd": "^5.0.12",
-    "knip": "^6.26.0",
-    "tsx": "^4.23.0",
+    "jscpd": "^5.0.14",
+    "knip": "^6.31.0",
+    "tsx": "^4.23.5",
     "typescript": "^6.0.3"
   },
   "overrides": {
