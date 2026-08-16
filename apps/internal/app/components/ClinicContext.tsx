@@ -17,7 +17,11 @@ export function ClinicLoadingPanel({ failed = false }: { failed?: boolean }) {
       data-agent-proof={failed ? "failed" : "opening"}
       data-agent-proof-state={failed ? "failed" : "loading"}
     >
-      <section className="entryPanel clinicResolutionPanel">
+      <section
+        className="entryPanel clinicResolutionPanel"
+        aria-live={failed ? undefined : "polite"}
+        role={failed ? undefined : "status"}
+      >
         <PawPrint aria-hidden="true" />
         <h1>{failed ? "Clinic unavailable" : "Opening your clinic…"}</h1>
         <p>
