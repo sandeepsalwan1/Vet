@@ -1,5 +1,5 @@
 import { getSql } from "./connection";
-import { resolveClinicId } from "./clinics";
+import { ensureDemoDataFresh } from "./demoSeed";
 import {
   normalizeAppointment,
   normalizeCall,
@@ -23,7 +23,7 @@ import {
 
 export async function listMockClinic(options?: { clinicId?: string | null }) {
   const sql = getSql();
-  const clinicId = await resolveClinicId(options?.clinicId);
+  const clinicId = await ensureDemoDataFresh({ clinicId: options?.clinicId });
   const [clinic] = await sql<MockClinicRow[]>`
     select
       coalesce((

@@ -74,5 +74,5 @@ __pycache__/
 /whoop-drafts.md
 /idexx-form-answers.txt
 
-# Lavish raw poll receipts may contain full DOM snapshots; decisions stay in the tracked review log.
-/.lavish/.*-feedback-receipts/
+# Local Lavish review artifacts and feedback receipts
+/.lavish/

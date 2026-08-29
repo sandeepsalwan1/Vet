@@ -1,6 +1,7 @@
 import { getSql } from "./connection";
 import { resolveClinicId } from "./clinics";
 import { recordClientVisitStage } from "./analytics";
+import { ensureDemoDataFresh } from "./demoSeed";
 import {
   assignOpenRoom,
   autoOpenReadyRooms,
@@ -56,6 +57,7 @@ function phoneDigits(value: string | null | undefined) {
 export async function getArrivalSettings(options?: { clinicId?: string | null }) {
   const sql = getSql();
   const clinicId = await ensureArrivalSetup({ clinicId: options?.clinicId });
+  await ensureDemoDataFresh({ clinicId });
   const rows = await sql<SettingsRow[]>`
     select room_assignment_enabled, questionnaire
     from arrival_settings
@@ -68,6 +70,7 @@ export async function getArrivalSettings(options?: { clinicId?: string | null })
 export async function listArrivalDesk(options?: { clinicId?: string | null }): Promise<ArrivalDeskSnapshot> {
   const sql = getSql();
   const clinicId = await ensureArrivalSetup({ clinicId: options?.clinicId });
+  await ensureDemoDataFresh({ clinicId });
   await autoOpenReadyRooms({ clinicId });
   const [settingRows, roomRows, arrivalRows] = await Promise.all([
     sql<SettingsRow[]>`
@@ -106,7 +109,7 @@ export async function matchArrivalIdentity(input: {
   petName?: string | null;
 }) {
   const sql = getSql();
-  const clinicId = await resolveClinicId(input.clinicId);
+  const clinicId = await ensureDemoDataFresh({ clinicId: input.clinicId });
   const expectedLastName = cleanText(input.lastName || lastName(input.clientName));
   const phone = phoneDigits(input.clientPhone);
   const pet = cleanText(input.petName);
