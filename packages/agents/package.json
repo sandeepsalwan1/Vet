@@ -15,10 +15,10 @@
     "@central-vet/db": "*",
     "@google/adk": "~1.3.0",
     "@google/genai": "^1.52.0",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
-    "tsx": "^4.23.0",
+    "tsx": "^4.23.13",
     "typescript": "^6.0.3"
   }
 }
