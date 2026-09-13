@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, Send } from "lucide-react";
-import type { FormEvent } from "react";
+import type { SubmitEvent } from "react";
 import { useState } from "react";
 import { fieldErrors as apiFieldErrors } from "../lib/apiClient";
 import { formatPhoneInput } from "../lib/phoneText";
@@ -49,7 +49,7 @@ export function RequestForm() {
     setError("");
   };
 
-  async function submit(event: FormEvent) {
+  async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (submitting) return;
     setSubmitting(true);

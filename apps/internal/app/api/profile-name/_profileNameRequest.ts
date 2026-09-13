@@ -17,7 +17,12 @@ const profileNameBodySchema = z.object({
 });
 
 type ProfileNameUpdateContext =
-  | { actor: Actor; clinicId: string; name: string }
+  | {
+      actor: Actor;
+      clinicId: string;
+      name: string;
+      recordUsage: () => Promise<void>;
+    }
   | { response: NextResponse };
 
 async function profilePayload(profileId: string | null | undefined, clinicId: string) {
@@ -92,7 +97,8 @@ async function profileNameUpdateContext(request: Request): Promise<ProfileNameUp
   return {
     actor: auth.actor,
     clinicId: clinic.clinicId,
-    name: parsed.data.name
+    name: parsed.data.name,
+    recordUsage: auth.recordUsage
   };
 }
 
@@ -108,5 +114,6 @@ export async function profileNameUpdateResponse(request: Request) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
   logInfo("profile_name_updated", result.logFields);
+  await context.recordUsage();
   return NextResponse.json(result.body, { headers: noStoreHeaders });
 }

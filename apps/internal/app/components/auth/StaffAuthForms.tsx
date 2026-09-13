@@ -1,7 +1,7 @@
 "use client";
 
 import { LogIn } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { type SubmitEvent, useState } from "react";
 import {
   getDemoAccounts,
   getDemoAdminCredentials,
@@ -30,7 +30,7 @@ export function StaffPortal({ onAuth, onOpenPasscodeBoard }: StaffPortalProps) {
   const demoVet = getDemoAccounts().find((account) => account.role === "veterinarian")!;
   const demoStaff = getDemoAccounts().find((account) => account.role === "staff")!;
 
-  async function submitLogin(event: FormEvent) {
+  async function submitLogin(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (loading) return;
     setLoading(true);
@@ -52,7 +52,7 @@ export function StaffPortal({ onAuth, onOpenPasscodeBoard }: StaffPortalProps) {
     }
   }
 
-  async function submitRedeem(event: FormEvent) {
+  async function submitRedeem(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (loading) return;
     setLoading(true);
@@ -74,7 +74,14 @@ export function StaffPortal({ onAuth, onOpenPasscodeBoard }: StaffPortalProps) {
         <p className="authFormSubtitle">Use the one-time password provided by your administrator</p>
         <label className="authLabel">
           Email
-          <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+          <input
+            autoComplete="username"
+            name="email"
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            required
+          />
         </label>
         <label className="authLabel">
           One-time password
@@ -116,6 +123,8 @@ export function StaffPortal({ onAuth, onOpenPasscodeBoard }: StaffPortalProps) {
       <label className="authLabel">
         Email
         <input
+          autoComplete="username"
+          name="email"
           type="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}

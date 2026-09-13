@@ -30,6 +30,7 @@ Local commands:
 - `npm run db:migrate`
 - `npm run dev`
 - `npm run lint`, `npm run typecheck`, `npm run lint:dead`, and `npm run lint:duplicates` for source health checks. Duplication ignores append-only DB migrations.
+- `npm test` for every deterministic app, package, database, and automation test.
 - `npm run opensrc:sync` to refresh every source in `opensrc/sources.json`; `npm run opensrc:install-schedule` installs the daily macOS refresh.
 - `npm run test:client-journey` for welcome, appointment, consent, checkout, and follow-up messaging policy.
 - `npm run smoke:local` while the dev server is running to warm local pages/routes, then verify core agent route response-time budgets.

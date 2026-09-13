@@ -2,7 +2,7 @@
 
 import type { AppRole } from "@central-vet/db";
 import { Check, Pencil, ShieldCheck } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { type SubmitEvent, useState } from "react";
 import { authenticateActorSession } from "../lib/authClient";
 import { useClinicBrand } from "./ClinicContext";
 import { ClinicWordmark } from "./ClinicWordmark";
@@ -88,7 +88,7 @@ export function EntryScreen({ onSave }: { onSave: (session: Session) => void }) 
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  async function submit(event: FormEvent) {
+  async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (submitting) return;
     if (role !== "veterinarian" && !name.trim()) {

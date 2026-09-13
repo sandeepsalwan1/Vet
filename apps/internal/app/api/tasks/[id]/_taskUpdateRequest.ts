@@ -186,6 +186,7 @@ export async function taskUpdateResponse(args: {
       status: result.task.status
     });
   }
+  await auth.recordUsage();
   return NextResponse.json({
     task: result.task ? sanitizeTaskForActor(result.task, actor.role) : result.task
   });

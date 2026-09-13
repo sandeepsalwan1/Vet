@@ -1,14 +1,13 @@
-import { dbError } from "../../../_apiResponse";
+import { withDbError } from "../../../_apiResponse";
 import { taskUndoResponse } from "./_taskUndoRequest";
 
-export async function POST(
-  request: Request,
-  context: { params: Promise<{ id: string }> }
-) {
-  try {
+export const POST = withDbError(
+  "tasks.undo",
+  async (
+    request: Request,
+    context: { params: Promise<{ id: string }> }
+  ) => {
     const { id } = await context.params;
-    return await taskUndoResponse({ request, id });
-  } catch (error) {
-    return dbError(error, { route: "tasks.undo" });
+    return taskUndoResponse({ request, id });
   }
-}
+);

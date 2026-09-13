@@ -2,7 +2,7 @@
 
 import type { StaffClientJourneySnapshot } from "@central-vet/db";
 import { BellRing, BedDouble, CalendarX2, CheckCircle2, CircleDollarSign, MessageSquareText, Send } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { readStaffClientJourney, sendStaffClientUpdate } from "./staffJourneyClient";
 import type { TaskBoardSession } from "./taskBoardTypes";
 
@@ -43,7 +43,9 @@ export function ClientJourneyStaffPanel({ session, actorQuery, onError }: Props)
     };
   }, [load]);
 
-  const selected = useMemo(() => snapshot?.clients.find((client) => `${client.clientId}:${client.petId}` === clientKey) ?? null, [clientKey, snapshot]);
+  const selected = snapshot?.clients.find(
+    (client) => `${client.clientId}:${client.petId}` === clientKey
+  ) ?? null;
 
   async function send(updateType: "hospitalized_update" | "ready_for_pickup" | "checkout" | "appointment_changed") {
     if (!selected || saving) return;

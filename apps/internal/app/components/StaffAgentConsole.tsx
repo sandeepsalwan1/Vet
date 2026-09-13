@@ -1,7 +1,7 @@
 "use client";
 
 import { Bot, ClipboardList, FileCheck2, Loader2, Mail, ReceiptText, Search, Stethoscope } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { type SubmitEvent, useEffect, useMemo, useState } from "react";
 import {
   runAgentConsoleAction,
   type AgentConsoleResult
@@ -82,7 +82,7 @@ export function StaffAgentConsole() {
     }
   }
 
-  async function submit(event: FormEvent) {
+  async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     await run("/api/agent/internal");
   }

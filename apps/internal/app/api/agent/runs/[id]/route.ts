@@ -1,16 +1,15 @@
-import { dbError } from "../../../_apiResponse";
+import { withDbError } from "../../../_apiResponse";
 import { agentRunTimelineResponse } from "../../_auditRequest";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(
-  request: Request,
-  context: { params: Promise<{ id: string }> }
-) {
-  try {
+export const GET = withDbError(
+  "agent.runs.get",
+  async (
+    request: Request,
+    context: { params: Promise<{ id: string }> }
+  ) => {
     const { id } = await context.params;
-    return await agentRunTimelineResponse({ request, id });
-  } catch (error) {
-    return dbError(error, { route: "agent.runs.get" });
+    return agentRunTimelineResponse({ request, id });
   }
-}
+);

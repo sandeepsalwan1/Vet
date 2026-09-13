@@ -4,7 +4,7 @@ const modeSchema = z.enum(["disabled", "test", "production"]);
 const cadenceSchema = z.enum(["once", "monthly", "post_appointment"]);
 const audienceSchema = z.enum(["explicit_recipients", "all_active_clients", "recent_clients", "recent_appointments"]);
 
-export const emailBodySchema = z.object({
+export const emailBodySchema = z.looseObject({
   message: z.string().trim().max(4000).optional(),
   subject: z.string().trim().max(160).optional(),
   mode: modeSchema.optional(),
@@ -22,7 +22,7 @@ export const emailBodySchema = z.object({
   sendNow: z.boolean().optional(),
   scheduledFor: z.string().trim().max(80).optional(),
   postAppointmentDelayDays: z.number().int().min(1).max(90).optional()
-}).passthrough();
+});
 
 type EmailBody = z.infer<typeof emailBodySchema>;
 type EmailMode = z.infer<typeof modeSchema>;
@@ -30,7 +30,7 @@ type EmailCadence = z.infer<typeof cadenceSchema>;
 type EmailAudience = z.infer<typeof audienceSchema>;
 
 const emailPattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
-const emailAddressSchema = z.string().email();
+const emailAddressSchema = z.email();
 
 function emailsFrom(value: unknown) {
   const values = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[,\s;]+/) : [];

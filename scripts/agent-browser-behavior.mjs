@@ -364,9 +364,17 @@ async function assertionResults(client, assertions, tolerateExceptions = false) 
   return values;
 }
 
-async function waitForAssertions(client, assertions, timeoutMs, { onSample } = {}) {
+async function waitForAssertions(
+  client,
+  assertions,
+  timeoutMs,
+  { onSample, timing = {} } = {}
+) {
+  const now = timing.now ?? Date.now;
+  const wait = timing.sleep ?? sleep;
+  const pollMs = timing.pollMs ?? 50;
   const observed = assertions.map(() => false);
-  const deadline = Date.now() + timeoutMs;
+  const deadline = now() + timeoutMs;
   do {
     const results = await assertionResults(client, assertions, true);
     await onSample?.(results);
@@ -374,8 +382,8 @@ async function waitForAssertions(client, assertions, timeoutMs, { onSample } = {
       if (result.passed) observed[index] = true;
     }
     if (observed.every(Boolean)) break;
-    await sleep(50);
-  } while (Date.now() < deadline);
+    await wait(pollMs);
+  } while (now() < deadline);
   return assertions.map((assertion, index) => ({
     assertion: assertionLabel(assertion),
     passed: observed[index]
@@ -896,9 +904,13 @@ async function waitForStableInputValue(
   selector,
   value,
   timeoutMs = 1_000,
-  stableMs = 250
+  stableMs = 250,
+  timing = {}
 ) {
-  const deadline = Date.now() + timeoutMs;
+  const now = timing.now ?? Date.now;
+  const wait = timing.sleep ?? sleep;
+  const pollMs = timing.pollMs ?? 50;
+  const deadline = now() + timeoutMs;
   let matchingSince;
   do {
     const matches = await evaluate(
@@ -909,21 +921,27 @@ async function waitForStableInputValue(
     );
     if (!matches) matchingSince = undefined;
     else {
-      matchingSince ??= Date.now();
-      if (Date.now() - matchingSince >= stableMs) return true;
+      matchingSince ??= now();
+      if (now() - matchingSince >= stableMs) return true;
     }
-    await sleep(50);
-  } while (Date.now() < deadline);
+    await wait(pollMs);
+  } while (now() < deadline);
   return false;
 }
 
-export async function runAction(client, baseUrl, action, onTriggered) {
+export async function runAction(
+  client,
+  baseUrl,
+  action,
+  onTriggered,
+  options = {}
+) {
   if (action.type === "navigate") {
     await navigate(client, baseUrl, action.path);
     return `Navigate to ${action.path}`;
   }
   if (action.type === "wait") {
-    await sleep(action.milliseconds);
+    await (options.timing?.sleep ?? sleep)(action.milliseconds);
     return `Wait ${action.milliseconds}ms`;
   }
   if (action.type === "press") {
@@ -1012,7 +1030,14 @@ export async function runAction(client, baseUrl, action, onTriggered) {
     }
     if (
       ["select", "text"].includes(inputKind) &&
-      !(await waitForStableInputValue(client, action.selector, action.value))
+      !(await waitForStableInputValue(
+        client,
+        action.selector,
+        action.value,
+        1_000,
+        250,
+        options.timing
+      ))
     ) {
       await triggeredObservation;
       fail(`browser fill did not persist: ${action.selector}`);
@@ -1026,7 +1051,8 @@ export async function establishDemoSession(
   client,
   session,
   baseUrl,
-  route
+  route,
+  options = {}
 ) {
   if (!session || session === "none") return "";
   const credentials = DEMO_SESSION_CREDENTIALS[session];
@@ -1050,12 +1076,12 @@ export async function establishDemoSession(
     type: "fill",
     selector: "input[type='email']",
     value: credentials.email
-  });
+  }, undefined, options);
   await runAction(client, "", {
     type: "fill",
     selector: "input[type='password']",
     value: credentials.password
-  });
+  }, undefined, options);
   await runAction(client, "", {
     type: "click",
     selector: "form button[type='submit']"
@@ -1063,12 +1089,20 @@ export async function establishDemoSession(
   const signedIn = await waitForStableEvaluation(
     client,
     sessionReady,
-    8_000
+    8_000,
+    250,
+    options.timing
   );
   if (!signedIn) fail(`browser demo sign-in did not complete for ${session}`);
   if (route !== loginRoute) {
     await navigate(client, baseUrl, route);
-    if (!(await waitForStableEvaluation(client, sessionReady, 8_000))) {
+    if (!(await waitForStableEvaluation(
+      client,
+      sessionReady,
+      8_000,
+      250,
+      options.timing
+    ))) {
       fail(`browser demo session was not retained for ${session} after navigation to ${route}`);
     }
   }
@@ -1094,18 +1128,22 @@ async function waitForStableEvaluation(
   client,
   expression,
   timeoutMs = 5_000,
-  stableMs = 250
+  stableMs = 250,
+  timing = {}
 ) {
-  const deadline = Date.now() + timeoutMs;
+  const now = timing.now ?? Date.now;
+  const wait = timing.sleep ?? sleep;
+  const pollMs = timing.pollMs ?? 50;
+  const deadline = now() + timeoutMs;
   let matchingSince;
   do {
     if (!(await evaluate(client, expression, true))) matchingSince = undefined;
     else {
-      matchingSince ??= Date.now();
-      if (Date.now() - matchingSince >= stableMs) return true;
+      matchingSince ??= now();
+      if (now() - matchingSince >= stableMs) return true;
     }
-    await sleep(50);
-  } while (Date.now() < deadline);
+    await wait(pollMs);
+  } while (now() < deadline);
   return false;
 }
 
@@ -1159,7 +1197,8 @@ export async function runTask(client, payload, task, options = {}) {
       client,
       task.session ?? "none",
       payload.baseUrl,
-      task.route
+      task.route,
+      options
     );
     if (sessionStep) {
       reproductionSteps.push(sessionStep);
@@ -1205,7 +1244,8 @@ export async function runTask(client, payload, task, options = {}) {
                 actionIndex
               ),
               {
-                onSample: (results) => capturePassingState(results, pending)
+                onSample: (results) => capturePassingState(results, pending),
+                timing: options.timing
               }
             ).then(
               (observed) => ({ observed }),
@@ -1219,7 +1259,8 @@ export async function runTask(client, payload, task, options = {}) {
           client,
           payload.baseUrl,
           action,
-          observeTriggeredState
+          observeTriggeredState,
+          options
         )
       );
       if (action.type === "navigate" && task.session && task.session !== "none") {
@@ -1227,7 +1268,9 @@ export async function runTask(client, payload, task, options = {}) {
           !(await waitForStableEvaluation(
             client,
             demoSessionReadyExpression(task.session),
-            8_000
+            8_000,
+            250,
+            options.timing
           ))
         ) {
           fail(
@@ -1293,7 +1336,8 @@ export async function runTask(client, payload, task, options = {}) {
               await options.capture?.("passed");
               passingStateCaptured = true;
             }
-          }
+          },
+          timing: options.timing
         }
       );
       for (const [observedIndex, result] of observed.entries()) {

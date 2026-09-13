@@ -1,14 +1,13 @@
-import { dbError } from "../../_apiResponse";
+import { withDbError } from "../../_apiResponse";
 import { taskUpdateResponse } from "./_taskUpdateRequest";
 
-export async function PATCH(
-  request: Request,
-  context: { params: Promise<{ id: string }> }
-) {
-  try {
+export const PATCH = withDbError(
+  "tasks.update",
+  async (
+    request: Request,
+    context: { params: Promise<{ id: string }> }
+  ) => {
     const { id } = await context.params;
-    return await taskUpdateResponse({ request, id });
-  } catch (error) {
-    return dbError(error, { route: "tasks.update" });
+    return taskUpdateResponse({ request, id });
   }
-}
+);

@@ -48,7 +48,12 @@ type SettingsAccessResult =
   | { actor: Actor; clinic: ClinicContext }
   | { response: NextResponse };
 type SettingsPatchResult =
-  | { actor: Actor; clinic: ClinicContext; patch: SettingsPatch }
+  | {
+      actor: Actor;
+      clinic: ClinicContext;
+      patch: SettingsPatch;
+      recordUsage: () => Promise<void>;
+    }
   | { response: NextResponse };
 
 const settingsAccessError = "Settings require Admin or Veterinarian.";
@@ -109,7 +114,12 @@ async function settingsPatchContext(request: Request): Promise<SettingsPatchResu
       response: NextResponse.json({ error: settingsAccessError }, { status: 403 })
     };
   }
-  return { actor: auth.actor, clinic, patch: parsed.data };
+  return {
+    actor: auth.actor,
+    clinic,
+    patch: parsed.data,
+    recordUsage: auth.recordUsage
+  };
 }
 
 type SettingsUpdateResult =
@@ -255,5 +265,6 @@ export async function settingsPatchResponse(request: Request) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
   logInfo("settings_updated", result.logFields);
+  await context.recordUsage();
   return NextResponse.json(result.payload, { headers: noStoreHeaders });
 }

@@ -17,8 +17,8 @@ import {
 } from "../_shared";
 
 const approvalSchema = z.object({
-  runId: z.string().uuid().optional().nullable(),
-  taskId: z.string().uuid().optional().nullable(),
+  runId: z.uuid().optional().nullable(),
+  taskId: z.uuid().optional().nullable(),
   approvalType: z.string().trim().min(2).max(80),
   title: z.string().trim().min(2).max(160),
   summary: z.string().trim().min(2).max(2000),
@@ -45,7 +45,11 @@ async function requireManagerActor(
   body: Record<string, unknown>,
   clinic: ClinicContext,
   invalidActorError: { error: string; status: number }
-): Promise<{ actor: Actor } | { ok: false; error: string; status: number } | { response: NextResponse }> {
+): Promise<
+  | { actor: Actor; recordUsage: () => Promise<void> }
+  | { ok: false; error: string; status: number }
+  | { response: NextResponse }
+> {
   const actorResult = actorSchema.safeParse(body.actor);
   if (!actorResult.success) return { ok: false, ...invalidActorError };
 
@@ -54,7 +58,10 @@ async function requireManagerActor(
   if (!canManage(auth.actor.role)) {
     return { ok: false, error: "Manager access required.", status: 403 };
   }
-  return { actor: auth.actor };
+  return {
+    actor: auth.actor,
+    recordUsage: auth.recordUsage
+  };
 }
 
 async function createApprovalFromBody(
@@ -75,13 +82,15 @@ async function createApprovalFromBody(
     return { ok: false, error: "Invalid approval request.", status: 400 };
   }
 
+  const approval = await createApproval({
+    ...parsed.data,
+    clinicId: clinic.clinicId
+  });
+  await manager.recordUsage();
   return {
     ok: true,
     status: 201,
-    approval: await createApproval({
-      ...parsed.data,
-      clinicId: clinic.clinicId
-    })
+    approval
   };
 }
 
@@ -110,6 +119,7 @@ async function decideApprovalFromBody(
     actor: manager.actor,
     note: decisionResult.data.note
   });
+  if (approval) await manager.recordUsage();
   return approval
     ? { ok: true, approval }
     : { ok: false, error: "Approval not found.", status: 404 };

@@ -1,4 +1,4 @@
-import { dbError } from "../_apiResponse";
+import { withDbError } from "../_apiResponse";
 import {
   arrivalDeskPatchResponse,
   arrivalIntakeGetResponse,
@@ -7,26 +7,12 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request) {
-  try {
-    return await arrivalIntakeGetResponse(request);
-  } catch (error) {
-    return dbError(error, { route: "arrival-intake.get" });
-  }
-}
-
-export async function POST(request: Request) {
-  try {
-    return await publicArrivalActionResponse(request);
-  } catch (error) {
-    return dbError(error, { route: "arrival-intake.post" });
-  }
-}
-
-export async function PATCH(request: Request) {
-  try {
-    return await arrivalDeskPatchResponse(request);
-  } catch (error) {
-    return dbError(error, { route: "arrival-intake.patch" });
-  }
-}
+export const GET = withDbError("arrival-intake.get", arrivalIntakeGetResponse);
+export const POST = withDbError(
+  "arrival-intake.post",
+  publicArrivalActionResponse
+);
+export const PATCH = withDbError(
+  "arrival-intake.patch",
+  arrivalDeskPatchResponse
+);

@@ -4,6 +4,7 @@ const workspaceRoot = path.resolve(import.meta.dirname, "../..");
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  reactCompiler: true,
   transpilePackages: ["@central-vet/agents", "@central-vet/client-request", "@central-vet/db", "@central-vet/notifications"],
   serverExternalPackages: ["@google/adk", "@google/genai"],
   outputFileTracingRoot: workspaceRoot,

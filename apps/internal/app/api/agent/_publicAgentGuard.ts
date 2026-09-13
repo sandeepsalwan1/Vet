@@ -9,7 +9,7 @@ const publicAgentWindowMs = 60 * 60 * 1000;
 const publicAgentHits = new Map<string, number[]>();
 let lastPublicAgentSweep = 0;
 
-const publicAgentSchema = z.object({
+const publicAgentSchema = z.looseObject({
   intent: z.string().trim().max(80).optional(),
   clientName: z.string().trim().max(120).optional(),
   name: z.string().trim().max(120).optional(),
@@ -25,7 +25,7 @@ const publicAgentSchema = z.object({
   request: z.string().trim().max(4000).optional(),
   transcript: z.string().trim().max(4000).optional(),
   body: z.string().trim().max(4000).optional()
-}).passthrough();
+});
 
 function hashValue(value: string) {
   return createHash("sha256").update(value).digest("hex");

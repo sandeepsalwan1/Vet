@@ -55,3 +55,19 @@ export function dbError(error: unknown, fields?: LogFields) {
   logError("server_error", error, fields);
   return NextResponse.json({ error: "Server error." }, { status: 500 });
 }
+
+export function withDbError<
+  Arguments extends unknown[],
+  Result extends Response | void
+>(
+  route: string,
+  handler: (...args: Arguments) => Result | Promise<Result>
+) {
+  return async (...args: Arguments): Promise<Result | Response> => {
+    try {
+      return await handler(...args);
+    } catch (error) {
+      return dbError(error, { route });
+    }
+  };
+}

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { hasOutstandingFeedbackPrompt } from "./_clientJourneyRequest";
-import { clientJourneySettingsPatchSchema } from "./staff/route";
+import { clientJourneySettingsPatchSchema } from "./staff/_staffRequest";
 
 const due = "2030-02-05T18:30:00.000Z";
 const now = new Date("2030-02-05T19:00:00.000Z").getTime();

@@ -1,4 +1,4 @@
-import { dbError } from "../_apiResponse";
+import { withDbError } from "../_apiResponse";
 import {
   approvalCreateResponse,
   approvalListResponse
@@ -6,18 +6,5 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request) {
-  try {
-    return await approvalListResponse(request);
-  } catch (error) {
-    return dbError(error, { route: "approvals.list" });
-  }
-}
-
-export async function POST(request: Request) {
-  try {
-    return await approvalCreateResponse(request);
-  } catch (error) {
-    return dbError(error, { route: "approvals.create" });
-  }
-}
+export const GET = withDbError("approvals.list", approvalListResponse);
+export const POST = withDbError("approvals.create", approvalCreateResponse);

@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
-import { dbError, noStoreHeaders } from "../_apiResponse";
+import { noStoreHeaders, withDbError } from "../_apiResponse";
 import { eventListPayload } from "./_eventRequest";
 
-export async function GET(request: Request) {
-  try {
+export const GET = withDbError(
+  "events.list",
+  async (request: Request) => {
     const result = await eventListPayload(request);
     if ("response" in result) return result.response;
     return NextResponse.json(result, { headers: noStoreHeaders });
-  } catch (error) {
-    return dbError(error, { route: "events.list" });
   }
-}
+);

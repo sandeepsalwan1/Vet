@@ -52,6 +52,7 @@ export async function taskUndoResponse(args: {
       actorRole: actor.role,
       status: task.status
     });
+    await auth.recordUsage();
   }
   return NextResponse.json({ task: task ? sanitizeTaskForActor(task, actor.role) : task });
 }

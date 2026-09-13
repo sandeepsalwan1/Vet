@@ -1,4 +1,5 @@
 import {
+  evaluateOperatorUsageAlert,
   sendAgentExampleEmail,
   sendDueClientJourneyMessages,
   sendDailyPrioritySummary,
@@ -142,6 +143,18 @@ export async function monthlyAgentEmailResponse(request: Request) {
     resultCount: result.results.length
   });
   return NextResponse.json({ ok: true, result });
+}
+
+export async function operatorUsageAlertResponse(request: Request) {
+  const unauthorized = requireCronAuthorization(request, "operator_usage_alert_rejected");
+  if (unauthorized) return unauthorized;
+  const result = await evaluateOperatorUsageAlert();
+  logInfo("operator_usage_alert_checked", {
+    sent: result.sent,
+    state: result.state,
+    reason: result.reason
+  });
+  return NextResponse.json(result);
 }
 
 export async function smokeNotificationResponse(request: Request) {

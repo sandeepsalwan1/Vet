@@ -1,10 +1,7 @@
-import { dbError } from "../../_apiResponse";
+import { withDbError } from "../../_apiResponse";
 import { smokeNotificationResponse } from "../_notificationRequest";
 
-export async function POST(request: Request) {
-  try {
-    return await smokeNotificationResponse(request);
-  } catch (error) {
-    return dbError(error, { route: "notifications.smoke" });
-  }
-}
+export const POST = withDbError(
+  "notifications.smoke",
+  smokeNotificationResponse
+);

@@ -12,7 +12,11 @@
         "app/**/page.tsx",
         "app/**/route.ts"
       ],
-      "project": ["app/**/*.{ts,tsx}", "components/**/*.{ts,tsx}", "lib/**/*.ts"],
+      "project": [
+        "app/**/*.{css,ts,tsx}",
+        "components/**/*.{ts,tsx}",
+        "lib/**/*.ts"
+      ],
       "ignoreDependencies": ["sharp"],
       "ignoreIssues": {
         "components/ui/**": ["exports", "types"]

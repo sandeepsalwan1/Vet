@@ -1,7 +1,7 @@
 "use client";
 
 import { Bot, Loader2, Send } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { type SubmitEvent, useState } from "react";
 import {
   runPublicAgentFlow,
   type PublicAgentResponse,
@@ -39,7 +39,7 @@ export function PublicAgentFlow({
     setError("");
   };
 
-  async function submit(event: FormEvent) {
+  async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (submitting) return;
     setSubmitting(true);

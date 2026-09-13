@@ -40,13 +40,18 @@ Migrations are append-only under `db/migrations`. The database client disables p
 - staff passcodes
 - optional Google, E2B, and Apify tools
 - notification mode, Resend email transport, Twilio SMS transport, sender, and recipient configuration
+- private platform-operator access and email recipient configuration
 - cron authorization and internal base URL
 
 Keep live notification modes disabled until approved. Use test recipients for smoke proof. Cron routes require `Authorization: Bearer $CRON_SECRET` outside development.
+`PLATFORM_OPERATOR_PASSCODE` protects `/operator` independently from hospital passcodes.
+`PLATFORM_OPERATOR_EMAIL` supplies the private low-return recipient without storing it in source or hospital settings.
+The private low-return toggle is off by default in Postgres.
 
 ## Cron
 
 - Daily priority summary calls `/api/notifications/daily-priority-summary` and honors the Admin end-of-day toggle.
+- The same daily cron service calls `/api/notifications/operator-usage` for the private low-return check without adding another paid cron.
 - Monthly agent email calls `/api/notifications/monthly-agent-email` and uses a month-scoped idempotency key.
 - Client journey delivery calls `/api/notifications/client-journey`, dispatches due idempotent plans, and rechecks current channel consent before transport.
 - Preserve the existing Render service names when changing the blueprint so sync updates rather than duplicates services.

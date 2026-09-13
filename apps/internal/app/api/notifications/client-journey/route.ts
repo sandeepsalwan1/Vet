@@ -1,20 +1,11 @@
-import { dbError } from "../../_apiResponse";
+import { withDbError } from "../../_apiResponse";
 import { clientJourneyNotificationsResponse } from "../_notificationRequest";
 
 export const dynamic = "force-dynamic";
 
-async function handler(request: Request) {
-  try {
-    return await clientJourneyNotificationsResponse(request);
-  } catch (error) {
-    return dbError(error, { route: "notifications.client_journey" });
-  }
-}
+const handler = withDbError(
+  "notifications.client_journey",
+  clientJourneyNotificationsResponse
+);
 
-export async function GET(request: Request) {
-  return handler(request);
-}
-
-export async function POST(request: Request) {
-  return handler(request);
-}
+export { handler as GET, handler as POST };

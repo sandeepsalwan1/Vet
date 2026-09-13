@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   ArrivalIntake as ArrivalRecord,
   ArrivalMatch,
@@ -82,13 +82,11 @@ export function useArrivalIntakeFlow() {
     };
   }, []);
 
-  const identityComplete = useMemo(() => {
-    return Boolean(
-      identity.lastName.trim().length >= 2 &&
-      phoneDigits(identity.clientPhone).length >= 10 &&
-      identity.petName.trim().length >= 2
-    );
-  }, [identity]);
+  const identityComplete = Boolean(
+    identity.lastName.trim().length >= 2 &&
+    phoneDigits(identity.clientPhone).length >= 10 &&
+    identity.petName.trim().length >= 2
+  );
 
   function updateIdentity(key: keyof ArrivalIdentityState, value: string | boolean) {
     const nextValue = key === "clientPhone" && typeof value === "string"

@@ -1,7 +1,7 @@
 "use client";
 
 import type { Task, TaskEvent } from "@central-vet/db";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   activeTaskSyncIntervalMs,
   activeTaskSyncWindowMs,
@@ -43,10 +43,7 @@ export function useTaskBoardDataSync() {
   const loadInFlightRef = useRef(false);
   const loadSequenceRef = useRef(0);
 
-  const actorQuery = useMemo(() => {
-    if (!session) return "";
-    return taskBoardActorQuery(session);
-  }, [session]);
+  const actorQuery = session ? taskBoardActorQuery(session) : "";
 
   const recordActivity = useCallback(() => {
     lastActivityRef.current = Date.now();
