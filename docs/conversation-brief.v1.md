@@ -24,6 +24,13 @@ The useful direction in his requests is evidence from real customer reviews, a m
 
 For context, [OpenVet's current site](https://www.openvet.ai/) presents clinical reasoning with patient records and cited evidence. Our inspected foundation focuses on clinic operations and the client journey. The client's mention is a reference to explore; his prompts do not settle how much clinical functionality belongs in our product.
 
+## Additional requests relayed by you
+
+- **Email-response assistant:** help prepare replies to incoming client emails using the relevant clinic information, with an OpenClaw-style assistant as the reference.
+- **Emailed clinical results:** produce a summary and possible diagnostic interpretation. The recommended initial flow is a veterinarian-reviewed draft before clinical advice reaches the client.
+
+These additions are preserved [verbatim in client requests](client-requests.v1.md#additional-requests-relayed-by-the-user---september-13-2026). They were relayed in this conversation after the original shared chat. Exact email workflows, automatic sending, result types, and implementation remain to be defined.
+
 ## What we have, what is worth keeping, and what is missing
 
 This reflects the source inspection and local checks already performed, not new production verification.

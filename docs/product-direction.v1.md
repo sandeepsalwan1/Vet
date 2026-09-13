@@ -31,7 +31,7 @@ This recommendation prioritizes the customer outcome described throughout the no
 
 | Source | Substance preserved | How to interpret it |
 | --- | --- | --- |
-| [Client requests](client-requests.v1.md), shared ChatGPT conversation beginning August 30 | All four visible client prompts, verbatim | Earlier AI responses are omitted. No review corpus was included. |
+| [Client requests](client-requests.v1.md), shared ChatGPT conversation beginning August 30, plus later user-relayed additions | All four visible client prompts and the later email-assistance/result-interpretation request, verbatim with separate provenance | Earlier AI responses are omitted. No review corpus was included. Later additions are the user's account of desired capabilities. |
 | [Project goals](project-goals.v1.md), undated product and workflow notes | Full supplied wording, verbatim | Desired outcomes and unresolved alternatives. The notes distinguish gathering data from booking appointments. |
 | [Agentic startup](agentic-startup.v1.md), undated agent-design notes | Full supplied wording, verbatim | Model choices, search weights, fees, autonomy, and infrastructure remain proposals to discuss. |
 | [DataHub](datahub.md#pilot-decisions-from-supplied-correspondence), July 29 to September 8 correspondence | Main agreements, vendor statements, and remaining questions | Dated correspondence, not verification of installed configuration or production operation. |
@@ -174,6 +174,8 @@ For incomplete or stale synchronization, show the last known update and offer st
 A browser-based companion is the proposed first delivery surface. Embedding a dashboard inside Cornerstone would require an actual supported extension mechanism and is not established by the supplied material. Keep AVImark compatibility at the normalized contract boundary; provider availability and capability still need verification.
 
 ## Agent choices to discuss
+
+The user has additionally requested an email-response assistant and diagnostic interpretation of results arriving by email. Their [exact wording and working interpretation](client-requests.v1.md#additional-requests-relayed-by-the-user---september-13-2026) are captured separately. An OpenClaw-style helper is a reference, not a settled framework choice. Proposed scope: draft routine replies from verified clinic facts; match clinical results to the correct patient and prepare interpretations for veterinarian review. Clinical-result interpretation needs its own validation before customer delivery. Mailbox integration and sending behavior remain to be defined.
 
 | Proposal in the notes | Recommended decision and reason |
 | --- | --- |
