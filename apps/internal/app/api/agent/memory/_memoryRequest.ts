@@ -14,8 +14,8 @@ import {
   requireManagerFromQuery
 } from "../../_shared";
 
-const memoryBodySchema = z.object({
-  id: z.string().uuid().optional(),
+const memoryBodySchema = z.looseObject({
+  id: z.uuid().optional(),
   subjectType: z.string().trim().min(1).max(80).optional(),
   subjectId: z.string().trim().max(120).optional().nullable(),
   memoryType: z.string().trim().max(80).optional(),
@@ -23,7 +23,7 @@ const memoryBodySchema = z.object({
   confidence: z.number().min(0).max(1).optional(),
   correctionNote: z.string().trim().max(500).optional().nullable(),
   metadata: z.record(z.string(), z.unknown()).optional()
-}).passthrough();
+});
 
 type MemoryBody = z.infer<typeof memoryBodySchema>;
 type MemoryActionResult =
@@ -152,17 +152,34 @@ export async function memoryListResponse(request: Request) {
 export async function memoryCreateResponse(request: Request) {
   const auth = await requireManagerFromBody(request);
   if ("response" in auth) return auth.response;
-  return memoryResponse(await createMemoryFromBody(auth.body, auth.actor, auth.clinic.clinicId));
+  const result = await createMemoryFromBody(
+    auth.body,
+    auth.actor,
+    auth.clinic.clinicId
+  );
+  if (result.ok) await auth.recordUsage();
+  return memoryResponse(result);
 }
 
 export async function memoryCorrectionResponse(request: Request) {
   const auth = await requireManagerFromBody(request);
   if ("response" in auth) return auth.response;
-  return memoryResponse(await correctMemoryFromBody(auth.body, auth.actor, auth.clinic.clinicId));
+  const result = await correctMemoryFromBody(
+    auth.body,
+    auth.actor,
+    auth.clinic.clinicId
+  );
+  if (result.ok) await auth.recordUsage();
+  return memoryResponse(result);
 }
 
 export async function memoryDeleteResponse(request: Request) {
   const auth = await requireManagerFromBody(request);
   if ("response" in auth) return auth.response;
-  return memoryResponse(await deleteMemoryFromBody(auth.body, auth.clinic.clinicId));
+  const result = await deleteMemoryFromBody(
+    auth.body,
+    auth.clinic.clinicId
+  );
+  if (result.ok) await auth.recordUsage();
+  return memoryResponse(result);
 }

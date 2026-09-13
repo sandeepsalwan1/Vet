@@ -54,9 +54,50 @@ function findAccountIndexByEmail(accounts: Account[], email: string): number {
   return accounts.findIndex((account) => account.email === normalized);
 }
 
+type DemoAccount = (typeof DEMO_ACCOUNTS)[number];
+
+function demoPasscode(account: DemoAccount): string | undefined {
+  return "passcode" in account ? account.passcode : undefined;
+}
+
+// The sign-in screen publishes these credentials, so a stale browser copy from
+// an earlier build must never outrank the hint on screen. Demo rows are
+// re-pinned to the published password on every seed; everything else is left
+// alone.
+function repinDemoAccount(account: Account, demo: DemoAccount): Account | null {
+  const passwordHash = mockHash(demo.password);
+  const passcode = demoPasscode(demo);
+  if (
+    account.role === demo.role &&
+    account.name === demo.name &&
+    account.passwordHash === passwordHash &&
+    account.passcode === passcode &&
+    !account.mustResetPassword
+  ) {
+    return null;
+  }
+  return {
+    ...account,
+    role: demo.role,
+    name: demo.name,
+    passcode,
+    passwordHash,
+    mustResetPassword: false,
+    otp: undefined,
+  };
+}
+
 function seedDemoAccounts(): void {
   const accounts = loadAccounts();
   const existingEmails = new Set(accounts.map((account) => account.email));
+  let repinned = false;
+  const current = accounts.map((account) => {
+    const demo = DEMO_ACCOUNTS.find((candidate) => candidate.email === account.email);
+    const updated = demo ? repinDemoAccount(account, demo) : null;
+    if (!updated) return account;
+    repinned = true;
+    return updated;
+  });
   const seeded = DEMO_ACCOUNTS
     .filter((account) => !existingEmails.has(account.email))
     .map((account) => ({
@@ -66,11 +107,11 @@ function seedDemoAccounts(): void {
       email: account.email,
       phone: "phone" in account ? account.phone : undefined,
       petName: "petName" in account ? account.petName : undefined,
-      passcode: "passcode" in account ? account.passcode : undefined,
+      passcode: demoPasscode(account),
       passwordHash: mockHash(account.password),
       createdAt: new Date().toISOString(),
     }));
-  if (seeded.length) persistAccounts([...accounts, ...seeded]);
+  if (seeded.length || repinned) persistAccounts([...current, ...seeded]);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

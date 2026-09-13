@@ -15,7 +15,7 @@ import {
   Stethoscope,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { canAdmin } from "../lib/taskWorkflow";
 import type { TaskBoardSession } from "./taskBoardTypes";
 import { useArrivalDeskState } from "./useArrivalDeskState";
@@ -65,15 +65,13 @@ export function ArrivalDeskPanel({ session, actorQuery, onError }: Props) {
     updateSettingsDraft
   } = useArrivalDeskState({ session, actorQuery, onError });
 
-  const occupancy = useMemo(() => {
-    const rooms = desk?.rooms ?? [];
-    const occupied = rooms.filter((room) => room.state === "occupied").length;
-    return {
-      occupied,
-      total: rooms.length,
-      pressured: rooms.length > 0 && occupied * 3 >= rooms.length * 2
-    };
-  }, [desk]);
+  const rooms = desk?.rooms ?? [];
+  const occupied = rooms.filter((room) => room.state === "occupied").length;
+  const occupancy = {
+    occupied,
+    total: rooms.length,
+    pressured: rooms.length > 0 && occupied * 3 >= rooms.length * 2
+  };
 
   useEffect(() => {
     if (!open) return;

@@ -2,6 +2,7 @@ import {
   checkAuthAttemptLimit,
   getRecipientProfileByPasscode,
   recordAuthAttempt,
+  recordPlatformUsageEvent,
   resolveClinicForHostname,
   type Actor,
   type AppRole,
@@ -54,6 +55,69 @@ function passcodeMatches(input: string | undefined, ...allowed: Array<string | n
   const passcode = configuredPasscode(input);
   return Boolean(passcode && allowed.some((candidate) => candidate === passcode));
 }
+
+function usesDemoCredential(actor: RawActor) {
+  if (!demoAccountsEnabled()) return false;
+  if (
+    actor.role === "admin" ||
+    actor.role === "va" ||
+    actor.role === "task_adder"
+  ) {
+    return passcodeMatches(actor.passcode, "246810");
+  }
+  if (actor.role === "veterinarian") {
+    return passcodeMatches(actor.passcode, "135790");
+  }
+  return false;
+}
+
+function isSyntheticUsageActor(actor: Actor, demosEnabled: boolean) {
+  const name = actor.name.trim().toLowerCase();
+  if (
+    name === "system" ||
+    name.includes("smoke") ||
+    name.includes("scenario runner") ||
+    name.includes("external visitor")
+  ) {
+    return true;
+  }
+  if (!demosEnabled) return false;
+  return (
+    (actor.role === "admin" && name === "clinic admin") ||
+    (actor.role === "veterinarian" && name === "dr. shiv") ||
+    (actor.role === "staff" && name === "front desk")
+  );
+}
+
+export function createAuthenticatedUsageRecorder(
+  recordUsage: typeof recordPlatformUsageEvent,
+  demosEnabled: () => boolean = demoAccountsEnabled
+) {
+  return async function recordUsageAfterAuthentication(
+    actor: Actor,
+    clinic: ClinicContext,
+    syntheticCredential: boolean
+  ) {
+    if (
+      syntheticCredential ||
+      isSyntheticUsageActor(actor, demosEnabled())
+    ) {
+      return;
+    }
+    try {
+      await recordUsage({
+        clinicId: clinic.clinicId,
+        actor
+      });
+    } catch {
+      logWarn("platform_usage_record_failed", { actorRole: actor.role });
+    }
+  };
+}
+
+const recordAuthenticatedUsage = createAuthenticatedUsageRecorder(
+  recordPlatformUsageEvent
+);
 
 export async function resolveClinicFromRequest(request: Request): Promise<ClinicContext> {
   if (agentProofFixturesEnabled(request)) return agentProofClinic();
@@ -118,7 +182,10 @@ export async function authenticateActor(
   actor: RawActor,
   request: Request,
   clinic?: ClinicContext
-): Promise<{ actor: Actor } | { response: NextResponse }> {
+): Promise<
+  | { actor: Actor; recordUsage: () => Promise<void> }
+  | { response: NextResponse }
+> {
   const clinicContext = clinic ?? await resolveClinicFromRequest(request);
   if (agentProofFixturesEnabled(request)) {
     const actorResult = agentProofActor(actor);
@@ -164,7 +231,14 @@ export async function authenticateActor(
         response: NextResponse.json({ error: "Invalid passcode." }, { status: 403 })
       };
     }
-    return { actor: normalized };
+    return {
+      actor: normalized,
+      recordUsage: () => recordAuthenticatedUsage(
+        normalized,
+        clinicContext,
+        usesDemoCredential(actor)
+      )
+    };
   }
 
   const normalized = await normalizeActor(actor, clinicContext);
@@ -173,7 +247,14 @@ export async function authenticateActor(
       response: NextResponse.json({ error: "Invalid role or name." }, { status: 403 })
     };
   }
-  return { actor: normalized };
+  return {
+    actor: normalized,
+    recordUsage: () => recordAuthenticatedUsage(
+      normalized,
+      clinicContext,
+      usesDemoCredential(actor)
+    )
+  };
 }
 
 export async function authenticateActorFromQuery(
@@ -204,7 +285,12 @@ export async function requireManagerFromQuery(request: Request) {
       response: NextResponse.json({ error: "Manager access required." }, { status: 403 })
     };
   }
-  return { url, clinic, actor: auth.actor };
+  return {
+    url,
+    clinic,
+    actor: auth.actor,
+    recordUsage: auth.recordUsage
+  };
 }
 
 async function readBody(request: Request) {
@@ -225,7 +311,12 @@ async function requireActorFromBody(request: Request) {
   if ("response" in auth) {
     return { body, response: auth.response };
   }
-  return { body, actor: auth.actor, clinic };
+  return {
+    body,
+    actor: auth.actor,
+    clinic,
+    recordUsage: auth.recordUsage
+  };
 }
 
 export async function requireManagerFromBody(request: Request) {

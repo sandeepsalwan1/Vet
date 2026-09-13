@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertCircle, Bot, CheckCircle2, Clock, PawPrint, Send, ShieldAlert, User } from "lucide-react";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { type SubmitEvent, useEffect, useRef, useState } from "react";
 import type { ReportSummary, WorkflowStatus } from "../lib/agentClient";
 import { ChatReportCard } from "./ChatReportCard";
 
@@ -96,7 +96,7 @@ export function ChatPanel({ messages, onSend, isLoading, placeholder, className 
     setInput("");
   }
 
-  function handleSubmit(e: FormEvent) {
+  function handleSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     submitInput();
   }

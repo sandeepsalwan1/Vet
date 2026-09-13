@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,11 +31,14 @@ import {
   untrustedCodeEnvironment,
   validateArtifactUrl,
   validatePublishedMedia,
-  validatePublishedMediaOutcome,
   validateVisualBehaviorPlan,
   visualRoutes,
   visualServerCommand
 } from "./agent-proof.mjs";
+import {
+  inspectPublishedProofMedia,
+  validatePublishedMediaOutcome
+} from "./agent-proof-media.mjs";
 
 const config = {
   repo: { owner: "sandeepsalwan1" },
@@ -963,6 +967,61 @@ test("published GIF proof is downloaded, digest-bound, exact-head, and playable"
         probe
       }),
     /digest mismatch/
+  );
+});
+
+test("published media rejects ambiguous wrapper paths and symlinked files", (t) => {
+  const ambiguousRoot = mkdtempSync(join(tmpdir(), "vet-ambiguous-proof-"));
+  const symlinkRoot = mkdtempSync(join(tmpdir(), "vet-symlink-proof-"));
+  t.after(() => {
+    rmSync(ambiguousRoot, { recursive: true, force: true });
+    rmSync(symlinkRoot, { recursive: true, force: true });
+  });
+
+  const firstDirectory = join(ambiguousRoot, "first");
+  const secondDirectory = join(ambiguousRoot, "second");
+  mkdirSync(firstDirectory);
+  mkdirSync(secondDirectory);
+  const first = join(firstDirectory, "capture.png");
+  const second = join(secondDirectory, "capture.png");
+  writeFileSync(first, "first-capture");
+  writeFileSync(second, "second-capture");
+  const digest = createHash("sha256").update(readFileSync(first)).digest("hex");
+
+  assert.throws(
+    () =>
+      inspectPublishedProofMedia({
+        artifactDir: ambiguousRoot,
+        expectedDigests: [
+          { name: "uploaded/capture.png", sha256: digest }
+        ],
+        headSha: "",
+        proofKind: "UI",
+        requireHeadMarker: false,
+        probe: () => ({
+          codec: "png",
+          width: 1,
+          height: 1,
+          frames: 1,
+          durationSeconds: 0
+        })
+      }),
+    /digest mismatch/
+  );
+
+  const target = join(symlinkRoot, "capture.png");
+  writeFileSync(target, "capture");
+  symlinkSync(target, join(symlinkRoot, "linked.png"));
+  assert.throws(
+    () =>
+      inspectPublishedProofMedia({
+        artifactDir: symlinkRoot,
+        expectedDigests: [],
+        headSha: "",
+        proofKind: "UI",
+        requireHeadMarker: false
+      }),
+    /contains a symlink/
   );
 });
 

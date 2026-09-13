@@ -59,6 +59,7 @@ Vet: one deployed Next.js app, Postgres-backed npm workspace.
 
 ## Architecture Rules
 
+- Architecture cleanup: work directly; no HTML reports or self-authored plans unless the user explicitly requests them.
 - Use `CONTEXT.md` names for domain concepts.
 - Keep HTTP routes shallow; put behavior in package/app modules with typed interfaces.
 - Do not re-add `apps/client-request`, `packages/request-form`, or `packages/request-intake`; `/request` lives in `apps/internal`.

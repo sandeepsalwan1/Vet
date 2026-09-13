@@ -14,7 +14,7 @@ They are separate tenants with separate branding, settings, and data.
 - `packages/client-request`: shared public request guard, validation, dedupe, and task creation.
 - `opensrc`: upstream mirror/provenance notes for dependencies that need source inspection.
 - `.agent` and `.github/workflows/agent-*`: issue-label automation config, prompts, and workflows.
-- `.agents/skills` and `.claude/skills`: project-local agent launch/scraping skills.
+- `.agents/skills` and `.claude/skills/run`: tracked project-local agent skills; installed skill mirrors stay local.
 
 Docs:
 
@@ -30,6 +30,7 @@ Local commands:
 - `npm run db:migrate`
 - `npm run dev`
 - `npm run lint`, `npm run typecheck`, `npm run lint:dead`, and `npm run lint:duplicates` for source health checks. Duplication ignores append-only DB migrations.
+- `npm test` for every deterministic app, package, database, and automation test.
 - `npm run opensrc:sync` to refresh every source in `opensrc/sources.json`; `npm run opensrc:install-schedule` installs the daily macOS refresh.
 - `npm run test:client-journey` for welcome, appointment, consent, checkout, and follow-up messaging policy.
 - `npm run smoke:local` while the dev server is running to warm local pages/routes, then verify core agent route response-time budgets.

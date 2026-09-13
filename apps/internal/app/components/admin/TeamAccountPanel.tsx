@@ -10,7 +10,7 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { type SubmitEvent, useState } from "react";
 import {
   createTeamMember,
   listTeam,
@@ -59,7 +59,7 @@ export function TeamAccountPanel({ session, onLogout, onOpenTaskBoard, embedded 
   const [createdOtp, setCreatedOtp] = useState<{ name: string; otp: string } | null>(null);
   const [team, setTeam] = useState<Account[]>(() => listTeam());
 
-  async function submit(e: FormEvent) {
+  async function submit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     if (loading) return;
     setLoading(true);

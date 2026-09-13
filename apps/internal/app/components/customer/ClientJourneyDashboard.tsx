@@ -12,7 +12,7 @@ import {
   ThumbsDown,
   ThumbsUp
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { AccountSession } from "../../lib/accountStore";
 import { readClientJourney, updateClientJourney } from "./clientJourneyClient";
 
@@ -56,6 +56,35 @@ function currentVisitStage(snapshot: ClientJourneySnapshot) {
   )?.eventType ?? null;
 }
 
+function currentJourneyState(snapshot: ClientJourneySnapshot | null) {
+  if (!snapshot) return null;
+  const stage = currentVisitStage(snapshot);
+  const appointment = snapshot.appointment &&
+    !stage &&
+    !["cancelled", "canceled", "completed", "checked_out"].includes(
+      snapshot.appointment.status.toLowerCase()
+    )
+    ? snapshot.appointment
+    : null;
+  const discharge = stage === "checkout" || stage === "discharge"
+    ? dueMessage(snapshot, "discharge")
+    : null;
+  const pickup = stage === "ready_for_pickup"
+    ? dueMessage(snapshot, "ready_for_pickup")
+    : null;
+  const feedbackMessage = dueMessage(snapshot, "visit_experience");
+  const feedback = feedbackMessage &&
+    !feedbackAnswered(snapshot, feedbackMessage, "visit_experience")
+    ? feedbackMessage
+    : null;
+  const petHealthMessage = dueMessage(snapshot, "pet_health_check");
+  const petHealth = petHealthMessage &&
+    !feedbackAnswered(snapshot, petHealthMessage, "pet_health")
+    ? petHealthMessage
+    : null;
+  return { appointment, discharge, pickup, feedback, petHealth };
+}
+
 export function ClientJourneyDashboard({ session }: Props) {
   const [snapshot, setSnapshot] = useState<ClientJourneySnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -97,20 +126,7 @@ export function ClientJourneyDashboard({ session }: Props) {
     }
   }
 
-  const state = useMemo(() => {
-    if (!snapshot) return null;
-    const stage = currentVisitStage(snapshot);
-    const appointment = snapshot.appointment && !stage && !["cancelled", "canceled", "completed", "checked_out"].includes(snapshot.appointment.status.toLowerCase())
-      ? snapshot.appointment
-      : null;
-    const discharge = stage === "checkout" || stage === "discharge" ? dueMessage(snapshot, "discharge") : null;
-    const pickup = stage === "ready_for_pickup" ? dueMessage(snapshot, "ready_for_pickup") : null;
-    const feedbackMessage = dueMessage(snapshot, "visit_experience");
-    const feedback = feedbackMessage && !feedbackAnswered(snapshot, feedbackMessage, "visit_experience") ? feedbackMessage : null;
-    const petHealthMessage = dueMessage(snapshot, "pet_health_check");
-    const petHealth = petHealthMessage && !feedbackAnswered(snapshot, petHealthMessage, "pet_health") ? petHealthMessage : null;
-    return { appointment, discharge, pickup, feedback, petHealth };
-  }, [snapshot]);
+  const state = currentJourneyState(snapshot);
 
   if (!session.accessToken) return null;
 

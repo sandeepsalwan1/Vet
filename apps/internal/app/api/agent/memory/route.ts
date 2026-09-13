@@ -1,4 +1,4 @@
-import { dbError } from "../../_apiResponse";
+import { withDbError } from "../../_apiResponse";
 import {
   memoryCorrectionResponse,
   memoryCreateResponse,
@@ -8,34 +8,10 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request) {
-  try {
-    return await memoryListResponse(request);
-  } catch (error) {
-    return dbError(error, { route: "agent.memory.list" });
-  }
-}
-
-export async function POST(request: Request) {
-  try {
-    return await memoryCreateResponse(request);
-  } catch (error) {
-    return dbError(error, { route: "agent.memory.create" });
-  }
-}
-
-export async function PATCH(request: Request) {
-  try {
-    return await memoryCorrectionResponse(request);
-  } catch (error) {
-    return dbError(error, { route: "agent.memory.correct" });
-  }
-}
-
-export async function DELETE(request: Request) {
-  try {
-    return await memoryDeleteResponse(request);
-  } catch (error) {
-    return dbError(error, { route: "agent.memory.delete" });
-  }
-}
+export const GET = withDbError("agent.memory.list", memoryListResponse);
+export const POST = withDbError("agent.memory.create", memoryCreateResponse);
+export const PATCH = withDbError(
+  "agent.memory.correct",
+  memoryCorrectionResponse
+);
+export const DELETE = withDbError("agent.memory.delete", memoryDeleteResponse);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ArrivalDeskSnapshot,
   ArrivalIntake,
@@ -69,13 +69,10 @@ export function useArrivalDeskState({
   const [saving, setSaving] = useState(false);
   const loadingRef = useRef(false);
 
-  const arrivalsByRoom = useMemo(() => {
-    const map = new Map<string, ArrivalIntake>();
-    desk?.arrivals.forEach((arrival) => {
-      if (arrival.roomId) map.set(arrival.roomId, arrival);
-    });
-    return map;
-  }, [desk]);
+  const arrivalsByRoom = new Map<string, ArrivalIntake>();
+  desk?.arrivals.forEach((arrival) => {
+    if (arrival.roomId) arrivalsByRoom.set(arrival.roomId, arrival);
+  });
 
   const load = useCallback(async () => {
     if (!actorQuery || loadingRef.current) return;

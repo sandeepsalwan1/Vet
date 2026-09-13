@@ -1,5 +1,6 @@
-import { getClientJourneySettings } from "./clientJourney";
+import { getClientJourneySettings } from "./clientJourneySettings";
 import { resolveClinicId } from "./clinics";
+import { ensureDemoDataFresh } from "./demoSeed";
 import { getSql } from "./connection";
 import {
   normalizeWaitStages,
@@ -87,7 +88,7 @@ export async function getClientAnalytics(input: {
   rangeDays: AnalyticsRangeDays;
 }): Promise<ClientAnalyticsSnapshot> {
   const sql = getSql();
-  const clinicId = await resolveClinicId(input.clinicId);
+  const clinicId = await ensureDemoDataFresh({ clinicId: input.clinicId });
   const settings = await getClientJourneySettings({ clinicId });
   const emailAfterHours = settings.petCheckDelayHours;
   // Start the no-reply window at actual delivery, not the visit or planned send time.

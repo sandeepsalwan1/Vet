@@ -1654,11 +1654,13 @@ function runCrabboxAttempt({
   noSync = false,
   behaviorPlan = null,
   selection,
-  attempt = 0
+  attempt = 0,
+  commandAvailable = commandExists,
+  commandRunner = runCommand
 }) {
   const visual = VISUAL_LANES.has(lane);
   const proofKind = lane === "gifProof" ? "GIF" : visual ? "UI" : "CI";
-  if (!commandExists("crabbox") && !dryRun) {
+  if (!commandAvailable("crabbox") && !dryRun) {
     return {
       ok: false,
       attempted: false,
@@ -1727,7 +1729,7 @@ function runCrabboxAttempt({
   let remoteCommandStarted = false;
 
   try {
-    run = runCommand("crabbox", args, {
+    run = commandRunner("crabbox", args, {
       check: false,
       env: childEnv,
       cwd: workdir,
@@ -1763,7 +1765,7 @@ function runCrabboxAttempt({
         proofKind,
         githubActions: env.GITHUB_ACTIONS
       })) {
-        const bootstrap = runCommand(bootstrapCommand, bootstrapArgs, {
+        const bootstrap = commandRunner(bootstrapCommand, bootstrapArgs, {
           check: false,
           env: childEnv,
           cwd: workdir
@@ -1791,7 +1793,7 @@ function runCrabboxAttempt({
         const contactSheetPath = join(bundleDir, "screen.contact.png");
         const gifPath = join(bundleDir, "screen.trimmed.gif");
         const trimmedVideoPath = join(bundleDir, "screen.trimmed.mp4");
-        const markerRun = runCommand(
+        const markerRun = commandRunner(
           "crabbox",
           browserRouteMarkerArgs({ provider: selection.provider, leaseId, route }),
           { check: false, env: childEnv, cwd: workdir }
@@ -1816,7 +1818,7 @@ function runCrabboxAttempt({
 
         const launch =
           proofKind === "GIF"
-            ? runCommand(
+            ? commandRunner(
                 "sh",
                 [
                   "-c",
@@ -1836,7 +1838,7 @@ function runCrabboxAttempt({
                   maxBuffer: BROWSER_COMMAND_MAX_BUFFER
                 }
               )
-            : runCommand("crabbox", browserLaunchArgs({ provider: selection.provider, leaseId, route }), {
+            : commandRunner("crabbox", browserLaunchArgs({ provider: selection.provider, leaseId, route }), {
                 check: false,
                 env: childEnv,
                 cwd: workdir
@@ -1851,7 +1853,7 @@ function runCrabboxAttempt({
           if (proofKind === "GIF") {
             behavior = parseBrowserBehaviorObservation(behaviorOutput, route);
           } else {
-            const behaviorRun = runCommand("crabbox", behaviorArgs, {
+            const behaviorRun = commandRunner("crabbox", behaviorArgs, {
               check: false,
               env: childEnv,
               cwd: workdir,
@@ -1873,7 +1875,7 @@ function runCrabboxAttempt({
           behaviorObservations.push(behavior);
         }
 
-        const doctor = runCommand(
+        const doctor = commandRunner(
           "crabbox",
           ["desktop", "doctor", "--provider", selection.provider, "--id", leaseId],
           { check: false, env: childEnv, cwd: workdir }
@@ -1881,7 +1883,7 @@ function runCrabboxAttempt({
         writeFileSync(logPath, redactSecrets(`\n${doctor.stdout}\n${doctor.stderr}`, config, env), { flag: "a", mode: 0o600 });
         if (doctor.status !== 0) throw new AgentError(`Crabbox desktop did not settle for ${route}`, 1);
 
-        const computerUse = runCommand(
+        const computerUse = commandRunner(
           "crabbox",
           ["desktop", "key", "--provider", selection.provider, "--id", leaseId, "--keys", "Home"],
           { check: false, env: childEnv, cwd: workdir }
@@ -1893,7 +1895,7 @@ function runCrabboxAttempt({
         if (computerUse.status !== 0) throw new AgentError(`Crabbox computer input failed for ${route}`, 1);
 
         if (proofKind === "GIF") {
-          const gif = runCommand(
+          const gif = commandRunner(
             "crabbox",
             gifArtifactArgs({ videoPath, gifPath, trimmedVideoPath }),
             { check: false, env: childEnv, cwd: workdir }
@@ -1922,7 +1924,7 @@ function runCrabboxAttempt({
           behaviorCaptureCount: behaviorCaptures.length,
           behaviorReportPath
         });
-        const collected = runCommand(
+        const collected = commandRunner(
           "crabbox",
           artifactArgs({ provider: selection.provider, leaseId, outputDir: bundleDir }),
           { check: false, env: childEnv, cwd: workdir }
@@ -2002,7 +2004,7 @@ function runCrabboxAttempt({
     }
     if (visual && cleanupLeaseId) {
       leaseId = cleanupLeaseId;
-      cleanup = runCommand("crabbox", ["stop", "--provider", selection.provider, cleanupLeaseId], {
+      cleanup = commandRunner("crabbox", ["stop", "--provider", selection.provider, cleanupLeaseId], {
         check: false,
         env: childEnv,
         cwd: workdir

@@ -8,7 +8,13 @@ import {
   type ClinicBrand
 } from "../lib/clinicClient";
 
-const ClinicContext = createContext<ClinicBrand>(defaultClinicBrand);
+// A neutral fallback: rendering a real tenant name outside the provider would
+// brand one hospital with another hospital's identity.
+const ClinicContext = createContext<ClinicBrand>({
+  ...defaultClinicBrand,
+  slug: "",
+  name: "Veterinary Hospital"
+});
 
 export function ClinicLoadingPanel({ failed = false }: { failed?: boolean }) {
   return (

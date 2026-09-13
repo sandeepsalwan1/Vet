@@ -4,7 +4,8 @@ import { ArrowRight, PawPrint, ShieldCheck, Stethoscope } from "lucide-react";
 import { useState } from "react";
 import type { AccountSession } from "../../lib/accountStore";
 import { useClinicBrand } from "../ClinicContext";
-import { CustomerLogin, CustomerSignup } from "./CustomerAuthForms";
+import { CustomerLogin } from "./CustomerLogin";
+import { CustomerSignup } from "./CustomerSignup";
 import { StaffPortal } from "./StaffAuthForms";
 
 export type Audience = "customer" | "staff";

@@ -1,6 +1,6 @@
 import { listAgentReports } from "@central-vet/db";
 import { NextResponse } from "next/server";
-import { dbError, noStoreHeaders } from "../_apiResponse";
+import { noStoreHeaders, withDbError } from "../_apiResponse";
 import {
   requireManagerFromQuery
 } from "../_shared";
@@ -12,8 +12,9 @@ type ReportRouteOptions = {
 };
 
 export function createReportGet(options: ReportRouteOptions) {
-  return async function GET(request: Request) {
-    try {
+  return withDbError(
+    options.route,
+    async (request: Request) => {
       const auth = await requireManagerFromQuery(request);
       if ("response" in auth) return auth.response;
 
@@ -22,8 +23,6 @@ export function createReportGet(options: ReportRouteOptions) {
         options.loadExtra?.(auth.clinic.clinicId) ?? Promise.resolve({})
       ]);
       return NextResponse.json({ ok: true, reports, ...extra }, { headers: noStoreHeaders });
-    } catch (error) {
-      return dbError(error, { route: options.route });
     }
-  };
+  );
 }

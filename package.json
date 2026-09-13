@@ -10,6 +10,8 @@
     "dev": "npm run dev:internal",
     "dev:internal": "node scripts/with-root-env.mjs npm --workspace @central-vet/internal run dev -- --port 3000",
     "build": "npm run build --workspace @central-vet/internal",
+    "test": "npm test --workspaces --if-present && npm run test:scripts",
+    "test:scripts": "node --test 'scripts/*.test.mjs'",
     "docs:list": "node scripts/docs-list.mjs",
     "docs:check": "node scripts/docs-list.mjs --check",
     "typecheck": "npm run typecheck --workspaces --if-present",
@@ -32,6 +34,7 @@
     "test:agent-proof-fixtures": "node --import tsx --test apps/internal/app/api/_agentProofFixtures.test.ts apps/internal/app/api/tasks/_agentProofTaskRoutes.test.ts",
     "test:client-journey": "node --import tsx --test packages/notifications/src/clientJourney.test.ts apps/internal/app/api/_requestHostname.test.ts apps/internal/app/api/client-account-claim/claimRequest.test.ts apps/internal/app/api/client-journey/route.test.ts",
     "test:analytics": "node --import tsx --test packages/db/src/analyticsRows.test.ts",
+    "test:operator-analytics": "node --import tsx --test packages/db/src/productUsageRows.test.ts packages/notifications/src/operatorUsageAlert.test.ts packages/notifications/src/notificationSend.test.ts apps/internal/app/api/_shared.test.ts apps/internal/app/lib/server/platformOperatorAuth.test.ts",
     "verify:agents": "node scripts/with-root-env.mjs node scripts/verify-agents.mjs --allow-fallback",
     "verify:agents:google": "node scripts/with-root-env.mjs node scripts/verify-agents.mjs"
   },
@@ -71,6 +74,7 @@
     "postcss": "8.5.23",
     "sharp": "0.35.3",
     "tar": "7.5.22",
+    "undici8": "npm:undici@8.9.0",
     "uuid": "11.1.1"
   }
 }

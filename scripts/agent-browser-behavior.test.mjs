@@ -34,6 +34,35 @@ const payload = {
   ]
 };
 
+function virtualTiming() {
+  let currentTime = 0;
+  return {
+    now: () => currentTime,
+    sleep: async (milliseconds) => {
+      currentTime += milliseconds;
+    }
+  };
+}
+
+function recordingTextInputClient() {
+  const calls = [];
+  return {
+    calls,
+    client: {
+      async send(method, params = {}) {
+        calls.push({ method, params });
+        if (
+          method === "Runtime.evaluate" &&
+          params.expression.includes('return "text"')
+        ) {
+          return { result: { value: "text" } };
+        }
+        return { result: { value: true } };
+      }
+    }
+  };
+}
+
 test("browser payload requires route-bound tasks and final assertions", () => {
   assert.equal(validateBrowserPayload(payload), payload);
   assert.throws(
@@ -235,7 +264,8 @@ test("fill uses browser-native insertion and waits for controlled state", async 
     },
     () => {
       triggeredAtPersistenceCheck = persistenceChecks;
-    }
+    },
+    { timing: virtualTiming() }
   );
 
   for (const { method, params } of calls) {
@@ -297,11 +327,17 @@ test("fill fails before the next action when controlled state rejects the value"
 
   await assert.rejects(
     () =>
-      runAction(client, "", {
-        type: "fill",
-        selector: "input[type=email]",
-        value: "a@b.c"
-      }),
+      runAction(
+        client,
+        "",
+        {
+          type: "fill",
+          selector: "input[type=email]",
+          value: "a@b.c"
+        },
+        undefined,
+        { timing: virtualTiming() }
+      ),
     /browser fill did not persist: input\[type=email\]/
   );
   assert.ok(persistenceChecks > 3);
@@ -328,35 +364,35 @@ test("select fill waits for the controlled value to persist", async () => {
     }
   };
 
-  await runAction(client, "", {
-    type: "fill",
-    selector: "select[name=priority]",
-    value: "urgent"
-  });
+  await runAction(
+    client,
+    "",
+    {
+      type: "fill",
+      selector: "select[name=priority]",
+      value: "urgent"
+    },
+    undefined,
+    { timing: virtualTiming() }
+  );
 
   assert.ok(persistenceChecks >= 5);
 });
 
 test("number fill uses browser selection without invalid DOM selection APIs", async () => {
-  const calls = [];
-  const client = {
-    async send(method, params = {}) {
-      calls.push({ method, params });
-      if (
-        method === "Runtime.evaluate" &&
-        params.expression.includes('return "text"')
-      ) {
-        return { result: { value: "text" } };
-      }
-      return { result: { value: true } };
-    }
-  };
+  const { calls, client } = recordingTextInputClient();
 
-  await runAction(client, "", {
-    type: "fill",
-    selector: "input[type=number]",
-    value: "42"
-  });
+  await runAction(
+    client,
+    "",
+    {
+      type: "fill",
+      selector: "input[type=number]",
+      value: "42"
+    },
+    undefined,
+    { timing: virtualTiming() }
+  );
 
   assert.ok(
     calls
@@ -379,25 +415,19 @@ test("number fill uses browser selection without invalid DOM selection APIs", as
 });
 
 test("empty fill clears controlled state with a browser-native Backspace", async () => {
-  const calls = [];
-  const client = {
-    async send(method, params = {}) {
-      calls.push({ method, params });
-      if (
-        method === "Runtime.evaluate" &&
-        params.expression.includes('return "text"')
-      ) {
-        return { result: { value: "text" } };
-      }
-      return { result: { value: true } };
-    }
-  };
+  const { calls, client } = recordingTextInputClient();
 
-  await runAction(client, "", {
-    type: "fill",
-    selector: "textarea.chatInput",
-    value: ""
-  });
+  await runAction(
+    client,
+    "",
+    {
+      type: "fill",
+      selector: "textarea.chatInput",
+      value: ""
+    },
+    undefined,
+    { timing: virtualTiming() }
+  );
 
   assert.ok(
     calls.some(
@@ -866,7 +896,8 @@ test("demo session setup clears ambient state before visible login", async () =>
     client,
     "demo-staff",
     "http://127.0.0.1:3000",
-    "/staff/approvals"
+    "/staff/approvals",
+    { timing: virtualTiming() }
   );
 
   assert.equal(result, "Sign in with the visible demo-staff account");
@@ -1012,7 +1043,9 @@ test("intermediate state is observed only after a user trigger", async () => {
     }
   };
 
-  const result = await runTask(client, payload, task);
+  const result = await runTask(client, payload, task, {
+    timing: virtualTiming()
+  });
 
   assert.equal(result.status, "pass");
   assert.ok(intermediateChecks.length > 0);
@@ -1067,7 +1100,9 @@ test("rejected controlled fill cannot authorize a later action or assertion", as
     }
   };
 
-  const result = await runTask(client, payload, task);
+  const result = await runTask(client, payload, task, {
+    timing: virtualTiming()
+  });
 
   assert.equal(result.status, "fail");
   assert.match(result.evidence, /browser fill did not persist/);
@@ -1344,7 +1379,9 @@ test("successful demo setup events are cleared before task actions", async () =>
     finalAssertions: [{ type: "visible", selector: "main" }]
   };
 
-  const result = await runTask(client, payload, task);
+  const result = await runTask(client, payload, task, {
+    timing: virtualTiming()
+  });
 
   assert.equal(resetCount, 2);
   assert.deepEqual(result.browserEvents, []);
@@ -1646,6 +1683,7 @@ test("key-triggered final state is observed before a slow keydown response", asy
 });
 
 test("last user trigger retains a delayed transient final state before a trailing wait", async () => {
+  const timing = virtualTiming();
   let triggeredAt = 0;
   const task = {
     clauseIds: ["AC1"],
@@ -1664,18 +1702,18 @@ test("last user trigger retains a delayed transient final state before a trailin
     async send(method, params = {}) {
       if (method !== "Runtime.evaluate") return {};
       if (params.expression.includes("getBoundingClientRect")) {
-        triggeredAt = Date.now();
+        triggeredAt = timing.now();
         return { result: { value: { x: 20, y: 20 } } };
       }
       if (params.expression.includes("[data-state='toast']")) {
-        const elapsed = Date.now() - triggeredAt;
+        const elapsed = timing.now() - triggeredAt;
         return { result: { value: elapsed >= 300 && elapsed < 650 } };
       }
       return { result: { value: true } };
     }
   };
 
-  const result = await runTask(client, payload, task);
+  const result = await runTask(client, payload, task, { timing });
 
   assert.equal(result.status, "pass");
 });

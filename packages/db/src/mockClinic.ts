@@ -1,6 +1,7 @@
 import { getSql } from "./connection";
 import { resolveClinicId } from "./clinics";
 import { recordClientVisitStage } from "./analytics";
+import { ensureDemoDataFresh } from "./demoSeed";
 import {
   normalizeAppointment,
   normalizeFollowup,
@@ -202,7 +203,7 @@ export async function bookMockAppointment(input: {
 
 export async function listOpenFollowups(options?: { clinicId?: string | null }) {
   const sql = getSql();
-  const clinicId = await resolveClinicId(options?.clinicId);
+  const clinicId = await ensureDemoDataFresh({ clinicId: options?.clinicId });
   const rows = await sql<FollowupRow[]>`
     select id, client_id, pet_id, followup_type, due_date, recommended_action, status
     from mock_followups

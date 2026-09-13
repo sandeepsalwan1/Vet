@@ -220,5 +220,6 @@ export async function taskCreateResponse(request: Request) {
     status: task.status,
     priority: task.priority
   });
+  await auth.recordUsage();
   return NextResponse.json({ task: sanitizeTaskForActor(task, actor.role) }, { status: 201 });
 }

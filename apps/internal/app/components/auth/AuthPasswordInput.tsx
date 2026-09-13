@@ -7,7 +7,7 @@ export function AuthPasswordInput({
   value,
   onChange,
   placeholder,
-  name,
+  name = "password",
   autoComplete
 }: {
   value: string;

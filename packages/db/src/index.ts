@@ -24,6 +24,20 @@ export type {
   WaitStageMetric
 } from "./analyticsRows";
 export {
+  getPlatformOperatorSettings,
+  getPlatformUsageSnapshot,
+  recordPlatformUsageEvent,
+  setPlatformUsageAlertsEnabled,
+  updatePlatformUsageAlertState
+} from "./productUsage";
+export {
+  checkPlatformOperatorAttemptLimit,
+  createPlatformOperatorNotificationAttempt,
+  markPlatformOperatorNotification,
+  recordPlatformOperatorAudit
+} from "./platformOperatorEvents";
+export type { PlatformUsageSnapshot } from "./productUsageRows";
+export {
   getClinicById,
   resolveClinicForHostname,
   resolveClinicId
@@ -119,25 +133,31 @@ export type {
 } from "./arrivalIntake";
 export {
   beginClientAccountClaim,
-  cancelClientJourneyMessages,
   completeClientAccountClaim,
-  createClientJourneyEvent,
-  createClientRecordRelease,
   deferClientAccountClaim,
   failClientAccountClaim,
-  getClientAccountClaimForVerification,
-  getClientClaimProfile,
-  getClientContactPreferences,
-  getClientJourneySettings,
-  getClientJourneySnapshot,
+  getClientAccountClaimForVerification
+} from "./clientAccountClaims";
+export {
+  cancelClientJourneyMessages,
+  createClientJourneyEvent,
+  createClientRecordRelease,
   listDueClientJourneyMessages,
-  listStaffClientJourneys,
   markClientJourneyMessageStatus,
   planClientJourneyMessage,
-  recordClientJourneyResponse,
-  saveClientContactPreferences,
+  recordClientJourneyResponse
+} from "./clientJourneyMessages";
+export {
+  getClientClaimProfile,
+  getClientContactPreferences,
+  getClientJourneySnapshot,
+  saveClientContactPreferences
+} from "./clientJourneyPortal";
+export {
+  getClientJourneySettings,
   updateClientJourneySettings
-} from "./clientJourney";
+} from "./clientJourneySettings";
+export { listStaffClientJourneys } from "./staffClientJourneys";
 export type { DueClientJourneyMessage } from "./clientJourneyRows";
 export type {
   ClientContactPreferences,

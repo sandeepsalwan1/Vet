@@ -65,6 +65,18 @@ const pngData = Buffer.concat([
 const gifData = Buffer.from("GIF89a fixture");
 const mp4Data = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from("ftypisomfixture")]);
 
+function successfulCrabboxRun(provider, leaseId) {
+  return {
+    status: 0,
+    stderr: "",
+    stdout: [
+      "AGENT_CRABBOX_REMOTE_COMMAND_STARTED_V1",
+      JSON.stringify({ provider, leaseId, totalMs: 12, exitCode: 0 }),
+      ""
+    ].join("\n")
+  };
+}
+
 test("GIF proof bootstraps its host encoder only on GitHub Linux", () => {
   assert.deepEqual(
     gifEncoderBootstrapCommands({
@@ -222,36 +234,8 @@ test("provider choice uses ready credentials, then credential-free visual Crabbo
 
 test("provider acquisition failure retries the configured fallback before remote execution", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "vet-agent-provider-retry-"));
-  const bin = join(dir, "bin");
-  const workdir = join(dir, "work");
-  const calls = join(dir, "calls.jsonl");
-  mkdirSync(bin);
-  mkdirSync(workdir);
-  writeFileSync(
-    join(bin, "crabbox"),
-    `#!/usr/bin/env node
-import { appendFileSync } from "node:fs";
-const args = process.argv.slice(2);
-const provider = args[args.indexOf("--provider") + 1];
-appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ provider }) + "\\n");
-if (provider === "vercel-sandbox") {
-  process.stderr.write("provider acquisition unavailable\\n");
-  process.exit(1);
-}
-process.stdout.write("AGENT_CRABBOX_REMOTE_COMMAND_STARTED_V1\\n");
-process.stdout.write(JSON.stringify({
-  provider,
-  leaseId: "cbx_fallback",
-  totalMs: 12,
-  exitCode: 0
-}) + "\\n");
-`
-  );
-  chmodSync(join(bin, "crabbox"), 0o755);
-  const originalPath = process.env.PATH;
-  process.env.PATH = `${bin}:${originalPath}`;
+  const providers = [];
   t.after(() => {
-    process.env.PATH = originalPath;
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -267,7 +251,15 @@ process.stdout.write(JSON.stringify({
       HCLOUD_TOKEN: "hetzner",
       CRABBOX_HETZNER_READY: "true"
     },
-    workdir
+    workdir: dir,
+    commandAvailable: () => true,
+    commandRunner: (_command, args) => {
+      const provider = args[args.indexOf("--provider") + 1];
+      providers.push(provider);
+      return provider === "vercel-sandbox"
+        ? { status: 1, stdout: "", stderr: "provider acquisition unavailable\n" }
+        : successfulCrabboxRun(provider, "cbx_fallback");
+    }
   });
 
   assert.equal(result.ok, true);
@@ -283,49 +275,13 @@ process.stdout.write(JSON.stringify({
       { provider: "hetzner", ok: true, remoteCommandStarted: true }
     ]
   );
-  assert.deepEqual(
-    readFileSync(calls, "utf8")
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line).provider),
-    ["vercel-sandbox", "hetzner"]
-  );
+  assert.deepEqual(providers, ["vercel-sandbox", "hetzner"]);
 });
 
 test("the final provider retries acquisition once before readiness fails", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "vet-agent-provider-last-retry-"));
-  const bin = join(dir, "bin");
-  const workdir = join(dir, "work");
-  const calls = join(dir, "calls.jsonl");
-  mkdirSync(bin);
-  mkdirSync(workdir);
-  writeFileSync(
-    join(bin, "crabbox"),
-    `#!/usr/bin/env node
-import { appendFileSync, readFileSync } from "node:fs";
-const args = process.argv.slice(2);
-const provider = args[args.indexOf("--provider") + 1];
-let prior = "";
-try { prior = readFileSync(${JSON.stringify(calls)}, "utf8"); } catch {}
-appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ provider }) + "\\n");
-if (!prior) {
-  process.stderr.write("temporary provider acquisition timeout\\n");
-  process.exit(1);
-}
-process.stdout.write("AGENT_CRABBOX_REMOTE_COMMAND_STARTED_V1\\n");
-process.stdout.write(JSON.stringify({
-  provider,
-  leaseId: "cbx_retry",
-  totalMs: 12,
-  exitCode: 0
-}) + "\\n");
-`
-  );
-  chmodSync(join(bin, "crabbox"), 0o755);
-  const originalPath = process.env.PATH;
-  process.env.PATH = `${bin}:${originalPath}`;
+  const providers = [];
   t.after(() => {
-    process.env.PATH = originalPath;
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -337,7 +293,15 @@ process.stdout.write(JSON.stringify({
       PATH: process.env.PATH,
       HOME: process.env.HOME
     },
-    workdir
+    workdir: dir,
+    commandAvailable: () => true,
+    commandRunner: (_command, args) => {
+      const provider = args[args.indexOf("--provider") + 1];
+      providers.push(provider);
+      return providers.length === 1
+        ? { status: 1, stdout: "", stderr: "temporary provider acquisition timeout\n" }
+        : successfulCrabboxRun(provider, "cbx_retry");
+    }
   });
 
   assert.equal(result.ok, true);
@@ -353,6 +317,7 @@ process.stdout.write(JSON.stringify({
       { provider: "local-container", ok: true, remoteCommandStarted: true }
     ]
   );
+  assert.deepEqual(providers, ["local-container", "local-container"]);
 });
 
 test("delegated Vercel output retries once after an exact early-stream failure", (t) => {
@@ -1469,41 +1434,10 @@ test("lease output recovers cleanup identity when timing output is malformed", (
 
 test("visual runner recovers and cleans a retained lease after malformed timing", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "vet-agent-cleanup-test-"));
-  const bin = join(dir, "bin");
   const workdir = join(dir, "work");
-  const crabbox = join(bin, "crabbox");
-  const calls = join(dir, "calls.jsonl");
-  mkdirSync(bin);
+  const records = [];
   mkdirSync(workdir);
-  writeFileSync(
-    crabbox,
-    `#!/usr/bin/env node
-import { appendFileSync, writeFileSync } from "node:fs";
-const args = process.argv.slice(2);
-appendFileSync(${JSON.stringify(calls)}, JSON.stringify({
-  args,
-  env: {
-    coordinator: process.env.CRABBOX_COORDINATOR_TOKEN ?? null,
-    hetzner: process.env.HCLOUD_TOKEN ?? null,
-    hetznerReady: process.env.CRABBOX_HETZNER_READY ?? null,
-    vercel: process.env.VERCEL_TOKEN ?? null,
-    vercelReady: process.env.CRABBOX_VERCEL_READY ?? null
-  }
-}) + "\\n");
-if (args[0] === "run") {
-  const output = args.indexOf("--lease-output");
-  writeFileSync(args[output + 1], JSON.stringify({ provider: "hetzner", leaseId: "cbx_recovered", kept: true }) + "\\n");
-  process.stdout.write("malformed timing\\n");
-}
-`
-  );
-  chmodSync(crabbox, 0o755);
-  const originalPath = process.env.PATH;
-  process.env.PATH = `${bin}:${originalPath}`;
-  t.after(() => {
-    process.env.PATH = originalPath;
-    rmSync(dir, { recursive: true, force: true });
-  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
 
   const result = runCrabboxLane({
     config,
@@ -1519,22 +1453,30 @@ if (args[0] === "run") {
       CRABBOX_VERCEL_READY: "true",
       CRABBOX_COORDINATOR_TOKEN: "coordinator"
     },
-    workdir
+    workdir,
+    commandAvailable: () => true,
+    commandRunner: (command, args, options) => {
+      records.push({ command, args, env: options.env });
+      if (args[0] === "run") {
+        const output = args.indexOf("--lease-output");
+        writeFileSync(
+          args[output + 1],
+          JSON.stringify({ provider: "hetzner", leaseId: "cbx_recovered", kept: true }) + "\n"
+        );
+        return { status: 0, stdout: "malformed timing\n", stderr: "" };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    }
   });
-  const records = readFileSync(calls, "utf8")
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line));
 
   assert.equal(result.ok, false);
   assert.equal(result.leaseId, "cbx_recovered");
   assert.equal(result.cleanupStatus, 0);
+  assert.deepEqual(records.map(({ command }) => command), ["crabbox", "crabbox"]);
   assert.deepEqual(records.at(-1).args, ["stop", "--provider", "hetzner", "cbx_recovered"]);
-  assert.deepEqual(records[0].env, {
-    coordinator: null,
-    hetzner: "hetzner",
-    hetznerReady: "true",
-    vercel: null,
-    vercelReady: null
-  });
+  assert.equal(records[0].env.CRABBOX_COORDINATOR_TOKEN, undefined);
+  assert.equal(records[0].env.HCLOUD_TOKEN, "hetzner");
+  assert.equal(records[0].env.CRABBOX_HETZNER_READY, "true");
+  assert.equal(records[0].env.VERCEL_TOKEN, undefined);
+  assert.equal(records[0].env.CRABBOX_VERCEL_READY, undefined);
 });

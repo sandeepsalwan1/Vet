@@ -60,13 +60,13 @@ const arrivalDeskPatchSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("room"),
     actor: actorSchema,
-    roomId: z.string().uuid(),
+    roomId: z.uuid(),
     state: z.enum(["open", "occupied", "closed", "cleaning"])
   }),
   z.object({
     action: z.literal("checkout"),
     actor: actorSchema,
-    arrivalId: z.string().uuid()
+    arrivalId: z.uuid()
   }),
   z.object({
     action: z.literal("settings"),
@@ -256,5 +256,6 @@ export async function arrivalDeskPatchResponse(request: Request) {
   if ("error" in result) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
+  await auth.recordUsage();
   return NextResponse.json(result.body, { status: result.status });
 }

@@ -2,7 +2,7 @@
 
 import { Pencil, Plus } from "lucide-react";
 import type { AppRole, Task, TaskPriority, TaskRequestType, TaskStatus } from "@central-vet/db";
-import type { FormEvent, InputHTMLAttributes } from "react";
+import type { InputHTMLAttributes, SubmitEvent } from "react";
 import { formatPhoneInput } from "../lib/phoneText";
 import { requestTypes } from "./taskBoardDisplay";
 
@@ -31,7 +31,7 @@ type TaskFormProps = {
   role: AppRole;
   saving: boolean;
   onClose: () => void;
-  onSubmit: (event: FormEvent) => void;
+  onSubmit: (event: SubmitEvent<HTMLFormElement>) => void;
 };
 
 function requiredLabel(text: string) {

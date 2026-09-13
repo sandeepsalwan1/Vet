@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import test from "node:test";
 import {
   implementationCommitMessage,
@@ -11,42 +11,40 @@ import {
 } from "./agent-lib.mjs";
 
 import {
-  applyNativeFixPatch,
-  assertNativeFixPatchExcludesSecrets,
   assertTrustedAgentPull,
   assertTrustedIntentSource,
   composeEffectiveIntent,
-  createNativeFixPatch,
-  finalizeNativeFixPublication,
   gateEnvironment,
   gateLabelChanges,
-  gateRepairDecision,
   gateCommentBody,
-  isRetryableInvalidOutput,
-  isReattachableAxiError,
-  isRetryableReviewEnvironmentBlock,
-  isRetryableTestEnvironmentBlock,
-  isRetryableTechnicalFailure,
   noMistakesReplayState,
   noMistakesConfig,
   parseNoMistakesUsageStats,
   noMistakesCommentMarker,
-  normalizeGateArtifact,
-  parseAxiResult,
   resolvePullMergeBase,
   resolveTrustedDefaultCommit,
   repairLedgerOutcome,
   runNoMistakesGate,
-  sanitizedGateArtifact,
   selectTrustedManagedTriageComment,
   setupFailureRecoveryEligible,
   setupFailureArtifact,
   terminalHeadBinding,
   validateNoMistakesRemoteRecord,
-  validatedHeadMatches,
   writeCodexTurnMarkerWrapper,
   writeSetupFailureResult,
 } from "./agent-no-mistakes-gate.mjs";
+import {
+  gateRepairDecision,
+  isReattachableAxiError,
+  isRetryableInvalidOutput,
+  isRetryableReviewEnvironmentBlock,
+  isRetryableTechnicalFailure,
+  isRetryableTestEnvironmentBlock,
+  normalizeGateArtifact,
+  parseAxiResult,
+  sanitizedGateArtifact,
+  validatedHeadMatches,
+} from "./agent-no-mistakes-result.mjs";
 
 const HEAD = "abcdef1234567890abcdef1234567890abcdef12";
 const config = {
@@ -56,52 +54,15 @@ const config = {
 };
 const safeFiles = [{ filename: "apps/internal/src/app/page.tsx" }];
 
-function gitAt(cwd, ...args) {
-  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
-}
-
-function nativeFixFixture(relativePath = "apps/internal/native-fix.txt") {
-  const root = mkdtempSync(join(tmpdir(), "vet-native-fix-"));
-  const source = join(root, "source");
-  const origin = join(root, "origin.git");
-  const nmHome = join(root, "nm-home");
-  const gate = join(nmHome, "repos", "vet.git");
-  const patchPath = join(root, "artifact", "fix.patch");
-  const branch = "agent/issue-42-native-fix";
-  mkdirSync(dirname(join(source, relativePath)), { recursive: true });
-  gitAt(root, "init", "-b", "main", source);
-  gitAt(source, "config", "user.name", "Test Bot");
-  gitAt(source, "config", "user.email", "test@example.com");
-  writeFileSync(join(source, relativePath), "before\n");
-  gitAt(source, "add", "-A");
-  gitAt(source, "commit", "-m", "test: base");
-  const baseHead = gitAt(source, "rev-parse", "HEAD");
-  gitAt(root, "clone", "--bare", source, origin);
-  gitAt(source, "branch", branch, baseHead);
-  gitAt(source, "remote", "add", "origin", origin);
-  gitAt(source, "push", "origin", `${branch}:refs/heads/${branch}`);
-  writeFileSync(join(source, relativePath), "after\n");
-  gitAt(source, "add", "-A");
-  gitAt(source, "commit", "-m", "fix: native review finding");
-  const fixedHead = gitAt(source, "rev-parse", "HEAD");
-  mkdirSync(dirname(gate), { recursive: true });
-  gitAt(root, "clone", "--bare", source, gate);
-  const parsed = {
-    status: "passed",
-    outcome: "passed",
-    run: { id: "native-run", head: fixedHead.slice(0, 12) },
-    findings: [],
-  };
-  const nativeFix = createNativeFixPatch(parsed, baseHead, patchPath, { nmHome });
-  const artifact = sanitizedGateArtifact(parsed, baseHead, { nativeFix });
-  return { artifact, baseHead, branch, fixedHead, gate, origin, patchPath, root };
-}
-
 test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", () => {
   const workflow = readFileSync(new URL("../.github/workflows/agent-no-mistakes.yml", import.meta.url), "utf8");
   const automergeWorkflow = readFileSync(new URL("../.github/workflows/agent-automerge.yml", import.meta.url), "utf8");
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const gate = readFileSync(new URL("./agent-no-mistakes-gate.mjs", import.meta.url), "utf8");
+  const nativeFix = readFileSync(
+    new URL("./agent-no-mistakes-native-fix.mjs", import.meta.url),
+    "utf8",
+  );
   const review = readFileSync(new URL("./agent-review.mjs", import.meta.url), "utf8");
 
   assert.match(workflow, /--validate-backend --lane no-mistakes --json/);
@@ -228,7 +189,7 @@ test("no-mistakes runs in Crabbox and publishes only a sealed trusted handoff", 
   assert.match(gate, /"--skip",\s+"rebase,test,document,lint,push,pr,ci"/);
   assert.doesNotMatch(workflow, /git config --global user\./);
   assert.match(workflow, /--fix-patch "\$RUNNER_TEMP\/no-mistakes-result\/fix\.patch"/);
-  assert.match(gate, /--force-with-lease/);
+  assert.match(nativeFix, /--force-with-lease/);
   assert.match(workflow, /dispatch-native-fix:/);
   assert.match(workflow, /gh workflow run agent-automerge\.yml/);
   assert.match(workflow, /--repo "\$GITHUB_REPOSITORY"/);
@@ -468,15 +429,22 @@ test("interrupted started model is terminal and usage-incomplete", (t) => {
   });
 });
 
-test("model start marker follows Codex turn start, not process startup", (t) => {
+test("model start marker follows Codex turn start, not process startup", { timeout: 5_000 }, async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "vet-codex-turn-marker-"));
   const codexPath = join(dir, "codex");
   const wrapperPath = join(dir, "codex-turn-marker");
   const markerPath = join(dir, "model-started");
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
   writeFileSync(
     codexPath,
-    '#!/usr/bin/env node\nprocess.stdout.write(process.env.CODEX_TEST_EVENTS ?? "");\n',
+    `#!/usr/bin/env node
+const preModel = '{"type":"thread.started","thread_id":"test"}\\n';
+const started = '{"type":"turn.started"}\\n' +
+  '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}\\n';
+process.stdout.write(preModel);
+process.stdin.once("data", () => {
+  process.stdout.write(started, () => process.exit(0));
+});
+`,
     { mode: 0o700 },
   );
   writeCodexTurnMarkerWrapper({
@@ -486,23 +454,44 @@ test("model start marker follows Codex turn start, not process startup", (t) => 
   });
 
   const preModelEvents = '{"type":"thread.started","thread_id":"test"}\n';
-  const preModel = spawnSync(wrapperPath, [], {
-    encoding: "utf8",
-    env: { ...process.env, CODEX_TEST_EVENTS: preModelEvents },
+  const wrapper = spawn(wrapperPath, [], { stdio: ["pipe", "pipe", "pipe"] });
+  t.after(() => {
+    if (wrapper.exitCode === null) wrapper.kill("SIGTERM");
+    rmSync(dir, { recursive: true, force: true });
   });
-  assert.equal(preModel.status, 0);
-  assert.equal(preModel.stdout, preModelEvents);
+  wrapper.stdout.setEncoding("utf8");
+  wrapper.stderr.setEncoding("utf8");
+  let stdout = "";
+  let stderr = "";
+  wrapper.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  wrapper.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  await new Promise((resolve, reject) => {
+    const onData = () => {
+      if (!stdout.includes(preModelEvents)) return;
+      wrapper.stdout.off("data", onData);
+      resolve();
+    };
+    wrapper.stdout.on("data", onData);
+    wrapper.once("error", reject);
+    onData();
+  });
+  assert.equal(stdout, preModelEvents);
   assert.equal(existsSync(markerPath), false);
 
-  const startedEvents =
-    `${preModelEvents}{"type":"turn.started"}\n` +
-    '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}\n';
-  const started = spawnSync(wrapperPath, [], {
-    encoding: "utf8",
-    env: { ...process.env, CODEX_TEST_EVENTS: startedEvents },
+  const completed = new Promise((resolve, reject) => {
+    wrapper.once("error", reject);
+    wrapper.once("close", (code, signal) => resolve({ code, signal }));
   });
-  assert.equal(started.status, 0);
-  assert.equal(started.stdout, startedEvents);
+  wrapper.stdin.end("continue\n");
+  const result = await completed;
+  const startedEvents = `${preModelEvents}{"type":"turn.started"}\n` +
+    '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}\n';
+  assert.deepEqual(result, { code: 0, signal: null }, stderr);
+  assert.equal(stdout, startedEvents);
   assert.equal(readFileSync(markerPath, "utf8"), "started\n");
 });
 
@@ -591,226 +580,6 @@ test("no-mistakes provenance accepts a real Crabbox result and rejects a forged 
   assert.throws(
     () => validateNoMistakesRemoteRecord(config, path),
     /provenance is invalid/,
-  );
-});
-
-test("native no-mistakes fixes become a sealed non-privileged patch", () => {
-  const fixture = nativeFixFixture();
-
-  assert.equal(fixture.artifact.status, "blocked");
-  assert.equal(fixture.artifact.outcome, "native-fix");
-  assert.equal(fixture.artifact.nativeFix.baseHead, fixture.baseHead);
-  assert.equal(fixture.artifact.nativeFix.fixedHead, fixture.fixedHead);
-  assert.deepEqual(fixture.artifact.nativeFix.paths, ["apps/internal/native-fix.txt"]);
-  assert.match(readFileSync(fixture.patchPath, "utf8"), /-before\n\+after/);
-  assert.deepEqual(gateRepairDecision(fixture.artifact, 0), {
-    state: "native-fix",
-    nextAttempt: 1,
-  });
-  assert.deepEqual(gateRepairDecision(fixture.artifact, 2), {
-    state: "native-fix",
-    nextAttempt: 3,
-  });
-  assert.deepEqual(gateRepairDecision(fixture.artifact, 3), {
-    state: "exhausted",
-    nextAttempt: null,
-  });
-
-  const dirtyArtifact = sanitizedGateArtifact(
-    {
-      status: "passed",
-      outcome: "passed",
-      run: { id: "native-run", head: fixture.fixedHead.slice(0, 12) },
-      findings: [],
-    },
-    fixture.baseHead,
-    { nativeFix: fixture.artifact.nativeFix, unpublishedChanges: true },
-  );
-  assert.equal(dirtyArtifact.status, "failed");
-  assert.equal(dirtyArtifact.outcome, "unpublished-changes");
-  assert.equal(dirtyArtifact.nativeFix, null);
-  assert.equal(
-    normalizeGateArtifact(dirtyArtifact, fixture.baseHead).outcome,
-    "unpublished-changes",
-  );
-});
-
-test("trusted publication reapplies the sealed tree with an exact-head lease", () => {
-  const fixture = nativeFixFixture();
-  const checkout = join(fixture.root, "apply");
-  gitAt(fixture.root, "clone", fixture.origin, checkout);
-  const commands = [];
-  const execute = (command, args, options = {}) => {
-    commands.push([command, args, options]);
-    if (command === "gh") return { status: 0, stdout: "", stderr: "" };
-    const result = spawnSync(command, args, {
-      cwd: checkout,
-      encoding: "utf8",
-      stdio: "pipe",
-    });
-    if (result.status !== 0 && options.check !== false) {
-      throw new Error(`${command} ${args.join(" ")} failed: ${result.stderr}`);
-    }
-    return {
-      status: result.status ?? 1,
-      stdout: result.stdout ?? "",
-      stderr: result.stderr ?? "",
-    };
-  };
-
-  const published = applyNativeFixPatch(
-    {
-      artifact: fixture.artifact,
-      config,
-      patchPath: fixture.patchPath,
-      pull: trustedPull({
-        number: 42,
-        head: { ref: fixture.branch, sha: fixture.baseHead },
-      }),
-      repairAttempt: 0,
-    },
-    {
-      runCommand: execute,
-      publisherEnvironment: () => ({
-        GH_TOKEN: "publisher-token",
-        GITHUB_TOKEN: "publisher-token",
-      }),
-    },
-  );
-
-  const remoteTree = gitAt(
-    fixture.origin,
-    "rev-parse",
-    `refs/heads/${fixture.branch}^{tree}`,
-  );
-  assert.equal(remoteTree, fixture.artifact.nativeFix.fixedTree);
-  assert.equal(published.nextRepairAttempt, 1);
-  assert.match(published.nextHead, /^[0-9a-f]{40}$/);
-  assert.deepEqual(
-    parseImplementationMetadata(
-      gitAt(
-        fixture.origin,
-        "log",
-        "-1",
-        "--format=%B",
-        `refs/heads/${fixture.branch}`,
-      ),
-    ),
-    parseImplementationMetadata(trustedPull().body),
-  );
-  assert.ok(
-    commands.some(
-      ([command, args]) =>
-        command === "git" &&
-        args.includes(
-          `--force-with-lease=refs/heads/${fixture.branch}:${fixture.baseHead}`,
-        ),
-    ),
-  );
-  for (const [command, args, options] of commands.filter(
-    ([command, args]) =>
-      command === "gh" ||
-      (command === "git" &&
-        ["fetch", "push", "ls-remote"].includes(args[0])),
-  )) {
-    assert.equal(options.env.GH_TOKEN, "publisher-token", `${command} ${args[0]}`);
-  }
-});
-
-test("native fix publication fails closed on publish errors", () => {
-  const fixture = nativeFixFixture();
-  const events = [];
-  assert.throws(
-    () =>
-      finalizeNativeFixPublication({
-        artifact: fixture.artifact,
-        config,
-        pull: { number: 42, head: { ref: fixture.branch, sha: fixture.baseHead } },
-        repairAttempt: 0,
-        patchPath: fixture.patchPath,
-        applyPatch: () => {
-          events.push("apply");
-          return { nextHead: fixture.fixedHead, nextRepairAttempt: 1, paths: fixture.artifact.nativeFix.paths };
-        },
-        recordFix: () => {
-          events.push("record");
-          throw new Error("publish failed");
-        },
-        setOutput: () => {
-          events.push("output");
-        },
-      }),
-    /publish failed/,
-  );
-  assert.deepEqual(events, ["apply", "record"]);
-});
-
-test("native fix publication dry-run validates without mutating git or GitHub", () => {
-  const fixture = nativeFixFixture();
-  const commands = [];
-  const published = applyNativeFixPatch(
-    {
-      artifact: fixture.artifact,
-      config,
-      patchPath: fixture.patchPath,
-      pull: { number: 42, head: { ref: fixture.branch, sha: fixture.baseHead } },
-      repairAttempt: 0,
-      dryRun: true,
-    },
-    {
-      runCommand: (command, args) => {
-        commands.push([command, args]);
-        throw new Error("dry-run must not execute a mutating command");
-      },
-    },
-  );
-
-  assert.deepEqual(commands, []);
-  assert.deepEqual(published, {
-    nextHead: "",
-    nextRepairAttempt: 1,
-    paths: ["apps/internal/native-fix.txt"],
-    dryRun: true,
-  });
-  assert.equal(
-    gitAt(fixture.origin, "rev-parse", `refs/heads/${fixture.branch}`),
-    fixture.baseHead,
-  );
-});
-
-test("native no-mistakes patches cannot modify automation control files", () => {
-  assert.throws(
-    () => nativeFixFixture("scripts/agent-danger.mjs"),
-    /privileged candidate paths/,
-  );
-});
-
-test("native fix artifacts reject exact credentials without exposing their value", () => {
-  const credential = "sk-test-native-fix-credential-123456789";
-  assert.equal(
-    assertNativeFixPatchExcludesSecrets("+safe replacement\n", {
-      CODEX_API_KEY: credential,
-    }),
-    true,
-  );
-  assert.throws(
-    () =>
-      assertNativeFixPatchExcludesSecrets(`+${credential}\n`, {
-        CODEX_API_KEY: credential,
-      }),
-    (error) => {
-      assert.match(error.message, /contains a credential value/);
-      assert.doesNotMatch(error.message, new RegExp(credential));
-      return true;
-    },
-  );
-  assert.throws(
-    () =>
-      assertNativeFixPatchExcludesSecrets(
-        "diff --git a/image.png b/image.png\nGIT binary patch\nliteral 1\nA\n",
-        {},
-      ),
-    /cannot contain binary changes/,
   );
 });
 

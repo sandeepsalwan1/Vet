@@ -6,7 +6,8 @@ import {
   LogOut,
   Plus
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
 import type { Task } from "@central-vet/db";
 import { logout as clearAccountSession } from "../lib/accountStore";
 import {
@@ -31,6 +32,7 @@ import { useTaskBoardSettings } from "./useTaskBoardSettings";
 import { useTaskBoardTaskActions } from "./useTaskBoardTaskActions";
 
 export function TaskBoard() {
+  const router = useRouter();
   const clinic = useClinicBrand();
   const {
     booted,
@@ -112,7 +114,8 @@ export function TaskBoard() {
   function logout() {
     clearSession();
     clearAccountSession();
-    window.location.assign("/staff");
+    router.replace("/staff");
+    router.refresh();
   }
 
   const { updateSessionName } = useTaskBoardProfileName({
@@ -148,16 +151,10 @@ export function TaskBoard() {
     setToast
   });
 
-  const openMediumHighCount = useMemo(
-    () => tasks.filter(isOpenPriorityTask).length,
-    [tasks]
-  );
-  const archivedTasks = useMemo(
-    () => tasks
-      .filter((task) => task.status === "archived")
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
-    [tasks]
-  );
+  const openMediumHighCount = tasks.filter(isOpenPriorityTask).length;
+  const archivedTasks = tasks
+    .filter((task) => task.status === "archived")
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 
   if (!booted) {
     return <BootScreen />;
