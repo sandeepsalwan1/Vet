@@ -1,0 +1,4 @@
+# Verbatim source records retain the user's original trailing whitespace.
+docs/agentic-startup.md whitespace=-blank-at-eol
+docs/project-goals.md whitespace=-blank-at-eol
+docs/reference-agent-rules.md whitespace=-blank-at-eol

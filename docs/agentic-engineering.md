@@ -36,6 +36,10 @@ Tracked implementation plans were rare in the sample: one explicit OpenClaw desi
 
 Plans, handoffs, research ledgers, transcripts, PR proof, and generated reports stay in ignored local state. After implementation, promote only durable decisions into the owning architecture, operations, or contract doc; delete the task narrative.
 
+Explicitly requested source records are an exception: preserve supplied user wording verbatim in the named content documents and keep assistant synthesis separate. Condense correspondence only when requested. Accepted decisions in `docs/adr/` use the user's exact wording, with only a numbered title and status added; never promote an unresolved source proposal to an accepted decision.
+
+The [ADR Verbatim skill](https://github.com/davidondrej/skills/blob/main/skills/thinking-and-docs/adr-verbatim/SKILL.md) defines that format. Source-file whitespace is preserved through narrowly scoped Git attributes.
+
 ### Copy the system, not the repository debris
 
 Some sampled repositories also contain dated investigations, proof reports, PR bodies, TODOs, and old refactor notes. Their presence is not evidence that Vet should reproduce them. The reusable system is routing, locality, source-backed facts, focused validation, and aggressive removal of superseded context.
@@ -44,6 +48,7 @@ Some sampled repositories also contain dated investigations, proof reports, PR b
 
 - Root `AGENTS.md` is frozen by project policy for this effort.
 - `npm run docs:list` routes agents to current durable docs; `npm run docs:check` catches metadata drift.
+- Verbatim ADRs use their title and status for discovery instead of content front matter. New decisions get new ADRs; old wording remains intact.
 - Scoped guides stay only where they own a local invariant that would be hard to discover from source or the root guide.
 - Architecture docs explain boundaries and flows, not exhaustive route or file catalogs.
 - Deployment and automation docs remain because they own operational and security-sensitive workflows.

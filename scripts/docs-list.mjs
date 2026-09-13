@@ -74,6 +74,12 @@ function parseInlineList(value) {
 
 function readMetadata(fullPath) {
   const content = readFileSync(fullPath, "utf8").replaceAll("\r\n", "\n");
+  if (dirname(fullPath) === join(docsDir, "adr")) {
+    const title = content.match(/^# (\d{4}) - (.+)\n/);
+    const status = content.match(/^Status: .+$/m);
+    if (!title || !status) return { error: "ADR requires a numbered title and status" };
+    return { summary: title[2], readWhen: ["Reviewing recorded project decisions"] };
+  }
   if (!content.startsWith("---\n")) {
     return { error: "missing front matter" };
   }

@@ -36,7 +36,52 @@ Vet now has a local implementation of that receiver:
 - Focused tests: `apps/internal/app/api/integrations/datahub/_datahubWebhook.test.ts`
 
 Current proof level: merged, deployed, authenticated, sandbox-mapped, and exercised with live Datahub webhook traffic.
-Production clinic onboarding and production PIMS traffic remain intentionally incomplete because they require a clinic invitation, approval, PIMS-provider confirmation, and pricing agreement.
+Production clinic onboarding and production PIMS traffic are not verified by the supplied evidence. The later correspondence below records pilot pricing and dedicated-account commitments, but does not establish the installed configuration or a successful production sync.
+
+## Pilot decisions from supplied correspondence
+
+Updated September 13, 2026 from the July 29 to September 8 email exchange. These are reported agreements and vendor statements, not independently verified controls or a legal interpretation. The actual DPA, countersigned services agreement, and installation/security attachments were referenced but not included in the supplied text. Personal contact details and email tracking are omitted.
+
+### Commercial agreement
+
+- The August 7 exchange agrees **$45 per clinic per month for the pilot**, with the Exhibit 2 patient-volume language set aside. The earlier quote says no setup fee.
+- Billing starts once the connector is authorized and the initial sync is verified.
+- The vendor describes annual renewal without a minimum one-year payment commitment or payment for the remainder of a year after discontinuation. Confirm cancellation mechanics against the actual agreement.
+- The vendor agreed to revisit the partner's contractual cyber-insurance requirement at wider rollout rather than block the first clinic. This is separate from the vendor's own insurance.
+- The August 10 reply reports a countersigned agreement and an installation invitation. Neither proves completed installation.
+- The first clinic identified in the exchange is the Tri-City design partner using Cornerstone. Its reported historical volume motivated the flat pilot arrangement; actual data scope must still be agreed.
+
+### Latest technical commitments
+
+The September 8 reply improves on the default setup described September 3:
+
+| Topic | Latest supplied statement | Remaining evidence |
+| --- | --- | --- |
+| Read access | Data Services API and direct on-premise database access depending on operation; dedicated SQL account can replace the default Cornerstone account and be restricted to reads | Verify actual account grants and selected data categories. Writeback remains disabled. |
+| Credentials | Earlier reply says local database credentials are not transmitted or stored offsite; Vet receives practice-scoped DataHub credentials and no direct database access | Confirm the same handling for the dedicated SQL account, including rotation and support access. |
+| Connector account | Dedicated standard non-admin Windows account; Log on as a service; Modify permission to its own connector data directory; registry reads without writes | Verify installed identity, groups, and effective permissions. No Cornerstone document-share write access is needed for this pilot. |
+| Management agent | A separate management agent retains local permissions to install, configure, and update the connector | Document its identity, privileges, remote-management powers, authentication, logging, update controls, and removal. Restricting the connector does not restrict this component. |
+| Network | Outbound-only; no exposed database or inbound connection needed | Obtain exact destinations, ports, and firewall requirements. |
+| Isolation | Separate credentials and isolation for each integration; partner credentials scoped to the practice | Verify the intended hospital mapping and actual accessible fields. |
+| IDEXX status | Vendor says DataHub is not IDEXX-certified or approved, has seen no IDEXX pushback on its clinic installations, and does not modify the schema | The vendor cannot establish IDEXX's support/licensing position. Absence of pushback is not approval. Obtain an authoritative position or the clinic's informed decision with the actual terms. |
+| Upgrades | Known supported versions generally work, sometimes requiring reinstall; unfamiliar breaking versions may take hours to days to address | Confirm the clinic version, supported versions, escalation path, and downtime fallback. This is not a guaranteed SLA. |
+| Cloud data | Relevant records and fields only, not a full mirror; payment card information is not sent | Agree the minimal dataset, historical scope, and handling of logs/downstream copies. |
+| Hosting | Production database hosted with DigitalOcean in New York | Check additional subprocessors and residency in the actual DPA. |
+| Encryption | Earlier reply states encryption in transit | At-rest, backup, and log encryption and independent security evidence remain unverified. |
+| Deletion | Active systems can be purged on request; recovery copies can retain data up to seven days through rolling point-in-time recovery | Confirm active purge timing, deletion evidence, downstream copies, and preventing reappearance after restore. |
+| DPA | Vendor says attached agreement covers ownership, security, retention/deletion, incident notification, subprocessors, and data use | Read the actual parties, signatures, notice interval, exceptions, and controlling terms. |
+| Secondary use | No current secondary AI/ML training; future use requires VetAgent's explicit written opt-in | Confirm consent authority and coverage of de-identified data, benchmarking, product development, and subprocessors. The summary does not resolve all secondary uses. |
+| Insurance and certification | Vendor states $1M cyber/E&O coverage, no SOC 2 certification, and no committed certification timeline | Per-occurrence versus aggregate remains unanswered; obtain evidence if required. No penetration-test summary was supplied. |
+| Backup and rollback | Vendor maintains cloud backups; clinic backup was to be checked before installation | Verify a current restorable Cornerstone backup and a clinic-IT-owned disable/uninstall/rollback procedure. |
+| Writeback | Disabled initially and separately controlled later | Exact write methods remain unresolved. No schema changes does not mean no direct row changes. |
+
+### Current next step
+
+The three specifically requested go-live items were a SQL-enforced read-only account, a dedicated connector service account, and a DPA. The vendor says all three are workable. The last supplied reply says the information will be taken to the client; it does not confirm permission, installation, or production completion.
+
+Confirm what has happened since that exchange, obtain the missing attachments, and close the focused installation questions above with the clinic and IT. Then verify read-only records against the PIMS and prove the product consumes them. Avoid restarting the entire questionnaire or treating sandbox receipts as production readiness.
+
+The earlier shared ChatGPT response is not the authority for IDEXX contract clauses, vendor liability, or security claims. Use the actual agreements and authoritative support information. The original client requests are preserved separately in [client-requests.md](client-requests.md).
 
 ## Live sandbox rollout on 2026-08-04
 
