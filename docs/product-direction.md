@@ -13,6 +13,8 @@ Status: discussion brief. Proposed choices below need discussion before they bec
 
 Current user direction: preserve the requests, prepare a quick understanding and email draft, and investigate free review collection. Product implementation and detailed planning are deferred until integration approval and the user's availability. See the [conversation brief](conversation-brief.md).
 
+Latest user update, September 13: DataHub is close to syncing and expected to be ready for the next build session. Treat this as an expectation; a successful live sync and its use by product workflows still need verification when work resumes.
+
 ## Recommended direction
 
 Build a hospital-branded, multi-tenant operations product that helps clients and clinic teams complete the whole visit with less confusion and fewer missed handoffs. During the integration phase, keep Cornerstone as the system of record because it holds the clinic's existing data. Use agents to understand requests, retrieve authorized information, and invoke reliable workflow actions.
@@ -36,6 +38,8 @@ This recommendation prioritizes the customer outcome described throughout the no
 | [Agent-rules reference](reference-agent-rules.md) | Full supplied example, verbatim | A reference document, not wholesale replacement of the repository's scoped instructions. |
 
 The source records preserve original wording, including transcription errors. This document is assistant-authored analysis, separate from those records. Only explicit user decisions enter [verbatim ADRs](adr/0001-preserve-original-requests.md); recommendations here are not accepted decisions.
+
+OpenVet's current official site describes clinical decision support using patient history and cited veterinary evidence, alongside a PIMS that handles scheduling, billing, and other operations. Its OpenAnimal practice connection is described as still being developed. These vendor descriptions help explain the client's reference; they do not establish that Vet needs the same clinical scope or that either product has a proven Cornerstone connection. Sources checked September 13: [OpenVet](https://www.openvet.ai/) and [OpenAnimal practice connection](https://www.openvet.ai/openanimal).
 
 Missing source attachments: the DPA, countersigned services agreement, security/installation attachments, designer reference, actual customer reviews, and production-sync evidence. The existing [DataHub runbook](datahub.md) captures an earlier API/schema review and sandbox proof; its presence does not verify current production operation.
 
@@ -91,7 +95,7 @@ Task management accompanies every stage: owner, priority, status, relevant conte
 
 ## Five candidate pain points to validate
 
-The supplied materials request analysis of the practice's top five customer complaints but contain no actual reviews. These are **candidate themes inferred from the workflow notes**, not ranked review findings.
+The supplied materials request analysis of the practice's top five customer complaints but contain no actual reviews. The subsequent public-page test recovered only a historical testimonial sample. These are **candidate themes inferred from the workflow notes**, not ranked review findings.
 
 | Candidate pain point | Product response | Evidence to collect |
 | --- | --- | --- |
@@ -105,18 +109,25 @@ Next research should cover the correctly identified hospital's available reviews
 
 ### Requested review collection: Google and Yelp
 
-The user requests all customer reviews from both platforms, preferably with no paid service, to understand what customers value and the problems the product should address. Research was checked September 13, 2026; collection has not run and no complete dataset exists yet.
+The user requests all customer reviews from both platforms, preferably with no paid service, including unofficial methods, to understand what customers value and the problems the product should address. Research and a direct public-page collection test ran September 13, 2026. A partial historical sample is saved locally; no complete dataset exists yet.
 
 | Route | What is verified | Suitability |
 | --- | --- | --- |
 | Google Business Profile API | Google states there is no API usage charge. The reviews endpoint lists reviews for a verified location, up to 50 per page, with pagination and a total count. Owner/manager authorization and approved API access are required. | A verified no-service-fee route to all reviews the API exposes for the clinic. Access is separate from Cornerstone/DataHub approval. |
 | Yelp standard Places API | Returns up to three review excerpts. | Does not satisfy the full-review requirement. |
 | Yelp Private Reviews API | Requires a contracted partnership; coverage depends on the agreement. Yelp's Insights FAQ describes the latest 200 reviews and prohibits exporting reviews out of the partner dashboard. | Not a verified free full-history export route. Do not buy access assuming it solves this task. |
-| Account downloads or public-page collection | Yelp's personal-data download describes the account's own information/contributions. A complete export of all customer reviews received by a business is not established. Public-page/manual collection remains an untested alternative. | Confirm actual coverage before choosing this path. No paid tool, browser extension, or scraper has been selected or installed. |
+| Yelp account download | Describes the account's own information/contributions. A complete export of all customer reviews received by a business is not established. | Do not assume the clinic's account download contains every customer's review. |
+| Public-page collection | A direct request retrieved 54 Google-labeled cards from the clinic's website. Direct Yelp access returned HTTP 403; its indexed first page was readable, but later pages and its separate non-recommended section were unavailable through the research tool. | Useful for establishing listing identity and a partial sample. Not a complete export of either platform. |
 
 Sources: [Google pricing](https://developers.google.com/my-business/content/pricing), [review pagination](https://developers.google.com/my-business/reference/rest/v4/accounts.locations.reviews/list), [access prerequisites](https://developers.google.com/my-business/content/prereqs), [Yelp standard endpoint](https://docs.developer.yelp.com/docs/places-intro), [Yelp partner access](https://docs.developer.yelp.com/docs/private-reviews-api), [Yelp partner limits](https://docs.developer.yelp.com/docs/faqs), and [Yelp account downloads](https://www.yelp-support.com/article/How-can-I-access-my-Yelp-data?l=en_US).
 
-Start by checking whether the clinic already has a usable export or approved Google API access. If it does, use that direct path. Otherwise, request the necessary owner access and settle Yelp coverage before building an exporter. A free trial or limited sample does not meet the requested complete, free export.
+**What the unofficial tools do:** open the business listing, sort/load reviews, expand text, scroll or paginate, and save structured records. Google collectors such as [gaspa93/googlemaps-scraper](https://github.com/gaspa93/googlemaps-scraper) expose a requested review count and sorting. The self-hosted [gosom/google-maps-scraper](https://github.com/gosom/google-maps-scraper) documents only roughly 300 reviews with its extra-reviews option, so it is not automatically an all-history solution. [yin/apify-yelp](https://github.com/yin/apify-yelp) documents local execution but requires proxy configuration by default; its cloud platform consumes account resources. These are reference approaches, not tools verified to export this clinic's full history for free. No third-party scraper or extension was installed or executed.
+
+**Actual sample:** the [clinic's reviews page](https://www.tricityvets.com/reviews) yielded 54 unique widget cards dated June 28, 2014 to June 4, 2019: 49 five-star and five four-star entries; 23 texts are truncated. All are labeled Google. Widget IDs are not Google review IDs, and the links point to the business rather than individual reviews. Preserve this as a historical positive testimonial sample, not a representative customer corpus. Raw HTML, CSV, JSON, and collection limits are in ignored [local research](.local/review-research/README.md).
+
+The attempted in-app browser connection failed before any page could be opened. The clinic's old Google review link returned HTTP 404 on a direct request. The readable [Yelp indexed page](https://www.yelp.com/biz/tricity-veterinary-hospital-fremont-9) showed 369 recommended and 41 non-recommended reviews in a February 2026 snapshot; those are not verified current totals. A full Yelp attempt must account for both sections and updated reviews. No full Yelp dataset was saved.
+
+For this one-off job, use a clinic-provided export or the free authorized Google API if available. Otherwise, the simplest unofficial retry is ordinary browser collection once a working browser session is available, applying the same scrolling/pagination method and checking coverage. Do not start with paid proxies, a trial service, or a new review-ingestion feature. If the site limits access, record the missing coverage rather than treating a sample as all reviews.
 
 The eventual research output should record platform, exact hospital listing, review ID/link, rating, date, review text, owner response, and collection time. Preserve raw material privately and publish a concise theme summary. Include positive themes worth retaining as well as complaints. Record source counts, unique counts, oldest/newest dates, and missing/filtered categories; do not label partial results as all reviews. Review text describes customer reports and must not be presented as independently established clinical facts.
 
@@ -229,11 +240,13 @@ Production mutation tools must never execute twice because both the ADK path and
 
 Keep hospital operational analytics separate from private platform product-use analytics. The current [business direction](../business.md) describes operator-only usage measures; hospitals must not gain access to another tenant's data or the private operator view.
 
-## What I need from you next
+## When development resumes
 
-1. **Confirm the current DataHub state:** not installed, installed but unverified, or verified real-data sync. The supplied exchange does not settle this.
-2. **Provide the actual attachments privately:** DPA, countersigned services agreement, integration/security overview, and installation guidance. API documentation and the designer reference would support the next phase. Keep credentials in the approved secret store.
-3. **Arrange one workflow observation with the clinic lead and participating team.** Start with a normal appointment, then a walk-in and an unresolved follow-up. Confirm who owns each handoff and the required response times.
-4. **Discuss the proposed first scope:** arrival-to-follow-up operations using read-only PIMS data. Identify a different first outcome if the clinic's review evidence or observation shows a more urgent need.
+No further user answer is needed to complete this documentation and conversation-preparation pass. The integration-status question has been answered: syncing is expected to be ready for the next build session.
+
+1. **Verify the expected live sync:** compare real clinic records with received data and confirm the product actually reads them.
+2. **Review the actual attachments privately:** DPA, countersigned services agreement, integration/security overview, and installation guidance. Keep credentials in the approved secret store.
+3. **Observe a short clinic workflow with the participating team:** a normal appointment, a walk-in, and an unresolved follow-up. Confirm who owns each handoff.
+4. **Agree the first outcome using the review evidence and observation:** the arrival-to-follow-up workflow is a recommendation, not an approved implementation plan.
 
 The intended next artifact is an agreed PRD covering actors, journeys, data ownership, permissions, failure states, messaging policy, metrics, acceptance cases, and explicit exclusions. The supplied notes propose using Lavish diagrams for that discussion before finalizing the PRD, with the designer owning visual design. Implementation should then close the verified gaps in the existing product in small complete workflows.

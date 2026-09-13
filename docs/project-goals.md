@@ -153,3 +153,23 @@ What I want you to do is also add in something to maybe the project MD file, or 
 
 The only reason we're trying to do this is because we need some kind of understanding. Also, keep in mind we're not trying to replace everything. We're trying to replace everything we have with this one. For now, we have to integrate with Cornerstone because that's where all the data is. Eventually, we would want to move everything away from that. 
 ````
+
+## Unofficial review collection request - September 13, 2026
+
+````text
+Try unofficial methods, like what do other people do? Things like that, copy that. How did they get it? It's a very honest type of thing to do. 
+````
+
+## Conversation scope and questions - September 13, 2026
+
+````text
+And then, just help out with that stuff. Identify what we have and then what he's talking about. Do you have any open questions, by the way? You could use the skill to ask me, but you only have a maximum of, preferably, 5 questions max. Keep in mind you should be able to answer all the questions here, but if there are literally any open questions, then okay, ask me. 
+````
+
+## DataHub status answer - September 13, 2026
+
+In response to whether Tri-City is awaiting approval, approved but not installed, installed but unverified, or confirmed to be syncing real clinic records:
+
+````text
+almost about to be synced i think it makes sense for it to be synced when we build so ig uess next time we will have this one ready though
+````
