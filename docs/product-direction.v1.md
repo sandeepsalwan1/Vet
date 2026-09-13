@@ -31,7 +31,7 @@ This recommendation prioritizes the customer outcome described throughout the no
 
 | Source | Substance preserved | How to interpret it |
 | --- | --- | --- |
-| [Client requests](client-requests.v1.md), shared ChatGPT conversation beginning August 30, plus later user-relayed additions | All four visible client prompts and the later email-assistance/result-interpretation request, verbatim with separate provenance | Earlier AI responses are omitted. No review corpus was included. Later additions are the user's account of desired capabilities. |
+| [Client requests](client-requests.v1.md), shared ChatGPT conversation beginning August 30, plus later user-relayed additions | All four visible client prompts, email-assistance/result-interpretation requests, and OpenVet/Eight Sleep references, verbatim with separate provenance | Earlier AI responses are omitted. No review corpus was included. Later additions are the user's account of desired capabilities. |
 | [Project goals](project-goals.v1.md), undated product and workflow notes | Full supplied wording, verbatim | Desired outcomes and unresolved alternatives. The notes distinguish gathering data from booking appointments. |
 | [Agentic startup](agentic-startup.v1.md), undated agent-design notes | Full supplied wording, verbatim | Model choices, search weights, fees, autonomy, and infrastructure remain proposals to discuss. |
 | [DataHub](datahub.md#pilot-decisions-from-supplied-correspondence), July 29 to September 8 correspondence | Main agreements, vendor statements, and remaining questions | Dated correspondence, not verification of installed configuration or production operation. |
@@ -172,6 +172,21 @@ Vet owns its operational tasks, message attempts, room workflow, and audit. A lo
 For incomplete or stale synchronization, show the last known update and offer staff help. Never create an appointment from a stale local slot or substitute seeded data for unavailable live data. Do not place raw PIMS payloads into unrestricted agent prompts.
 
 A browser-based companion is the proposed first delivery surface. Embedding a dashboard inside Cornerstone would require an actual supported extension mechanism and is not established by the supplied material. Keep AVImark compatibility at the normalized contract boundary; provider availability and capability still need verification.
+
+## OpenVet and Eight Sleep as references
+
+The user now explicitly wants to study and adopt useful OpenVet capabilities and research email-based service using Eight Sleep as a reference. Email should be a practical way to request help, supply information, and complete work. The exact clinical and operational feature set remains to be selected from real clinic needs.
+
+Initial primary-source checks, September 13, 2026:
+
+| Reference | What is supported by the source | Useful pattern for Vet |
+| --- | --- | --- |
+| [OpenVet email workflow](https://www.openvet.ai/resources/openvet-opens-to-every-licensed-veterinarian-free), July 2 announcement | OpenVet says members can email clinical questions or forward blood-test results, receive structured clinical responses, and open the app for sources and further work. The veterinarian remains the decision-maker. This is a vendor description, not independent validation. | Clinical email intake, correct patient context, sourced interpretation, clinician review, and continuity with the patient's record. |
+| [Eight Sleep support](https://help.eightsleep.com/en_us/what-are-you-business-hours-S1X5mlfr4) and [service requests](https://help.eightsleep.com/en_us/how-do-i-process-a-return-or-exchange-HknxSH5Iv) | Eight Sleep documents email as a service channel and a way to initiate returns/cancellations, alongside chat and phone. It does not say that all replies or resolutions are automated. | Email as an entry point to a complete service workflow, with context, a responsible owner, status, and a verified outcome. |
+
+Research should map each candidate workflow to: the triggering email, needed data, resulting action or reply, completion evidence, and human involvement. Cover routine questions and status, appointment and records requests, result interpretation, estimates/invoice explanations, follow-up, and service recovery. Prioritize after the integration has run for roughly a week and actual data coverage can be inspected, as the user requested. Do not interpret a broad research inventory as an immediate build commitment or a reason to abandon the existing app and task infrastructure.
+
+Use the existing client/staff separation for a first assessment. Routine service automation and clinical decision support need different evidence and review paths. Preserve email-thread context, avoid repeated requests for information already supplied, and ensure a handoff creates work that a person owns. No vendor or framework purchase has been selected. The initial [local research note](.local/openvet-email-research.v1.md) records the evidence gaps for deeper research.
 
 ## Agent choices to discuss
 

@@ -28,8 +28,11 @@ For context, [OpenVet's current site](https://www.openvet.ai/) presents clinical
 
 - **Email-response assistant:** help prepare replies to incoming client emails using the relevant clinic information, with an OpenClaw-style assistant as the reference.
 - **Emailed clinical results:** produce a summary and possible diagnostic interpretation. The recommended initial flow is a veterinarian-reviewed draft before clinical advice reaches the client.
+- **OpenVet and Eight Sleep references:** adopt useful OpenVet clinical workflows and research email-based customer service using Eight Sleep as the example. Aim for an email assistant that can resolve requests using clinic data, maintain context, and arrange human help when needed.
 
 These additions are preserved [verbatim in client requests](client-requests.v1.md#additional-requests-relayed-by-the-user---september-13-2026). They were relayed in this conversation after the original shared chat. Exact email workflows, automatic sending, result types, and implementation remain to be defined.
+
+OpenVet itself [describes accepting clinical questions and forwarded blood-test results by email](https://www.openvet.ai/resources/openvet-opens-to-every-licensed-veterinarian-free). This directly supports its relevance as a workflow reference. Eight Sleep [documents email, chat, and phone support](https://help.eightsleep.com/en_us/what-are-you-business-hours-S1X5mlfr4); the initial check does not establish that every response is automated.
 
 ## What we have, what is worth keeping, and what is missing
 
