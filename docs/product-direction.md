@@ -11,9 +11,13 @@ read_when:
 Prepared September 13, 2026 from five supplied documents and a targeted inspection of the working tree, including the subsequently consolidated mainline.
 Status: discussion brief. Proposed choices below need discussion before they become a PRD or change the existing product contract.
 
+Current user direction: preserve the requests, prepare a quick understanding and email draft, and investigate free review collection. Product implementation and detailed planning are deferred until integration approval and the user's availability. See the [conversation brief](conversation-brief.md).
+
 ## Recommended direction
 
-Build a hospital-branded, multi-tenant operations product that helps clients and clinic teams complete the whole visit with less confusion and fewer missed handoffs. Keep the PIMS as the system of record. Use agents to understand requests, retrieve authorized information, and invoke reliable workflow actions.
+Build a hospital-branded, multi-tenant operations product that helps clients and clinic teams complete the whole visit with less confusion and fewer missed handoffs. During the integration phase, keep Cornerstone as the system of record because it holds the clinic's existing data. Use agents to understand requests, retrieve authorized information, and invoke reliable workflow actions.
+
+The user has clarified the longer-term direction: move away from Cornerstone into this product. Integration is the first stage, not a permanent requirement to remain a companion product. The eventual replacement scope and migration/cutover criteria have not been agreed; no migration or replacement implementation is authorized by this brief.
 
 The next milestone should be one complete, observable workflow at the design-partner hospital: **read a real appointment, match its arrival, show the team what happens next, record visit progress, and complete an appropriate follow-up or human handoff.** Start with read-only PIMS integration and staff-owned PIMS changes. Agree messaging policy before enabling customer delivery.
 
@@ -98,6 +102,23 @@ The supplied materials request analysis of the practice's top five customer comp
 | Weak follow-up or unresolved concerns | Recovery follow-up, assigned callback, and confirmed resolution | Eligible follow-ups completed, callbacks overdue, and response outcomes |
 
 Next research should cover the correctly identified hospital's available reviews across a stated date range, remove duplicates, retain complaint examples and counts, and distinguish operational issues from clinical allegations requiring professional review. Do not combine different hospitals' reviews or claim that an incomplete collection represents all reviews.
+
+### Requested review collection: Google and Yelp
+
+The user requests all customer reviews from both platforms, preferably with no paid service, to understand what customers value and the problems the product should address. Research was checked September 13, 2026; collection has not run and no complete dataset exists yet.
+
+| Route | What is verified | Suitability |
+| --- | --- | --- |
+| Google Business Profile API | Google states there is no API usage charge. The reviews endpoint lists reviews for a verified location, up to 50 per page, with pagination and a total count. Owner/manager authorization and approved API access are required. | A verified no-service-fee route to all reviews the API exposes for the clinic. Access is separate from Cornerstone/DataHub approval. |
+| Yelp standard Places API | Returns up to three review excerpts. | Does not satisfy the full-review requirement. |
+| Yelp Private Reviews API | Requires a contracted partnership; coverage depends on the agreement. Yelp's Insights FAQ describes the latest 200 reviews and prohibits exporting reviews out of the partner dashboard. | Not a verified free full-history export route. Do not buy access assuming it solves this task. |
+| Account downloads or public-page collection | Yelp's personal-data download describes the account's own information/contributions. A complete export of all customer reviews received by a business is not established. Public-page/manual collection remains an untested alternative. | Confirm actual coverage before choosing this path. No paid tool, browser extension, or scraper has been selected or installed. |
+
+Sources: [Google pricing](https://developers.google.com/my-business/content/pricing), [review pagination](https://developers.google.com/my-business/reference/rest/v4/accounts.locations.reviews/list), [access prerequisites](https://developers.google.com/my-business/content/prereqs), [Yelp standard endpoint](https://docs.developer.yelp.com/docs/places-intro), [Yelp partner access](https://docs.developer.yelp.com/docs/private-reviews-api), [Yelp partner limits](https://docs.developer.yelp.com/docs/faqs), and [Yelp account downloads](https://www.yelp-support.com/article/How-can-I-access-my-Yelp-data?l=en_US).
+
+Start by checking whether the clinic already has a usable export or approved Google API access. If it does, use that direct path. Otherwise, request the necessary owner access and settle Yelp coverage before building an exporter. A free trial or limited sample does not meet the requested complete, free export.
+
+The eventual research output should record platform, exact hospital listing, review ID/link, rating, date, review text, owner response, and collection time. Preserve raw material privately and publish a concise theme summary. Include positive themes worth retaining as well as complaints. Record source counts, unique counts, oldest/newest dates, and missing/filtered categories; do not label partial results as all reviews. Review text describes customer reports and must not be presented as independently established clinical facts.
 
 ## What exists and what still needs proof
 

@@ -120,3 +120,36 @@ coffee large cold brew
 
 focus on the UI, so look at this design pattern. I uploaded it from our designer. 
 ````
+
+## Conversation preparation request - September 13, 2026
+
+````text
+Then I also want you to make it so that you don't need to implement stuff right now, but add this one verbatim. After that, I want you to prepare me for the conversation. 
+````
+
+## Email request - September 13, 2026
+
+````text
+Then I also want you to make an email response, by the way. 
+````
+
+## Understanding, reviews, and future direction - September 13, 2026
+
+````text
+Also, tell me specifically what he actually wanted in those prompts. What does he want me to do, because he totally sent me that link? Review it, and then, by the way, tell us what we have that we like. I don't have time to plan it right now, and I don't have time to work on this currently. I'm planning to work on this once I get the integration approved and stuff, because then I'm able to build faster and easier. I don't have time to review everything, but this is the overall type of thing we want to do. I just want to get some understanding real quick:&#x20;
+
+- what we currently have
+- what we don't have
+- what he wanted
+- and so on
+
+&#x20;also, one other thing I want you to do is this: after this one, first of all, answer that one, and then I'm going to tell you you can go ahead and do it. Actually, you can figure it out now while we're doing it. Nothing really much, anyway.
+
+
+
+What I want you to do is also add in something to maybe the project MD file, or maybe you could figure it out now and just get it out of the way now. We want to download all of the customer reviews because that can be very, very insightful. We want to download it all from Yelp and all from Google Reviews. Try to find out if there's some completely free way to do that.
+
+
+
+The only reason we're trying to do this is because we need some kind of understanding. Also, keep in mind we're not trying to replace everything. We're trying to replace everything we have with this one. For now, we have to integrate with Cornerstone because that's where all the data is. Eventually, we would want to move everything away from that. 
+````
