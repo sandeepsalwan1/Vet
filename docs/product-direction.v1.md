@@ -1,17 +1,17 @@
 ---
-summary: "Consolidated product direction, source reconciliation, and proposed clinic pilot for Vet."
+summary: "V1: Consolidated product direction, source reconciliation, and proposed clinic pilot for Vet."
 read_when:
   - Discussing the clinic lifecycle, agent scope, or first production pilot
   - Turning the supplied product notes into an agreed PRD
   - Deciding whether PIMS integration, payments, or clinical features are ready to expand
 ---
 
-# Vet product direction
+# V1 - Vet product direction
 
 Prepared September 13, 2026 from five supplied documents and a targeted inspection of the working tree, including the subsequently consolidated mainline.
 Status: discussion brief. Proposed choices below need discussion before they become a PRD or change the existing product contract.
 
-Current user direction: preserve the requests, prepare a quick understanding and email draft, and investigate free review collection. Product implementation and detailed planning are deferred until integration approval and the user's availability. See the [conversation brief](conversation-brief.md).
+Current user direction: preserve the requests, prepare a quick understanding and email draft, and investigate free review collection. Product implementation and detailed planning are deferred until integration approval and the user's availability. See the [conversation brief](conversation-brief.v1.md).
 
 Latest user update, September 13: DataHub is close to syncing and expected to be ready for the next build session. Treat this as an expectation; a successful live sync and its use by product workflows still need verification when work resumes.
 
@@ -31,13 +31,13 @@ This recommendation prioritizes the customer outcome described throughout the no
 
 | Source | Substance preserved | How to interpret it |
 | --- | --- | --- |
-| [Client requests](client-requests.md), shared ChatGPT conversation beginning August 30 | All four visible client prompts, verbatim | Earlier AI responses are omitted. No review corpus was included. |
-| [Project goals](project-goals.md), undated product and workflow notes | Full supplied wording, verbatim | Desired outcomes and unresolved alternatives. The notes distinguish gathering data from booking appointments. |
-| [Agentic startup](agentic-startup.md), undated agent-design notes | Full supplied wording, verbatim | Model choices, search weights, fees, autonomy, and infrastructure remain proposals to discuss. |
+| [Client requests](client-requests.v1.md), shared ChatGPT conversation beginning August 30 | All four visible client prompts, verbatim | Earlier AI responses are omitted. No review corpus was included. |
+| [Project goals](project-goals.v1.md), undated product and workflow notes | Full supplied wording, verbatim | Desired outcomes and unresolved alternatives. The notes distinguish gathering data from booking appointments. |
+| [Agentic startup](agentic-startup.v1.md), undated agent-design notes | Full supplied wording, verbatim | Model choices, search weights, fees, autonomy, and infrastructure remain proposals to discuss. |
 | [DataHub](datahub.md#pilot-decisions-from-supplied-correspondence), July 29 to September 8 correspondence | Main agreements, vendor statements, and remaining questions | Dated correspondence, not verification of installed configuration or production operation. |
-| [Agent-rules reference](reference-agent-rules.md) | Full supplied example, verbatim | A reference document, not wholesale replacement of the repository's scoped instructions. |
+| [Agent-rules reference](reference-agent-rules.v1.md) | Full supplied example, verbatim | A reference document, not wholesale replacement of the repository's scoped instructions. |
 
-The source records preserve original wording, including transcription errors. This document is assistant-authored analysis, separate from those records. Only explicit user decisions enter [verbatim ADRs](adr/0001-preserve-original-requests.md); recommendations here are not accepted decisions.
+The source records preserve original wording, including transcription errors. This document is assistant-authored analysis, separate from those records. Only explicit user decisions enter [verbatim ADRs](adr/0001-preserve-original-requests.v1.md); recommendations here are not accepted decisions.
 
 OpenVet's current official site describes clinical decision support using patient history and cited veterinary evidence, alongside a PIMS that handles scheduling, billing, and other operations. Its OpenAnimal practice connection is described as still being developed. These vendor descriptions help explain the client's reference; they do not establish that Vet needs the same clinical scope or that either product has a proven Cornerstone connection. Sources checked September 13: [OpenVet](https://www.openvet.ai/) and [OpenAnimal practice connection](https://www.openvet.ai/openanimal).
 

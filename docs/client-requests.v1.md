@@ -1,10 +1,10 @@
 ---
-summary: "Verbatim client prompts extracted from the supplied shared ChatGPT conversation."
+summary: "V1: Verbatim client prompts extracted from the supplied shared ChatGPT conversation."
 read_when:
   - Checking what the client actually requested before relying on earlier AI responses
 ---
 
-# Client requests
+# V1 - Client requests
 
 Source: the supplied shared ChatGPT conversation beginning August 30, received September 13, 2026. The four visible user turns below are copied exactly. AI responses and the AI-written email draft are omitted. The conversation contains no actual review corpus or completed review analysis.
 

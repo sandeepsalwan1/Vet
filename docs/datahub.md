@@ -40,6 +40,8 @@ Production clinic onboarding and production PIMS traffic are not verified by the
 
 ## Pilot decisions from supplied correspondence
 
+**V1 addition from this conversation - September 13, 2026.** The summary below was prepared from the supplied emails. The rest of this file is the pre-existing integration runbook.
+
 Updated September 13, 2026 from the July 29 to September 8 email exchange. These are reported agreements and vendor statements, not independently verified controls or a legal interpretation. The actual DPA, countersigned services agreement, and installation/security attachments were referenced but not included in the supplied text. Personal contact details and email tracking are omitted.
 
 ### Commercial agreement
@@ -79,11 +81,11 @@ The September 8 reply improves on the default setup described September 3:
 
 The three specifically requested go-live items were a SQL-enforced read-only account, a dedicated connector service account, and a DPA. The vendor says all three are workable. The last supplied email says the information will be taken to the client; it does not confirm permission, installation, or production completion.
 
-Latest user update, September 13: the connection is close to syncing and expected to be ready for the next build session. This expectation is recorded verbatim in [project goals](project-goals.md); successful production sync remains unverified.
+Latest user update, September 13: the connection is close to syncing and expected to be ready for the next build session. This expectation is recorded verbatim in [project goals](project-goals.v1.md); successful production sync remains unverified.
 
 When work resumes, verify the expected sync, obtain the missing attachments, and close the focused installation questions above with the clinic and IT. Compare read-only records against the PIMS and prove the product consumes them. Avoid restarting the entire questionnaire or treating sandbox receipts as production readiness.
 
-The earlier shared ChatGPT response is not the authority for IDEXX contract clauses, vendor liability, or security claims. Use the actual agreements and authoritative support information. The original client requests are preserved separately in [client-requests.md](client-requests.md).
+The earlier shared ChatGPT response is not the authority for IDEXX contract clauses, vendor liability, or security claims. Use the actual agreements and authoritative support information. The original client requests are preserved separately in [client-requests.v1.md](client-requests.v1.md).
 
 ## Live sandbox rollout on 2026-08-04
 

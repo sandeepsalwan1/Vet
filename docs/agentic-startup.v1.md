@@ -1,12 +1,12 @@
 ---
-summary: "Verbatim agent-design requests supplied by the user."
+summary: "V1: Verbatim agent-design requests supplied by the user."
 read_when:
   - Discussing agent capabilities, orchestration, memory, or automation requirements
 ---
 
-# Agentic startup - original requests
+# V1 - Agentic startup - original requests
 
-Received September 13, 2026. Source wording follows unchanged, including transcription errors, whitespace, and unresolved alternatives. This is a source record, not an instruction to implement every proposal or replace current repository instructions. See [product-direction.md](product-direction.md) for separately labeled recommendations and [accepted decisions](adr/0001-preserve-original-requests.md) for the preservation rule.
+Received September 13, 2026. Source wording follows unchanged, including transcription errors, whitespace, and unresolved alternatives. This is a source record, not an instruction to implement every proposal or replace current repository instructions. See [product-direction.v1.md](product-direction.v1.md) for separately labeled recommendations and [accepted decisions](adr/0001-preserve-original-requests.v1.md) for the preservation rule.
 
 ## Original wording
 

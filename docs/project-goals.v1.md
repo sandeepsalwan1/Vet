@@ -1,12 +1,12 @@
 ---
-summary: "Verbatim product and clinic-workflow requests supplied by the user."
+summary: "V1: Verbatim product and clinic-workflow requests supplied by the user."
 read_when:
   - Discussing the overall product goal, clinic lifecycle, roles, or design direction
 ---
 
-# Project goals - original requests
+# V1 - Project goals - original requests
 
-Received September 13, 2026. Source wording follows unchanged, including transcription errors, whitespace, and unresolved alternatives. This is a source record, not an instruction to implement every proposal or replace current repository instructions. See [product-direction.md](product-direction.md) for separately labeled recommendations and [accepted decisions](adr/0001-preserve-original-requests.md) for the preservation rule.
+Received September 13, 2026. Source wording follows unchanged, including transcription errors, whitespace, and unresolved alternatives. This is a source record, not an instruction to implement every proposal or replace current repository instructions. See [product-direction.v1.md](product-direction.v1.md) for separately labeled recommendations and [accepted decisions](adr/0001-preserve-original-requests.v1.md) for the preservation rule.
 
 ## Original wording
 
@@ -172,4 +172,10 @@ In response to whether Tri-City is awaiting approval, approved but not installed
 
 ````text
 almost about to be synced i think it makes sense for it to be synced when we build so ig uess next time we will have this one ready though
+````
+
+## Document labels and conversation preparation - September 13, 2026
+
+````text
+&#x20;could you please label the documents you made? Maybe name it v1-v1, just so it's clear I understand which one you did, and then tell me and prepare me for this conversation 
 ````
