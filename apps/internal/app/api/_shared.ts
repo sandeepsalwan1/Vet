@@ -190,7 +190,7 @@ export async function authenticateActor(
   if (agentProofFixturesEnabled(request)) {
     const actorResult = agentProofActor(actor);
     return actorResult
-      ? { actor: actorResult }
+      ? { actor: actorResult, recordUsage: async () => undefined }
       : {
           response: NextResponse.json(
             { error: "Invalid role or passcode." },
