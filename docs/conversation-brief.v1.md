@@ -43,7 +43,7 @@ This reflects the source inspection and local checks already performed, not new 
 | Shared product | One Next.js app with tenant-aware data and hospital branding | End-to-end proof that every pilot path uses the right live hospital data |
 | Clinic workflow | Arrival questionnaire, room/status workflow, staff tasks, client journey, follow-up and analytics foundations | Real clinic observation, real-data mapping, and reliable completion of the whole workflow |
 | Agents | Client/staff separation, typed tools, audit/memory foundations, Google ADK and deterministic paths | Proof of live outcomes; proposed specialist hierarchy and wider autonomy are not settled |
-| DataHub | Ingestion/storage foundation and documented sandbox traffic; user expects syncing to be ready by the next build session | Verification of the expected live sync and the connection from received records into product reads; inspected key flows still use mock tables |
+| DataHub | Ingestion/storage foundation and documented sandbox traffic; vendor reports setup ready and asks for the go-ahead to activate read-only sync | Activation confirmation, successful live sync, and the connection from received records into product reads; inspected key flows still use mock tables |
 | Communication | Message planning, follow-up and delivery controls | Approved real recipients/settings and proven customer delivery/replies for the pilot |
 | Larger ambitions | Booking and pricing demonstration/report paths | Proven production booking, payments, autonomous price changes, clinical copilot, and Cornerstone replacement |
 | Customer evidence | User-supplied exports: 400 Yelp rows with 362 unique IDs, and 565 unique Google reviews; earlier website sample retained separately | Deduplication, explanation of mismatched listing totals, coverage assessment, and evidence-backed top-five ranking |
@@ -68,7 +68,7 @@ The useful outcome of this conversation is agreement on the customer problem to 
 
 ## Keep the immediate discussion small
 
-- DataHub status is answered for this discussion: expected to be syncing by the next build session, with successful live operation still to verify.
+- DataHub reports setup ready and is asking to turn on read-only sync. The [activation reply draft and screenshot](.local/datahub-sync-confirmation.v1.md) are saved locally; activation remains unconfirmed. Let it run for about a week once enabled, then inspect real data before planning the next build.
 - The user has supplied Yelp and Google review exports. Analyze these first; additional access is only needed if material coverage gaps remain.
 - Acknowledge the intended outcome and that product planning resumes later. Do not commit to a clinical feature list, delivery date, or automatic booking/payment policy now.
 

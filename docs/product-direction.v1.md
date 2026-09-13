@@ -13,7 +13,7 @@ Status: discussion brief. Proposed choices below need discussion before they bec
 
 Current user direction: preserve the requests, prepare a quick understanding and email draft, and investigate free review collection. Product implementation and detailed planning are deferred until integration approval and the user's availability. See the [conversation brief](conversation-brief.v1.md).
 
-Latest user update, September 13: DataHub is close to syncing and expected to be ready for the next build session. Treat this as an expectation; a successful live sync and its use by product workflows still need verification when work resumes.
+Latest supplied evidence, September 13: DataHub reports the remaining setup items are confirmed and asks for an explicit go-ahead to activate read-only sync. The [screenshot and reply draft](.local/datahub-sync-confirmation.v1.md) are saved locally. Activation and successful live sync are not yet confirmed. The user's intended sequence is to let the integration run for about a week, inspect the actual data, and then decide the next build scope.
 
 ## Recommended direction
 

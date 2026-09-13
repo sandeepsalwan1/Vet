@@ -81,7 +81,7 @@ The September 8 reply improves on the default setup described September 3:
 
 The three specifically requested go-live items were a SQL-enforced read-only account, a dedicated connector service account, and a DPA. The vendor says all three are workable. The last supplied email says the information will be taken to the client; it does not confirm permission, installation, or production completion.
 
-Latest user update, September 13: the connection is close to syncing and expected to be ready for the next build session. This expectation is recorded verbatim in [project goals](project-goals.v1.md); successful production sync remains unverified.
+Latest supplied evidence, September 13: the vendor reports the remaining setup items are confirmed and explicitly asks whether to turn on the read-only sync. The screenshot and suggested reply are preserved in the [local confirmation note](.local/datahub-sync-confirmation.v1.md). This establishes reported readiness to activate, not completed activation or successful production sync. The reply is a draft and has not been sent by the assistant.
 
 When work resumes, verify the expected sync, obtain the missing attachments, and close the focused installation questions above with the clinic and IT. Compare read-only records against the PIMS and prove the product consumes them. Avoid restarting the entire questionnaire or treating sandbox receipts as production readiness.
 
