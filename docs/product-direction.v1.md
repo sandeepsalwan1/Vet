@@ -95,7 +95,7 @@ Task management accompanies every stage: owner, priority, status, relevant conte
 
 ## Five candidate pain points to validate
 
-The supplied materials request analysis of the practice's top five customer complaints but contain no actual reviews. The subsequent public-page test recovered only a historical testimonial sample. These are **candidate themes inferred from the workflow notes**, not ranked review findings.
+The original conversation supplied no reviews. The user has since supplied Yelp and Google scraper exports, now stored locally for analysis. These are still **candidate themes inferred from the workflow notes**, not ranked review findings; theme analysis of the exports has not yet run.
 
 | Candidate pain point | Product response | Evidence to collect |
 | --- | --- | --- |
@@ -109,7 +109,9 @@ Next research should cover the correctly identified hospital's available reviews
 
 ### Requested review collection: Google and Yelp
 
-The user requests all customer reviews from both platforms, preferably with no paid service, including unofficial methods, to understand what customers value and the problems the product should address. Research and a direct public-page collection test ran September 13, 2026. A partial historical sample is saved locally; no complete dataset exists yet.
+The user requests all customer reviews from both platforms, preferably with no paid service, including unofficial methods, to understand what customers value and the problems the product should address. Research and a direct public-page collection test ran September 13, 2026. The user subsequently supplied scraper exports, which were moved unchanged into the ignored [local review folder](.local/review-research/README.md).
+
+Current inputs: 400 Yelp rows with 362 unique review IDs, and 565 unique Google reviews for the correct clinic. Yelp contains 38 repeated IDs with matching text/rating/date. The exports' listing totals are 383 for Yelp and 560 for Google, so complete coverage is not verified. Dates span 2013-2026; 104 Google entries contain ratings without text. Use these exports for the next analysis, retaining the earlier 54-card website sample only as a separate historical source.
 
 | Route | What is verified | Suitability |
 | --- | --- | --- |
@@ -125,7 +127,7 @@ Sources: [Google pricing](https://developers.google.com/my-business/content/pric
 
 **Actual sample:** the [clinic's reviews page](https://www.tricityvets.com/reviews) yielded 54 unique widget cards dated June 28, 2014 to June 4, 2019: 49 five-star and five four-star entries; 23 texts are truncated. All are labeled Google. Widget IDs are not Google review IDs, and the links point to the business rather than individual reviews. Preserve this as a historical positive testimonial sample, not a representative customer corpus. Raw HTML, CSV, JSON, and collection limits are in ignored [local research](.local/review-research/README.md).
 
-The attempted in-app browser connection failed before any page could be opened. The clinic's old Google review link returned HTTP 404 on a direct request. The readable [Yelp indexed page](https://www.yelp.com/biz/tricity-veterinary-hospital-fremont-9) showed 369 recommended and 41 non-recommended reviews in a February 2026 snapshot; those are not verified current totals. A full Yelp attempt must account for both sections and updated reviews. No full Yelp dataset was saved.
+The earlier in-app browser connection failed before any page could be opened. The clinic's old Google review link returned HTTP 404 on a direct request. The readable [Yelp indexed page](https://www.yelp.com/biz/tricity-veterinary-hospital-fremont-9) showed 369 recommended and 41 non-recommended reviews in a February 2026 snapshot; those are not verified current totals. The supplied Yelp export is now available, but does not identify recommended/non-recommended coverage. A full analysis must account for coverage and updated reviews.
 
 For this one-off job, use a clinic-provided export or the free authorized Google API if available. Otherwise, the simplest unofficial retry is ordinary browser collection once a working browser session is available, applying the same scrolling/pagination method and checking coverage. Do not start with paid proxies, a trial service, or a new review-ingestion feature. If the site limits access, record the missing coverage rather than treating a sample as all reviews.
 

@@ -46,7 +46,7 @@ This reflects the source inspection and local checks already performed, not new 
 | DataHub | Ingestion/storage foundation and documented sandbox traffic; user expects syncing to be ready by the next build session | Verification of the expected live sync and the connection from received records into product reads; inspected key flows still use mock tables |
 | Communication | Message planning, follow-up and delivery controls | Approved real recipients/settings and proven customer delivery/replies for the pilot |
 | Larger ambitions | Booking and pricing demonstration/report paths | Proven production booking, payments, autonomous price changes, clinical copilot, and Cornerstone replacement |
-| Customer evidence | Exact client request, candidate themes, and 54 historical Google-labeled testimonial cards saved from the clinic website | Complete Google/Yelp dataset and evidence-backed top-five ranking; the sample contains only four/five-star reviews and 23 truncated texts |
+| Customer evidence | User-supplied exports: 400 Yelp rows with 362 unique IDs, and 565 unique Google reviews; earlier website sample retained separately | Deduplication, explanation of mismatched listing totals, coverage assessment, and evidence-backed top-five ranking |
 
 The strongest parts to retain are the common hospital-configurable product, clear tasks and visit status, tenant boundaries, and existing integration/agent interfaces. They provide a base for the eventual product. Which experiences customers specifically like remains a review-analysis question; it has not been established from a complete dataset.
 
@@ -61,7 +61,7 @@ The strongest parts to retain are the common hospital-configurable product, clea
 | Can you build something like OpenVet? | We can explore the particular capabilities you find useful. Our current foundation is the clinic workflow and client journey. Clinical decision support would need its own scope and validation. |
 | How much is already built? | We have check-in, visit status, staff tasks, follow-up, and integration foundations. Important paths still use mock data, so I am not calling the full live workflow finished. |
 | Does DataHub avoid needing Cornerstone API keys? | The vendor says a dedicated read-only database account is supported. It still needs authorized installation and database access; that is different from having no credentials or permissions. We will verify the installed setup. |
-| What are the five biggest complaints? | We do not have a defensible ranking yet. The saved website sample is historical and positive-only. We need broader Google/Yelp coverage before selecting the top five. |
+| What are the five biggest complaints? | We now have Yelp and Google exports for the correct clinic. We need to deduplicate and analyze them before claiming a top-five ranking. |
 | When will this be ready, and will it replace Cornerstone? | I expect integration to be ready for the next build session, and I will resume when I have capacity. We will first prove one complete workflow with real data. Replacing Cornerstone is the longer-term direction, with migration scope still to agree. |
 
 The useful outcome of this conversation is agreement on the customer problem to investigate first and how to obtain review coverage. A delivery date or full feature specification can wait until the real-data path is verified.
@@ -69,10 +69,10 @@ The useful outcome of this conversation is agreement on the customer problem to 
 ## Keep the immediate discussion small
 
 - DataHub status is answered for this discussion: expected to be syncing by the next build session, with successful live operation still to verify.
-- A complete review export may later need the clinic's Google Business Profile access or an existing export. This does not need to hold up the present brief.
+- The user has supplied Yelp and Google review exports. Analyze these first; additional access is only needed if material coverage gaps remain.
 - Acknowledge the intended outcome and that product planning resumes later. Do not commit to a clinical feature list, delivery date, or automatic booking/payment policy now.
 
-Google provides a no-charge API route, subject to account authorization and approval. Unofficial tools use browser scrolling and pagination; completeness depends on actual access. The direct test recovered the clinic's historical testimonial sample, but Yelp blocked a direct download and a complete free export remains unverified. The [review-collection findings](product-direction.v1.md#requested-review-collection-google-and-yelp) explain the tools, results, and sources. Review collection does not technically depend on the PIMS integration. No further question is needed for this preparation pass.
+The [local review folder](.local/review-research/README.md) now contains both supplied exports, unchanged. Yelp lists 383 total reviews but the export has 362 unique IDs; Google lists 560 but contains 565 unique IDs. Those differences remain unresolved. The [review-collection findings](product-direction.v1.md#requested-review-collection-google-and-yelp) retain the earlier free-tool research. Review analysis does not technically depend on the PIMS integration.
 
 ## Draft reply
 
