@@ -2,4 +2,4 @@
 
 Status: accepted (user, 2026-09-13)
 
-Could you also consolidate all into one branch, like the main branch, mainline? You could just commit to the main branch.
+Consolidate work on `main`. Direct commits are allowed.

@@ -19,6 +19,7 @@ They are separate tenants with separate branding, settings, and data.
 Docs:
 
 - Run `npm run docs:list` to find maintained docs by purpose and task.
+- New features: [work backwards from customers](docs/adr/0001-new-features.v1.md), using the [Google and Yelp review exports](docs/reviews.md).
 - Start with [`docs/architecture.md`](docs/architecture.md) for system boundaries and [`docs/deployment.md`](docs/deployment.md) for operations.
 - [`docs/agent-automation.md`](docs/agent-automation.md): AFK operator guide for issue automation and recovery.
 - Coding-agent policy lives in [AGENTS.md](AGENTS.md); scoped guides add only subtree-specific rules.

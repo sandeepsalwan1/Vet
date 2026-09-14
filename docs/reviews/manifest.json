@@ -1,0 +1,50 @@
+[
+  {
+    "file": "tricity-yelp.jsonl",
+    "clinic": "Tri-City",
+    "platform": "Yelp",
+    "original_filename": "dataset_yelp-reviews-scraper_2026-09-13_22-35-27-863.jsonl",
+    "supplied_on": "2026-09-13",
+    "bytes": 873036,
+    "sha256": "d1816a78004ddc2e228cbce456a000fa2945a21f0fc0c94ff618e7cbd31930b8",
+    "review_rows": 400,
+    "unique_review_ids": 362,
+    "provenance": "User-supplied scraper export; bytes unchanged"
+  },
+  {
+    "file": "tricity-google.jsonl",
+    "clinic": "Tri-City",
+    "platform": "Google",
+    "original_filename": "dataset_crawler-google-places_2026-09-13_22-31-48-334.jsonl",
+    "supplied_on": "2026-09-13",
+    "bytes": 747484,
+    "sha256": "e9dc2f860259e0ac6e77c81c2097ab24094059e43827d879e31d1d9452acd69a",
+    "review_rows": 565,
+    "unique_review_ids": 565,
+    "provenance": "User-supplied scraper export; bytes unchanged"
+  },
+  {
+    "file": "woodminster-google.jsonl",
+    "clinic": "Woodminster",
+    "platform": "Google",
+    "original_filename": "dataset_crawler-google-places_2026-09-13_23-10-18-364.jsonl",
+    "supplied_on": "2026-09-13",
+    "bytes": 380474,
+    "sha256": "ad6d6dd4c3bd2ec6d7ca82485720b9db81f56faef74ef2ed085b194b11ef0926",
+    "review_rows": 315,
+    "unique_review_ids": 315,
+    "provenance": "User-supplied scraper export; bytes unchanged"
+  },
+  {
+    "file": "woodminster-yelp.jsonl",
+    "clinic": "Woodminster",
+    "platform": "Yelp",
+    "original_filename": "dataset_yelp-reviews-scraper_2026-09-13_23-11-58-961.jsonl",
+    "supplied_on": "2026-09-13",
+    "bytes": 928159,
+    "sha256": "130e85c54b97c5e5a3361d74784ce4314435c66d1b2f196261f3bc54cdaba9ab",
+    "review_rows": 470,
+    "unique_review_ids": 425,
+    "provenance": "User-supplied scraper export; bytes unchanged"
+  }
+]

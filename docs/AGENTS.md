@@ -8,4 +8,4 @@
 - Keep public docs generic: no credentials, personal account notes, resource ids, named contacts, tickets, or private operational details.
 - Update the owning doc when behavior or a public contract changes; do not maintain a manual inventory in this directory.
 - Run `npm run docs:check` after changes.
-- For ADRs, follow `.agents/skills/adr-verbatim/SKILL.md`: preserve the user's body verbatim and add only the numbered title and status. The copied `read-all-adrs` and `decisions` skills are manual-only.
+- Keep ADRs terse: decision and necessary source links. Preserve original wording in source docs. Use `adr-verbatim` only when explicitly requested; this overrides its generic ADR trigger. The copied `read-all-adrs` and `decisions` skills are manual-only.

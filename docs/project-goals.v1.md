@@ -179,3 +179,25 @@ almost about to be synced i think it makes sense for it to be synced when we bui
 ````text
 &#x20;could you please label the documents you made? Maybe name it v1-v1, just so it's clear I understand which one you did, and then tell me and prepare me for this conversation 
 ````
+
+## Original ADR source wording - September 13, 2026
+
+Preserved here as the ADRs are condensed.
+
+````text
+First of all, the most important thing is that I want you to put in all this information as is. To be honest, a lot of this stuff is pretty good, except the email. For the email, you keep the main decisions and stuff. You don't need to put all the email in, but the agents thing, for sure, and all the stuff that guy wanted, for sure, and all the stuff I told you about, for sure.
+````
+
+````text
+Could you also consolidate all into one branch, like the main branch, mainline? You could just commit to the main branch.
+````
+
+## Customer-first ADR correction - September 13, 2026
+
+````text
+Also, get the ADR. For 001 new features, it's not exactly like that. You need to fix these ADRs and make them very token-sensitive and terse. For new features, I meant they should be focusing on the customer. That's what the ADR should be: work backwards.
+
+For the ADRs, write them very token-sensitive and terse. Specifically for the new features, tell it to look at the reviews or some shit, and then bam. I don't know, but just tell it to work backwards from the reviews, and then incorporate it, because work backwards from the customer when you make a new feature. Try to reference it almost exactly like the customer problem, and then try to reference that exactly. Work backwards from the problem, and fix the ADR.
+
+Make sure you have the JSON file somewhere there. I don't really see it. Also, clean up a bunch of useless shit. There's a bunch of useless shit in here, like bleat drafts, shit like that.
+````
