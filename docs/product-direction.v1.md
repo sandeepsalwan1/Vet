@@ -37,7 +37,7 @@ This recommendation prioritizes the customer outcome described throughout the no
 | [DataHub](datahub.md#pilot-decisions-from-supplied-correspondence), July 29 to September 8 correspondence | Main agreements, vendor statements, and remaining questions | Dated correspondence, not verification of installed configuration or production operation. |
 | [Agent-rules reference](reference-agent-rules.v1.md) | Full supplied example, verbatim | A reference document, not wholesale replacement of the repository's scoped instructions. |
 
-The source records preserve original wording, including transcription errors. This document is assistant-authored analysis, separate from those records. Only explicit user decisions enter [verbatim ADRs](adr/0001-preserve-original-requests.v1.md); recommendations here are not accepted decisions.
+The source records preserve original wording, including transcription errors. This document is assistant-authored analysis, separate from those records. Only explicit user decisions enter [verbatim ADRs](adr/0002-preserve-original-requests.v1.md); recommendations here are not accepted decisions.
 
 OpenVet's current official site describes clinical decision support using patient history and cited veterinary evidence, alongside a PIMS that handles scheduling, billing, and other operations. Its OpenAnimal practice connection is described as still being developed. These vendor descriptions help explain the client's reference; they do not establish that Vet needs the same clinical scope or that either product has a proven Cornerstone connection. Sources checked September 13: [OpenVet](https://www.openvet.ai/) and [OpenAnimal practice connection](https://www.openvet.ai/openanimal).
 

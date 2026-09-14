@@ -1,4 +1,4 @@
-# 0002 - Consolidate on main
+# 0003 - Consolidate on main
 
 Status: accepted (user, 2026-09-13)
 

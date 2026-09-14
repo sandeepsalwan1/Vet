@@ -6,7 +6,7 @@ read_when:
 
 # V1 - Agent rules - supplied reference
 
-Received September 13, 2026. Source wording follows unchanged, including transcription errors, whitespace, and unresolved alternatives. This is a source record, not an instruction to implement every proposal or replace current repository instructions. See [product-direction.v1.md](product-direction.v1.md) for separately labeled recommendations and [accepted decisions](adr/0001-preserve-original-requests.v1.md) for the preservation rule.
+Received September 13, 2026. Source wording follows unchanged, including transcription errors, whitespace, and unresolved alternatives. This is a source record, not an instruction to implement every proposal or replace current repository instructions. See [product-direction.v1.md](product-direction.v1.md) for separately labeled recommendations and [accepted decisions](adr/0002-preserve-original-requests.v1.md) for the preservation rule.
 
 ## Original wording
 

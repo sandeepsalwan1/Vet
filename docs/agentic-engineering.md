@@ -38,7 +38,7 @@ Plans, handoffs, research ledgers, transcripts, PR proof, and generated reports 
 
 Explicitly requested source records are an exception: preserve supplied user wording verbatim in the named content documents and keep assistant synthesis separate. Condense correspondence only when requested. Accepted decisions in `docs/adr/` use the user's exact wording, with only a numbered title and status added; never promote an unresolved source proposal to an accepted decision.
 
-The [ADR Verbatim skill](https://github.com/davidondrej/skills/blob/main/skills/thinking-and-docs/adr-verbatim/SKILL.md) defines that format. Source-file whitespace is preserved through narrowly scoped Git attributes.
+The full [ADR Verbatim skill](../.agents/skills/adr-verbatim/SKILL.md) defines that format. It is copied unchanged from davidondrej/skills, together with [Read All ADRs](../.agents/skills/read-all-adrs/SKILL.md) and [Decisions](../.agents/skills/decisions/SKILL.md). Each skill retains its upstream files, MIT license, and pinned provenance. The latter two skills are manual-only. Use a plain dash in locally authored ADR titles; preserve original source punctuation. Source-file whitespace is preserved through narrowly scoped Git attributes.
 
 ### Copy the system, not the repository debris
 

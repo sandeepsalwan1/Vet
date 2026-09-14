@@ -2,3 +2,4 @@
 docs/agentic-startup.v1.md whitespace=-blank-at-eol
 docs/project-goals.v1.md whitespace=-blank-at-eol
 docs/reference-agent-rules.v1.md whitespace=-blank-at-eol
+.agents/skills/decisions/SKILL.md whitespace=-blank-at-eol

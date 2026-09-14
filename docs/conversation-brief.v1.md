@@ -85,4 +85,4 @@ The [local email draft](.local/client-reply.v1.md) is addressed to the client wh
 - **Your wording preserved:** [V1 project goals](project-goals.v1.md) and [V1 agentic startup](agentic-startup.v1.md).
 - **Other supplied wording preserved:** [V1 client requests](client-requests.v1.md) and [V1 agent-rules reference](reference-agent-rules.v1.md).
 - **Email decisions summarized:** the marked [V1 addition in the existing DataHub runbook](datahub.md#pilot-decisions-from-supplied-correspondence).
-- **Verbatim decisions:** [V1 preservation ADR](adr/0001-preserve-original-requests.v1.md) and [V1 mainline ADR](adr/0002-consolidate-on-main.v1.md). Their contents are unchanged; only their filenames gained the version label.
+- **Verbatim decisions, in order:** [0001 - New features](adr/0001-new-features.v1.md), [0002 - Preserve original requests](adr/0002-preserve-original-requests.v1.md), and [0003 - Consolidate on main](adr/0003-consolidate-on-main.v1.md). The feature ADR uses your exact email, results, OpenVet, and Eight Sleep wording; the two earlier ADR bodies are unchanged.

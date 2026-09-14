@@ -70,3 +70,5 @@ Or, because that's what we need to copy, whatever we want to copy OpenVet. I thi
 - **Research the full opportunity:** inventory useful email workflows, including routine questions, status updates, appointment requests, records requests, estimates/invoice explanations, results, care follow-up, and complaint resolution. These are candidate workflows to investigate, not a commitment to implement every one immediately. Separate operational replies from clinician-reviewed interpretations and identify what real clinic data each needs.
 
 Initial source checks and open research items are summarized in [product direction](product-direction.v1.md#openvet-and-eight-sleep-as-references). The intended outcome is a clinic-specific assistant that helps complete work through email as well as the app.
+
+At the user's request, the two later source passages above are also recorded verbatim as the first ADR: [0001 - New features](adr/0001-new-features.v1.md). The assistant-authored interpretations remain separate from the decision text.
