@@ -99,7 +99,7 @@ jobs:
             --ensure-latest-deploy \
             --output-file "$RUNNER_TEMP/agent-render-proof.json" \
             --json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: agent-post-merge-${{ inputs.pr-number }}
