@@ -132,7 +132,7 @@ jobs:
             exit 1
           fi
           printf 'head_sha=%s\n' "$head_sha" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: main
           persist-credentials: false
@@ -199,12 +199,12 @@ jobs:
       pull-requests: read
       issues: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.workflow_sha }}
           path: trusted
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.head_sha }}
           path: target
@@ -418,7 +418,7 @@ jobs:
       issues: write
       statuses: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0

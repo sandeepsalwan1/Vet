@@ -119,7 +119,7 @@ jobs:
           else
             echo "sha=" >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.workflow_sha }}
           path: trusted
@@ -179,7 +179,7 @@ jobs:
       proof_passed: ${{ steps.remote.outputs.proof_passed }}
       artifact_url: ${{ steps.artifact.outputs.artifact-url }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.workflow_sha }}
           path: trusted
@@ -240,7 +240,7 @@ jobs:
     outputs:
       outcome_b64: ${{ steps.verify.outputs.outcome_b64 }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.workflow_sha }}
           path: trusted
@@ -303,12 +303,12 @@ jobs:
         ports:
           - 5432:5432
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.workflow_sha }}
           path: trusted
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           path: target
@@ -360,12 +360,12 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.workflow_sha }}
           path: trusted
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           path: target
@@ -405,12 +405,12 @@ jobs:
     outputs:
       outcome_b64: ${{ steps.local.outputs.outcome_b64 }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.workflow_sha }}
           path: trusted
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           path: target
@@ -455,7 +455,7 @@ jobs:
       pull-requests: write
       statuses: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         continue-on-error: true
         with:
           ref: ${{ github.workflow_sha }}
