@@ -201,7 +201,7 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: target/package-lock.json
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: agent-review-context-${{ inputs.pr-number }}
           path: target/.agent-output
@@ -323,7 +323,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: agent-review-result-${{ inputs.pr-number }}
           path: .agent-output
@@ -493,12 +493,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           name: agent-review-remote-diagnostics-${{ inputs.pr-number }}
           path: .agent-output/review-failure
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           name: agent-review-result-${{ inputs.pr-number }}

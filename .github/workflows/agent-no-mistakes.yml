@@ -215,7 +215,7 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: target/package-lock.json
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: no-mistakes-context-${{ inputs.pr-number }}
           path: target/.agent-output
@@ -429,7 +429,7 @@ jobs:
       - name: Download sanitized gate result
         id: download
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: no-mistakes-result-${{ inputs.pr-number }}
           path: ${{ runner.temp }}/no-mistakes-result
