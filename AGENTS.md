@@ -13,7 +13,7 @@ Vet: one deployed Next.js app, Postgres-backed npm workspace.
 - `docs`: active docs; generated proof is local-only.
 - `opensrc`: upstream mirrors/provenance notes that support package decisions.
 - `scripts`: local smoke, proof, migration, provisioning helpers.
-- `.agents/skills` and `.claude/skills`: project-local agent skills; keep secrets out.
+- `.agents/skills`: project-local skills for every agent; `.claude/skills` links to it; keep secrets out.
 
 ## Commands
 
@@ -59,6 +59,7 @@ Vet: one deployed Next.js app, Postgres-backed npm workspace.
 
 ## Architecture Rules
 
+- Before planning or changing code, read every ADR in `docs/adr/`, the relevant `.agents/skills`, and `docs/clean-code.md`.
 - Architecture cleanup: work directly; no HTML reports or self-authored plans unless the user explicitly requests them.
 - Use `CONTEXT.md` names for domain concepts.
 - Keep HTTP routes shallow; put behavior in package/app modules with typed interfaces.

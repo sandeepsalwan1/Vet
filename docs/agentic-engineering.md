@@ -16,9 +16,15 @@ read_when:
 - For new features, follow [ADR 0001](adr/0001-new-features.v1.md): cite the customer's exact problem and work backwards from it.
 - Use plain dashes in authored text; preserve original source punctuation and whitespace.
 
-## Imported ADR skills
+## Imported skills
 
-[ADR Verbatim](../.agents/skills/adr-verbatim/SKILL.md), [Read All ADRs](../.agents/skills/read-all-adrs/SKILL.md), and [Decisions](../.agents/skills/decisions/SKILL.md) retain complete upstream files, MIT licenses and pinned provenance. Use ADR Verbatim only when explicitly requested; the current user instruction overrides its generic ADR trigger. The latter two skills remain manual-only.
+These skills from [davidondrej/skills](https://github.com/davidondrej/skills) keep complete upstream files, MIT licenses and pinned provenance in each `ORIGIN.md`. `.agents/skills` serves Codex and Pi; `.claude/skills` links to it for Claude Code.
+
+- ADRs: [ADR Verbatim](../.agents/skills/adr-verbatim/SKILL.md), [Read All ADRs](../.agents/skills/read-all-adrs/SKILL.md), [Decisions](../.agents/skills/decisions/SKILL.md), [Ask Then Build](../.agents/skills/ask-then-build/SKILL.md), [4x4](../.agents/skills/4x4/SKILL.md).
+- Scope and risk: [Before Building](../.agents/skills/before-building/SKILL.md), [Stop Overthinking](../.agents/skills/stop-overthinking/SKILL.md), [Risky Changes](../.agents/skills/risky-changes/SKILL.md).
+- Long runs: [Handoff](../.agents/skills/handoff/SKILL.md), [Goal Loop](../.agents/skills/goal-loop/SKILL.md), [Anti-Sleep](../.agents/skills/anti-sleep/SKILL.md).
+
+Use ADR Verbatim only when explicitly requested; the current user instruction overrides its generic ADR trigger. Project ADRs override upstream skill defaults. Anti-Sleep keeps a Mac awake for a bounded time; check for an active `caffeinate` assertion before starting another.
 
 ## References
 
